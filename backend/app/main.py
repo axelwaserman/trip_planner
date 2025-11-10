@@ -1,7 +1,10 @@
 """FastAPI application for Trip Planner."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.models import ChatRequest, ChatResponse
+from app.chat import chat_service
 
 app = FastAPI(
     title="Trip Planner API",
@@ -29,3 +32,24 @@ async def root() -> dict[str, str]:
 async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest) -> ChatResponse:
+    """Chat endpoint for conversational AI.
+    
+    Args:
+        request: Chat request with message and optional session_id
+        
+    Returns:
+        Chat response with agent's reply and session_id
+        
+    Raises:
+        HTTPException: If chat service fails
+    """
+    try:
+        response, session_id = await chat_service.chat(request.message, request.session_id)
+        return ChatResponse(response=response, session_id=session_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat service error: {e!s}")
+
