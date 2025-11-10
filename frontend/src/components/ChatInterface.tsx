@@ -1,6 +1,8 @@
 import { Box, Button, Flex, Input, Stack, Text } from '@chakra-ui/react'
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -33,6 +35,7 @@ export function ChatInterface() {
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }])
 
     try {
+      console.log('Sending message:', userMessage)
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -42,11 +45,14 @@ export function ChatInterface() {
         }),
       })
 
+      console.log('Response status:', response.status)
+
       if (!response.ok) {
         throw new Error('Failed to get response')
       }
 
       const data = await response.json()
+      console.log('Response data:', data)
       
       // Store session ID for conversation continuity
       setSessionId(data.session_id)
@@ -117,7 +123,46 @@ export function ChatInterface() {
                   borderWidth={msg.role === 'assistant' ? '1px' : '0'}
                   borderColor="gray.200"
                 >
-                  <Text whiteSpace="pre-wrap">{msg.content}</Text>
+                  {msg.role === 'assistant' ? (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        table: ({ children }) => (
+                          <Box as="table" w="full" my={2} borderWidth="1px" borderColor="gray.300">
+                            {children}
+                          </Box>
+                        ),
+                        thead: ({ children }) => (
+                          <Box as="thead" bg="gray.50">
+                            {children}
+                          </Box>
+                        ),
+                        th: ({ children }) => (
+                          <Box as="th" px={3} py={2} borderWidth="1px" borderColor="gray.300" fontWeight="semibold" textAlign="left">
+                            {children}
+                          </Box>
+                        ),
+                        td: ({ children }) => (
+                          <Box as="td" px={3} py={2} borderWidth="1px" borderColor="gray.300">
+                            {children}
+                          </Box>
+                        ),
+                        p: ({ children }) => <Text mb={2}>{children}</Text>,
+                        ul: ({ children }) => <Box as="ul" pl={5} my={2}>{children}</Box>,
+                        ol: ({ children }) => <Box as="ol" pl={5} my={2}>{children}</Box>,
+                        li: ({ children }) => <Text as="li" mb={1}>{children}</Text>,
+                        code: ({ children }) => (
+                          <Box as="code" bg="gray.100" px={1} rounded="sm" fontFamily="mono" fontSize="sm">
+                            {children}
+                          </Box>
+                        ),
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  ) : (
+                    <Text whiteSpace="pre-wrap">{msg.content}</Text>
+                  )}
                 </Box>
               </Flex>
             ))
