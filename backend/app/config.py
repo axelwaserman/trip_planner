@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Ollama LLM
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "gpt-oss:20b"
+    ollama_model: str = "deepseek-r1:8b"
 
 
 settings = Settings()
