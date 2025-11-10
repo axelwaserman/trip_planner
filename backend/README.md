@@ -51,7 +51,7 @@ uv run ruff format .
 
 **Type check:**
 ```bash
-uv run mypy src/
+uv run mypy app/
 ```
 
 ## API Documentation
@@ -64,14 +64,12 @@ Once running, visit:
 
 ```
 backend/
-├── src/
-│   └── app/
-│       ├── __init__.py
-│       └── main.py          # FastAPI application
+├── app/
+│   ├── __init__.py
+│   └── main.py          # FastAPI application
 ├── tests/
 │   └── __init__.py
-├── pyproject.toml           # Dependencies & config
-├── ruff.toml               # Linting configuration
-├── .python-version         # Python version (3.13)
-└── .env.example            # Environment template
+├── pyproject.toml       # Dependencies & config
+├── .python-version      # Python version (3.13)
+└── .env.example         # Environment template
 ```

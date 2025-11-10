@@ -7,7 +7,7 @@ AI-powered trip planning assistant with conversational interface and real-time t
 ```
 trip_planner/
 ├── backend/          # FastAPI backend
-│   ├── src/app/     # Application code
+│   ├── app/         # Application code
 │   ├── tests/       # Tests
 │   └── ...
 ├── frontend/         # React + TypeScript frontend
