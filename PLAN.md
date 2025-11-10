@@ -12,7 +12,7 @@ Build an AI-powered trip planning chat agent that can leverage real-world APIs t
 
 ## Tech Stack
 - **Backend**: FastAPI, LangChain, Python 3.13
-- **Frontend**: React, TypeScript, Tailwind CSS
+- **Frontend**: React, TypeScript, Chakra UI v3
 - **Tooling**: uv, ruff, mypy, pytest
 - **LLM**: Ollama (local, gpt-oss20b model)
 
@@ -22,17 +22,23 @@ Build an AI-powered trip planning chat agent that can leverage real-world APIs t
 **Goal**: Get project structure with proper tooling, basic FastAPI server running
 
 ### Tasks
-- [ ] Initialize Python project with uv
-- [ ] Set up project structure (src/, tests/, config)
-- [ ] Configure ruff for linting
-- [ ] Configure mypy for type checking
-- [ ] Create basic FastAPI app with health check endpoint
-- [ ] Set up pytest with first basic test
-- [ ] Add environment variable management (.env)
-- [ ] Create README with setup instructions
-- [ ] Add .gitignore
+- [x] Initialize Python project with uv
+- [x] Set up project structure (src/app/, tests/, config)
+- [x] Configure ruff for linting
+- [x] Create basic FastAPI app with health check endpoint
+- [x] Set up pytest with first basic test
+- [x] Add environment variable management (.env.example)
+- [x] Create README with setup instructions
+- [x] Add .gitignore
+- [x] Initialize frontend with Vite + React + TypeScript
+- [x] Install and configure Chakra UI v3
+- [x] Configure Vite proxy for API calls
+- [ ] Install backend dependencies with uv
+- [ ] Run backend server and verify health endpoint
+- [ ] Run frontend and verify it loads
+- [ ] Run tests and verify they pass
 
-**Learning Focus**: Project structure, modern Python tooling, FastAPI basics
+**Learning Focus**: Project structure, modern Python tooling, FastAPI basics, monorepo setup
 
 ---
 
@@ -163,12 +169,19 @@ These are ideas to explore after MVP is working:
 ---
 
 ## Current Status
-**Phase**: Not started
+**Phase**: Phase 1 - Foundation & Basic FastAPI Setup (In Progress)
 **Last Updated**: 2025-11-01
 
 ### Completed Milestones
-- ✅ Project initialized
 - ✅ Copilot instructions defined
+- ✅ Implementation plan created
+- ✅ Monorepo structure created (backend + frontend)
+- ✅ Backend scaffolded with FastAPI, uv, ruff, pytest
+- ✅ Frontend scaffolded with Vite, React, TypeScript, Chakra UI v3
+- ✅ Project documentation (READMEs, .gitignore)
 
 ### Next Up
-- Phase 1: Foundation & Basic FastAPI Setup
+- Install backend dependencies and verify setup works
+- Run backend server and test health endpoint
+- Run frontend and verify it connects
+- Complete Phase 1, move to Phase 2 (LangChain Chat Agent)
