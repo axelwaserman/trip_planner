@@ -34,9 +34,13 @@ export function ChatInterface() {
     // Add user message
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }])
 
+    // Add empty assistant message that we'll update with chunks
+    const assistantMessageIndex = messages.length + 1
+    setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+
     try {
       console.log('Sending message:', userMessage)
-      const response = await fetch('/api/chat', {
+      const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -51,20 +55,60 @@ export function ChatInterface() {
         throw new Error('Failed to get response')
       }
 
-      const data = await response.json()
-      console.log('Response data:', data)
-      
-      // Store session ID for conversation continuity
-      setSessionId(data.session_id)
-      
-      // Add assistant response
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.response }])
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      let accumulatedContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(6))
+
+            if (data.error) {
+              throw new Error(data.error)
+            }
+
+            if (data.done) {
+              // Stream complete
+              setSessionId(data.session_id)
+              break
+            }
+
+            if (data.chunk) {
+              accumulatedContent += data.chunk
+              // Update the assistant message with accumulated content
+              setMessages((prev) =>
+                prev.map((msg, idx) =>
+                  idx === assistantMessageIndex
+                    ? { ...msg, content: accumulatedContent }
+                    : msg
+                )
+              )
+              setSessionId(data.session_id)
+            }
+          }
+        }
+      }
     } catch (error) {
       console.error('Chat error:', error)
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },
-      ])
+      setMessages((prev) =>
+        prev.map((msg, idx) =>
+          idx === assistantMessageIndex
+            ? { ...msg, content: 'Sorry, I encountered an error. Please try again.' }
+            : msg
+        )
+      )
     } finally {
       setIsLoading(false)
     }

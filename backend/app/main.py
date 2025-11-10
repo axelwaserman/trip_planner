@@ -1,7 +1,10 @@
 """FastAPI application for Trip Planner."""
 
+import json
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from app.models import ChatRequest, ChatResponse
 from app.chat import chat_service
@@ -52,4 +55,42 @@ async def chat(request: ChatRequest) -> ChatResponse:
         return ChatResponse(response=response, session_id=session_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat service error: {e!s}")
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest) -> StreamingResponse:
+    """Streaming chat endpoint that returns Server-Sent Events.
+    
+    Args:
+        request: Chat request with message and optional session_id
+        
+    Returns:
+        StreamingResponse with SSE chunks
+    """
+
+    async def event_generator():
+        """Generate Server-Sent Events for streaming response."""
+        try:
+            session_id = None
+            async for chunk, sid in chat_service.chat_stream(request.message, request.session_id):
+                session_id = sid
+                # Send chunk as SSE
+                data = json.dumps({"chunk": chunk, "session_id": session_id})
+                yield f"data: {data}\n\n"
+
+            # Send done event
+            yield f"data: {json.dumps({'done': True, 'session_id': session_id})}\n\n"
+        except Exception as e:
+            # Send error event
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
+    )
 

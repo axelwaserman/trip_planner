@@ -84,6 +84,33 @@ class ChatService:
         
         return response_text, session_id
 
+    async def chat_stream(self, message: str, session_id: str | None = None):
+        """Stream a chat response chunk by chunk.
+        
+        Args:
+            message: User message
+            session_id: Optional session ID for conversation continuity
+            
+        Yields:
+            Tuples of (chunk, session_id) where chunk is a piece of the response
+        """
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+        
+        # Stream the chain with history
+        async for chunk in self.chain_with_history.astream(
+            {"input": message},
+            config={"configurable": {"session_id": session_id}},
+        ):
+            # Extract text content from chunk
+            if hasattr(chunk, "content"):
+                content = chunk.content
+            else:
+                content = str(chunk)
+            
+            if content:
+                yield content, session_id
+
 
 # Global chat service instance
 chat_service = ChatService()
