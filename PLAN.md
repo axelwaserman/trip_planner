@@ -13,8 +13,8 @@ Build an AI-powered trip planning chat agent that can leverage real-world APIs t
 ## Tech Stack
 - **Backend**: FastAPI, LangChain, Python 3.13
 - **Frontend**: React, TypeScript, Chakra UI v3
-- **Tooling**: uv, ruff, mypy, pytest
-- **LLM**: Ollama (local, gpt-oss20b model)
+- **Tooling**: uv, ruff, mypy, pytest, just
+- **LLM**: Ollama (local, deepseek-r1:8b model)
 
 ---
 
@@ -23,8 +23,9 @@ Build an AI-powered trip planning chat agent that can leverage real-world APIs t
 
 ### Tasks
 - [x] Initialize Python project with uv
-- [x] Set up project structure (src/app/, tests/, config)
-- [x] Configure ruff for linting
+- [x] Set up project structure (app/, tests/, config)
+- [x] Configure ruff for linting (consolidated in pyproject.toml)
+- [x] Configure mypy for type checking
 - [x] Create basic FastAPI app with health check endpoint
 - [x] Set up pytest with first basic test
 - [x] Add environment variable management (.env.example)
@@ -33,31 +34,41 @@ Build an AI-powered trip planning chat agent that can leverage real-world APIs t
 - [x] Initialize frontend with Vite + React + TypeScript
 - [x] Install and configure Chakra UI v3
 - [x] Configure Vite proxy for API calls
-- [ ] Install backend dependencies with uv
-- [ ] Run backend server and verify health endpoint
-- [ ] Run frontend and verify it loads
-- [ ] Run tests and verify they pass
+- [x] Install backend dependencies with uv
+- [x] Run backend server and verify health endpoint works
+- [x] Run frontend and verify it loads
+- [x] Run tests and verify they pass (6/6 passing)
+- [x] Add justfile for common development commands
+- [x] Frontend health check displays backend connection status
 
 **Learning Focus**: Project structure, modern Python tooling, FastAPI basics, monorepo setup
 
+**Status**: ✅ COMPLETED
+
 ---
 
-## Phase 2: LangChain Chat Agent (No Tools)
-**Goal**: Simple conversational agent without tools - baseline chat experience
+## Phase 2: LangChain Integration & Chat Agent
+**Goal**: Create working chat agent with LangChain and Ollama
 
 ### Tasks
-- [ ] Install LangChain dependencies
-- [ ] Create chat endpoint (POST /api/chat)
-- [ ] Implement basic LangChain conversation chain
-- [ ] Add conversation memory (in-memory for single session)
-- [ ] Create request/response models (Pydantic)
-- [ ] Add error handling for LLM API calls
-- [ ] Write tests for chat endpoint
-- [ ] Add async patterns for LLM calls
-- [ ] Configure LLM provider (Ollama with gpt-oss20b model)
-- [ ] Test conversation flow end-to-end
+- [x] Install langchain, langchain-ollama, and related dependencies
+- [x] Configure Ollama connection settings (base URL, model selection)
+- [x] Create chat service with LangChain's RunnableWithMessageHistory
+- [x] Implement session-based conversation memory using InMemoryChatMessageHistory
+- [x] Add chat endpoint to FastAPI (/api/chat)
+- [x] Write tests for chat functionality with mocking
+- [x] Build chat UI component in React
+- [x] Connect frontend to chat endpoint
+- [x] Test full conversation flow (frontend → backend → Ollama → response)
+- [x] Add streaming endpoint (/api/chat/stream) using Server-Sent Events
+- [x] Implement streaming on frontend with ReadableStream
+- [x] Add markdown rendering with react-markdown + remark-gfm
+- [x] Style markdown tables, lists, and code blocks
+- [x] Optimize model selection (switched from gpt-oss:20b to deepseek-r1:8b)
 
-**Learning Focus**: LangChain basics, async FastAPI, conversation memory, error handling
+**Learning Focus**: LangChain 1.0 patterns, async streaming, conversation memory, SSE, markdown rendering
+
+**Status**: ✅ COMPLETED
 
 ---
 
@@ -169,19 +180,18 @@ These are ideas to explore after MVP is working:
 ---
 
 ## Current Status
-**Phase**: Phase 1 - Foundation & Basic FastAPI Setup (In Progress)
-**Last Updated**: 2025-11-01
+- **Current Phase**: Phase 2 - ✅ COMPLETED, Ready for Phase 3
+- **Last Updated**: 2025-01-XX
+- **Blockers**: None
+- **Next Steps**: Implement mock flight search tool with LangChain tool/function calling
 
 ### Completed Milestones
-- ✅ Copilot instructions defined
-- ✅ Implementation plan created
-- ✅ Monorepo structure created (backend + frontend)
-- ✅ Backend scaffolded with FastAPI, uv, ruff, pytest
-- ✅ Frontend scaffolded with Vite, React, TypeScript, Chakra UI v3
-- ✅ Project documentation (READMEs, .gitignore)
-
-### Next Up
-- Install backend dependencies and verify setup works
-- Run backend server and test health endpoint
-- Run frontend and verify it connects
-- Complete Phase 1, move to Phase 2 (LangChain Chat Agent)
+- ✅ Full project structure with monorepo setup (backend + frontend)
+- ✅ Development tooling configured (uv, ruff, mypy, pytest, just)
+- ✅ FastAPI backend with health check endpoint
+- ✅ LangChain chat agent integrated with Ollama (deepseek-r1:8b)
+- ✅ Session-based conversation memory working
+- ✅ Streaming chat responses via Server-Sent Events
+- ✅ React chat UI with Chakra UI v3, markdown rendering (tables, lists, code)
+- ✅ All tests passing (6/6)
+- ✅ Vite proxy configured for seamless API calls
