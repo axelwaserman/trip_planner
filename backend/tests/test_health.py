@@ -17,6 +17,6 @@ def test_root() -> None:
 
 def test_health() -> None:
     """Test health check endpoint."""
-    response = client.get("/health")
+    response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}

@@ -25,7 +25,7 @@ async def root() -> dict[str, str]:
     return {"message": "Trip Planner API"}
 
 
-@app.get("/health")
+@app.get("/api/health")
 async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
