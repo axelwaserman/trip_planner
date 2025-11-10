@@ -36,6 +36,10 @@ Building an AI-powered trip planner with:
    - Granular tasks
    - Track completion as we progress
 3. **Code Reviews**: Provide PR-style review feedback when I ask for it
+4. **Commit Messages**: Use conventional commits format:
+   - Format: `<type>: <short description>`
+   - Types: `feat`, `fix`, `test`, `docs`, `refactor`, `chore`, `style`
+   - Example: `feat: add health check endpoint`
 
 ### Communication Style
 - **Explanations**: Detailed reasoning, not brief bullets
