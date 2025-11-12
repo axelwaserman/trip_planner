@@ -156,22 +156,406 @@ This phase uses **LangChain 1.0** (installed: `langchain==1.0.3`):
 ## Phase 4: Enhanced Frontend & LLM Provider Flexibility
 **Goal**: Improve UI to show tool usage + support multiple LLM providers
 
-### Tasks
-- [ ] Display tool usage in chat (show when agent searches flights)
-- [ ] Add loading states for tool execution
-- [ ] Improve message rendering (tool calls, results, thinking)
-- [ ] Make UI responsive for mobile
-- [ ] Add LLM provider selection UI (dropdown or config)
-- [ ] Create generic LLM provider wrapper/factory
-  - [ ] Support Ollama (local)
-  - [ ] Support Gemini (API key via UI or env var)
-  - [ ] Support OpenAI (API key via UI or env var)
-  - [ ] Support Anthropic (API key via UI or env var)
-- [ ] Add LLM provider configuration to backend settings
-- [ ] Test switching between providers
-- [ ] Update documentation for multi-provider setup
+### Checkpoint 1: Enhanced Message Rendering & Tool Visibility
+**Goal**: Make tool execution visible and improve overall chat UX
 
-**Learning Focus**: React UI patterns, LLM provider abstraction, configuration management
+**Architecture**: Message-Based Approach (Option 2)
+- Tool calls and results are separate messages in chat history
+- Expandable/collapsible tool result cards with full details
+- Mobile-first responsive design
+
+#### Backend Tasks
+- [ ] **Update domain models** (`app/domain/chat.py`):
+  - [ ] Add `MessageType` enum: `user`, `assistant`, `tool_call`, `tool_result`
+  - [ ] Extend `ChatRequest` to support typed messages
+  - [ ] Create `ToolCallMetadata` model (tool name, arguments, started_at, completed_at)
+  - [ ] Create `ToolResultMetadata` model (tool name, summary, full result, status)
+  
+- [ ] **Update SSE streaming** (`app/api/routes/chat.py`):
+  - [ ] Emit separate events for tool call start: `{"type": "tool_call", "tool_name": "search_flights", "arguments": {...}}`
+  - [ ] Emit tool execution status updates: `{"type": "tool_status", "status": "executing"}`
+  - [ ] Emit tool result as separate message: `{"type": "tool_result", "summary": "...", "full_result": "..."}`
+  - [ ] Continue streaming assistant response after tool execution
+  
+- [ ] **Update ChatService** (`app/chat.py`):
+  - [ ] Track tool execution timing (start/end timestamps)
+  - [ ] Generate summary for tool results (first 2-3 lines of formatted output)
+  - [ ] Store tool call and result messages in conversation history
+  - [ ] Ensure message history includes all message types for context
+
+#### Frontend Tasks
+- [ ] **Update Message interface** (`ChatInterface.tsx`):
+  ```tsx
+  interface Message {
+    role: 'user' | 'assistant' | 'tool_call' | 'tool_result'
+    content: string
+    metadata?: {
+      toolName?: string
+      arguments?: Record<string, any>
+      summary?: string
+      fullResult?: string
+      status?: 'executing' | 'complete' | 'error'
+      elapsedMs?: number
+      startedAt?: string
+      completedAt?: string
+    }
+  }
+  ```
+
+- [ ] **Create `ToolCallCard` component**:
+  - [ ] Show tool icon (✈️ for flights) + tool name
+  - [ ] Display status indicator (spinner when executing, checkmark when complete)
+  - [ ] Show elapsed time
+  - [ ] Expandable section showing tool arguments (e.g., "JFK → LAX, 2025-12-15")
+  - [ ] Mobile-optimized (collapsible by default on small screens)
+
+- [ ] **Create `ToolResultCard` component**:
+  - [ ] Collapsed by default, showing only summary
+  - [ ] Dropdown/chevron icon to expand full results
+  - [ ] Full results shown in scrollable container with markdown rendering
+  - [ ] "View on site" button/link support (for future external links)
+  - [ ] Copy button to copy full results to clipboard
+  - [ ] Mobile-friendly accordion pattern
+
+- [ ] **Enhanced loading states**:
+  - [ ] Replace "Thinking..." with animated typing indicator (three dots)
+  - [ ] Show context-aware status: "Analyzing your request..." → "Searching flights..." → "Processing results..."
+  - [ ] Smooth transitions between states
+
+- [ ] **Message rendering logic**:
+  - [ ] Separate rendering functions per message type
+  - [ ] User messages: Right-aligned, blue background
+  - [ ] Assistant messages: Left-aligned, white background, markdown support
+  - [ ] Tool call messages: `<ToolCallCard>` component
+  - [ ] Tool result messages: `<ToolResultCard>` component
+
+- [ ] **Mobile responsiveness**:
+  - [ ] Test on 320px, 375px, 768px viewports
+  - [ ] Tool cards stack vertically on mobile
+  - [ ] Adjust font sizes and padding for mobile
+  - [ ] Ensure dropdowns/accordions work on touch devices
+  - [ ] Test markdown table horizontal scroll
+  - [ ] Sticky input area at bottom
+
+#### Testing Tasks
+- [ ] **Unit tests**:
+  - [ ] Test `ToolCallCard` rendering with different statuses
+  - [ ] Test `ToolResultCard` expand/collapse functionality
+  - [ ] Test message parsing logic for different SSE event types
+
+- [ ] **Manual tests**:
+  - [ ] Ask for flight search, verify tool call card appears with spinner
+  - [ ] Verify tool result card shows collapsed summary by default
+  - [ ] Click to expand full results, verify markdown renders correctly
+  - [ ] Test on Chrome DevTools mobile viewport (iPhone, Android)
+  - [ ] Verify message history maintains all tool calls/results after refresh
+
+**Success Criteria**: 
+- ✅ Tool execution is clearly visible with dedicated message cards
+- ✅ Tool arguments are visible in expandable dropdown
+- ✅ Tool results are collapsible with summary preview
+- ✅ Loading states provide context-aware feedback
+- ✅ UI works smoothly on mobile devices (320px+)
+- ✅ All message types persist in conversation history
+
+---
+
+### Checkpoint 2: LLM Provider Abstraction Layer
+**Goal**: Create flexible backend that supports multiple LLM providers
+
+#### Architecture Overview
+```
+BaseLLMProvider (ABC)
+├── OllamaProvider (current)
+├── OpenAIProvider (gpt-4o, gpt-4o-mini)
+├── AnthropicProvider (claude-3.5-sonnet, claude-3-opus)
+└── GoogleProvider (gemini-1.5-pro, gemini-1.5-flash)
+```
+
+#### Tasks
+- [ ] **Create provider abstraction**:
+  - [ ] Create `app/infrastructure/llm/base.py` with `BaseLLMProvider` ABC:
+    ```python
+    class BaseLLMProvider(ABC):
+        @abstractmethod
+        async def create_chat_model(self, **kwargs) -> BaseChatModel:
+            """Return LangChain ChatModel instance with tools bound."""
+        
+        @abstractmethod
+        def get_provider_name(self) -> str:
+            """Return provider name (e.g., 'ollama', 'openai')."""
+        
+        @abstractmethod
+        def get_available_models(self) -> list[str]:
+            """Return list of supported models."""
+        
+        @abstractmethod
+        def validate_config(self) -> bool:
+            """Check if provider is properly configured (API keys, etc.)."""
+    ```
+
+- [ ] **Implement provider classes**:
+  - [ ] `OllamaProvider` in `app/infrastructure/llm/ollama.py`:
+    - Uses existing `langchain_ollama.ChatOllama`
+    - Configuration from `OLLAMA_BASE_URL` and `OLLAMA_MODEL`
+    - No API key required
+    - Models: List from `ollama list` (qwen3:8b, qwen2.5:7b, deepseek-r1:8b, etc.)
+  
+  - [ ] `OpenAIProvider` in `app/infrastructure/llm/openai.py`:
+    - Install: `uv add langchain-openai`
+    - Uses `langchain_openai.ChatOpenAI`
+    - Configuration: `OPENAI_API_KEY`
+    - Models: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo
+  
+  - [ ] `AnthropicProvider` in `app/infrastructure/llm/anthropic.py`:
+    - Install: `uv add langchain-anthropic`
+    - Uses `langchain_anthropic.ChatAnthropic`
+    - Configuration: `ANTHROPIC_API_KEY`
+    - Models: claude-3-5-sonnet-20241022, claude-3-opus-20240229, claude-3-haiku-20240307
+  
+  - [ ] `GoogleProvider` in `app/infrastructure/llm/google.py`:
+    - Install: `uv add langchain-google-genai`
+    - Uses `langchain_google_genai.ChatGoogleGenerativeAI`
+    - Configuration: `GOOGLE_API_KEY`
+    - Models: gemini-1.5-pro, gemini-1.5-flash, gemini-1.0-pro
+
+- [ ] **Provider factory**:
+  - [ ] Create `app/infrastructure/llm/factory.py` with `LLMProviderFactory`:
+    ```python
+    class LLMProviderFactory:
+        _providers: dict[str, type[BaseLLMProvider]] = {
+            "ollama": OllamaProvider,
+            "openai": OpenAIProvider,
+            "anthropic": AnthropicProvider,
+            "google": GoogleProvider,
+        }
+        
+        @classmethod
+        def create_provider(cls, provider_name: str) -> BaseLLMProvider:
+            """Create provider instance by name."""
+        
+        @classmethod
+        def get_available_providers(cls) -> list[dict[str, Any]]:
+            """Return list of providers with their config status."""
+    ```
+
+- [ ] **Update Settings**:
+  - [ ] Add to `app/config.py`:
+    ```python
+    # LLM Provider Configuration
+    llm_provider: str = "ollama"  # Default to Ollama
+    
+    # Ollama (existing)
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen3:8b"
+    
+    # OpenAI
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+    
+    # Anthropic
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-3-5-sonnet-20241022"
+    
+    # Google
+    google_api_key: str | None = None
+    google_model: str = "gemini-1.5-flash"
+    ```
+  
+  - [ ] Update `.env.example` with new variables
+
+- [ ] **Refactor ChatService**:
+  - [ ] Update `ChatService.__init__` to accept `BaseLLMProvider` instead of hardcoding Ollama:
+    ```python
+    def __init__(self, flight_service: FlightService, llm_provider: BaseLLMProvider):
+        self.store = _global_chat_store
+        flight_search_func = create_flight_search_tool(flight_service)
+        self.search_flights_tool = tool(flight_search_func)
+        
+        # Get chat model from provider
+        chat_model = await llm_provider.create_chat_model(temperature=0.7)
+        self.llm = chat_model.bind_tools([self.search_flights_tool])
+    ```
+  
+  - [ ] Update `create_chat_service` factory to use provider from settings
+
+- [ ] **Testing**:
+  - [ ] Unit tests for each provider (mock API clients)
+  - [ ] Test provider factory creation and validation
+  - [ ] Integration test: Create ChatService with each provider
+  - [ ] E2E test: Send message using different providers (mock API responses)
+
+**Success Criteria**:
+- ✅ All four providers implemented and tested
+- ✅ ChatService works with any provider via dependency injection
+- ✅ Provider validation checks for required API keys
+- ✅ Tests pass with mocked provider responses
+
+---
+
+### Checkpoint 3: Provider Configuration API & Frontend UI
+**Goal**: Allow users to select and configure LLM providers via UI
+
+#### Backend Tasks
+- [ ] **Provider configuration endpoints**:
+  - [ ] `GET /api/llm/providers` - List available providers with status:
+    ```json
+    {
+      "providers": [
+        {
+          "name": "ollama",
+          "display_name": "Ollama (Local)",
+          "is_configured": true,
+          "available_models": ["qwen3:8b", "qwen2.5:7b", "deepseek-r1:8b"],
+          "current_model": "qwen3:8b"
+        },
+        {
+          "name": "openai",
+          "display_name": "OpenAI",
+          "is_configured": false,
+          "available_models": ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"],
+          "requires_api_key": true
+        }
+      ],
+      "current_provider": "ollama"
+    }
+    ```
+  
+  - [ ] `POST /api/llm/configure` - Update provider settings:
+    ```json
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "api_key": "sk-..." // Optional, can be env var
+    }
+    ```
+  
+  - [ ] `GET /api/llm/current` - Get current provider and model info
+
+- [ ] **Session-based configuration** (optional):
+  - [ ] Allow per-session provider override (don't persist globally)
+  - [ ] Store provider choice in session metadata
+  - [ ] Useful for testing multiple providers simultaneously
+
+#### Frontend Tasks
+- [ ] **Settings Panel Component**:
+  - [ ] Create `SettingsPanel.tsx` component with:
+    - Provider dropdown/radio group
+    - Model selection dropdown (filtered by provider)
+    - API key input (for external providers)
+    - "Test Connection" button
+    - Save/Cancel buttons
+  
+  - [ ] Add settings icon/button to header (⚙️)
+  - [ ] Open settings in modal or slide-out drawer
+  - [ ] Fetch providers on mount: `GET /api/llm/providers`
+  - [ ] Submit configuration: `POST /api/llm/configure`
+
+- [ ] **Provider status indicators**:
+  - [ ] Show current provider/model in chat header (e.g., "💬 Ollama • qwen3:8b")
+  - [ ] Add tooltip on hover with provider details
+  - [ ] Show warning if provider is unconfigured
+
+- [ ] **API key management**:
+  - [ ] Add secure input field for API keys (type="password")
+  - [ ] Option to store in browser localStorage (warn about security)
+  - [ ] Option to use environment variables (recommended)
+  - [ ] Validate API key format before saving
+
+- [ ] **Testing**:
+  - [ ] Manual test: Switch from Ollama to OpenAI (if API key available)
+  - [ ] Manual test: Verify model dropdown updates when provider changes
+  - [ ] Manual test: Test API key validation and error messages
+  - [ ] Manual test: Send message after switching providers
+
+**Success Criteria**:
+- ✅ Users can view available providers and their configuration status
+- ✅ Users can switch providers and models via UI
+- ✅ API keys can be entered and validated
+- ✅ Current provider is clearly displayed in chat interface
+- ✅ Settings persist across sessions (via backend config)
+
+---
+
+### Checkpoint 4: Testing, Documentation & Polish
+**Goal**: Ensure production-ready quality for Phase 4 features
+
+#### Tasks
+- [ ] **Comprehensive testing**:
+  - [ ] Add unit tests for all new components (`ToolCallIndicator`, `SettingsPanel`)
+  - [ ] Add integration tests for provider endpoints
+  - [ ] Test mobile responsiveness on real devices (iOS Safari, Android Chrome)
+  - [ ] Test markdown rendering with all new UI components
+  - [ ] Performance test: Measure latency with different providers
+  - [ ] Load test: Multiple concurrent sessions with different providers
+
+- [ ] **Error handling**:
+  - [ ] Handle API key validation errors gracefully
+  - [ ] Show user-friendly messages for provider failures (rate limits, network errors)
+  - [ ] Add retry logic for transient provider failures
+  - [ ] Fallback to Ollama if external provider fails
+
+- [ ] **Documentation updates**:
+  - [ ] Update `README.md` with:
+    - LLM provider setup instructions
+    - How to get API keys for OpenAI/Anthropic/Google
+    - Environment variable configuration
+    - Provider comparison table (cost, latency, capabilities)
+  - [ ] Add `docs/LLM_PROVIDERS.md` with detailed provider guide
+  - [ ] Update API documentation (OpenAPI/Swagger) with new endpoints
+  - [ ] Add architecture diagrams showing provider abstraction layer
+
+- [ ] **Code quality**:
+  - [ ] Run `just fix` and `just typecheck` on all new code
+  - [ ] Ensure test coverage >80% for new modules
+  - [ ] Add docstrings to all provider classes and methods
+  - [ ] Review and refactor for consistency
+
+- [ ] **User experience polish**:
+  - [ ] Add loading skeletons for provider list
+  - [ ] Add success/error toasts for configuration changes
+  - [ ] Improve error messages (avoid technical jargon)
+  - [ ] Add keyboard shortcuts (e.g., Ctrl+, for settings)
+  - [ ] Add dark mode support (optional, but nice to have)
+
+**Success Criteria**:
+- ✅ All tests pass (unit, integration, E2E)
+- ✅ Code quality checks pass (ruff, mypy)
+- ✅ Documentation is comprehensive and up-to-date
+- ✅ UI is polished and user-friendly
+- ✅ Error handling is robust and helpful
+
+---
+
+## Phase 4 Summary
+
+**Status**: 🔄 **IN PROGRESS** (Not Started)
+
+**Key Deliverables**:
+1. ✨ Enhanced chat UI with tool execution visibility
+2. 🔌 Multi-provider LLM support (Ollama, OpenAI, Anthropic, Google)
+3. ⚙️ User-facing settings panel for provider configuration
+4. 📱 Mobile-responsive design
+5. 📚 Comprehensive documentation for provider setup
+
+**Estimated Effort**: 
+- Checkpoint 1: 4-6 hours (UI enhancements)
+- Checkpoint 2: 6-8 hours (Provider abstraction)
+- Checkpoint 3: 4-5 hours (Configuration UI)
+- Checkpoint 4: 3-4 hours (Testing & docs)
+- **Total**: ~17-23 hours
+
+**Dependencies**:
+- OpenAI API key (optional, for testing)
+- Anthropic API key (optional, for testing)
+- Google API key (optional, for testing)
+
+**Learning Focus**: 
+- React component design patterns (indicators, settings panels)
+- LangChain provider abstraction and dependency injection
+- Multi-provider LLM integration and testing
+- API key management and security best practices
+- Mobile-first responsive design
 
 ---
 
