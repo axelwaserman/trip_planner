@@ -1,7 +1,7 @@
 """Test chat endpoint."""
 
 from collections.abc import AsyncGenerator
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -18,7 +18,8 @@ def test_chat_endpoint_streams_response() -> None:
         yield ("Hello", "test-session-123")
         yield (" there!", "test-session-123")
 
-    with patch("app.api.routes.chat.chat_service.chat_stream", side_effect=mock_stream):
+    # Patch the ChatService.chat_stream method
+    with patch("app.chat.ChatService.chat_stream", side_effect=mock_stream):
         response = client.post(
             "/api/chat",
             json={"message": "Hello"},
