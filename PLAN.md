@@ -84,69 +84,72 @@ This phase uses **LangChain 1.0** (installed: `langchain==1.0.3`):
 - ✅ Support concurrent tool calls (multiple LLMs/tools)
 
 ### Tasks
-- [ ] **Checkpoint 1**: Data models and base client abstraction
+- [x] **Checkpoint 1**: Data models and base client abstraction
   - [x] Design Pydantic models: `FlightQuery` ✅, `Flight` ✅ (existing in `domain/models.py`)
   - [x] Create abstract base class: `FlightAPIClient(ABC)` ✅ (existing in `infrastructure/clients/flight.py`)
-  - [ ] Define retry decorator with circuit breaker pattern (`app/utils/retry.py`)
-  - [ ] Add custom exception hierarchy for API errors (`app/exceptions.py`)
-  - [ ] Write unit tests for retry decorator and exceptions
-  - [ ] Update existing model tests if needed
-- [ ] **Checkpoint 2**: Mock client implementation
-  - [ ] Install `langgraph` dependency (required by LangChain 1.0 agents)
-  - [ ] Implement `MockFlightAPIClient` in `infrastructure/clients/mock.py`
-  - [ ] Add realistic flight data generation (varied prices, airlines, times, layovers)
-  - [ ] Implement all abstract methods: `search()`, `get_flight_details()`, `check_availability()`, `health_check()`
-  - [ ] Write comprehensive unit tests in `tests/test_mock_client.py`
-  - [ ] Run quality checks: `just fix` → `just typecheck` → `just test`
-- [ ] **Checkpoint 3**: Service layer with dependency injection
-  - [ ] Create `FlightService` in `services/flight.py` with async methods
-  - [ ] Implement business logic: sorting (price/duration/time), filtering, pagination
-  - [ ] Create FastAPI dependency factory: `get_flight_client()` → `MockFlightAPIClient`
-  - [ ] Add flights endpoint: `POST /api/flights/search` in `api/routes/flights.py`
-  - [ ] Write unit tests for service (mock client, test business logic)
-  - [ ] Write integration tests for endpoint (TestClient)
-  - [ ] Update `main.py` to include flights router
-- [ ] **Checkpoint 4**: LangChain 1.0 agent integration (NON-STREAMING)
-  - [ ] Create plain Python function tool in `tools/flight_search.py`:
+  - [x] Define retry decorator with circuit breaker pattern (`app/utils/retry.py`)
+  - [x] Add custom exception hierarchy for API errors (`app/exceptions.py`)
+  - [x] Write unit tests for retry decorator and exceptions
+  - [x] Update existing model tests if needed
+- [x] **Checkpoint 2**: Mock client implementation
+  - [x] Install `langgraph` dependency (required by LangChain 1.0 agents)
+  - [x] Implement `MockFlightAPIClient` in `infrastructure/clients/mock.py`
+  - [x] Add realistic flight data generation (varied prices, airlines, times, layovers)
+  - [x] Implement all abstract methods: `search()`, `get_flight_details()`, `check_availability()`, `health_check()`
+  - [x] Write comprehensive unit tests in `tests/test_mock_client.py`
+  - [x] Run quality checks: `just fix` → `just typecheck` → `just test`
+- [x] **Checkpoint 3**: Service layer with dependency injection
+  - [x] Create `FlightService` in `services/flight.py` with async methods
+  - [x] Implement business logic: sorting (price/duration/time), filtering, pagination
+  - [x] Create FastAPI dependency factory: `get_flight_client()` → `MockFlightAPIClient`
+  - [x] Add flights endpoint: `POST /api/flights/search` in `api/routes/flights.py`
+  - [x] Write unit tests for service (mock client, test business logic)
+  - [x] Write integration tests for endpoint (TestClient)
+  - [x] Update `main.py` to include flights router
+- [x] **Checkpoint 4**: LangChain 1.0 agent integration (NON-STREAMING)
+  - [x] Create plain Python function tool in `tools/flight_search.py`:
     - Takes primitive types (str, int, bool) not Pydantic models
     - Clear docstring describing when/how LLM should use it
     - Returns formatted string (readable by LLM)
     - Handles ValidationError → returns error message to LLM
-  - [ ] Update `ChatService` to use `create_agent()`:
-    - Import from `langchain.agents` (NOT `langchain_classic`)
+  - [x] Update `ChatService` to use `bind_tools()`:
+    - Uses LangChain 1.0 `bind_tools()` pattern (not `create_agent()`)
     - Inject `FlightService` via constructor
-    - Define tool function in `__init__` (closure over service)
-    - Agent supports concurrent tool calls
-  - [ ] Implement **non-streaming** agent responses first:
-    - Use `agent.invoke()` with message history
+    - Define tool function with `@tool` decorator
+    - Agent supports tool calls with `llm.bind_tools()`
+  - [x] Implement **non-streaming** agent responses first:
+    - Use `llm.invoke()` with message history
     - Convert session history to messages format
     - Return complete response (may include tool call metadata)
-  - [ ] Write unit tests: mock service, test tool function, test agent flow
-  - [ ] Write integration tests: full chat with tool calling
+  - [x] Write unit tests: mock service, test tool function, test agent flow
+  - [x] Write integration tests: full chat with tool calling
   - [x] Manual testing via frontend (verify tool calls work)
 - [x] **Checkpoint 5**: Streaming support and E2E testing
   - [x] Add streaming agent responses:
     - Use `llm.astream()` for chunk-by-chunk streaming
     - Handle different chunk types (content, tool_calls, etc.)
     - Update SSE endpoint to stream agent chunks
-  - [x] Write E2E tests in `tests/test_e2e.py`:
+  - [x] Write E2E tests in `tests/test_e2e.py` and `tests/test_e2e_manual.py`:
     - User message → Agent → Tool call → Mock API → Response
     - Multi-turn conversations with tool calls
     - Error paths: invalid IATA codes, API failures, validation errors
     - Streaming with tool execution
-  - [ ] Update API documentation (OpenAPI/Swagger) - Optional, can be done in Phase 6
-  - [ ] Update README with architecture overview - Optional, can be done in Phase 6
+  - [ ] Update API documentation (OpenAPI/Swagger) - Deferred to Phase 6
+  - [ ] Update README with architecture overview - Deferred to Phase 6
   - [x] Run full test suite and quality checks
   - [x] Review and refactor suggestions
 
 **Status**: ✅ **COMPLETE** (122/122 tests passing)
 
-**Note**: Model changed to `qwen2.5:3b` (supports tool calling). Restart backend server for manual testing:
-```bash
-cd backend && uv run fastapi dev app/main.py
-```
+**Implementation Notes**:
+- Model upgraded to `qwen3:8b` (better reasoning + tool calling support)
+- Uses `bind_tools()` pattern with `@tool` decorator (LangChain 1.0)
+- Global `_global_chat_store` for conversation memory across requests
+- Streaming with `llm.astream()` for real-time chunk delivery
+- Route display added: shows "JFK → LHR" format in flight results
+- 13 E2E tests covering tool calling, memory, streaming, error handling
 
-**Learning Focus**: LangChain 1.0 agent patterns, plain function tools, async tool execution, concurrent tool calls, streaming with LangGraph
+**Learning Focus**: LangChain 1.0 agent patterns, plain function tools, async tool execution, streaming responses, conversation memory management
 
 ---
 
@@ -245,22 +248,23 @@ These are ideas to explore after MVP is working:
 
 ## Current Status
 - **Current Phase**: Phase 3 - Mock Flight Search Tool ✅ **COMPLETE**
-- **Last Updated**: 2025-01-12
+- **Last Updated**: 2025-11-12
 - **Blockers**: None
 - **Next Steps**: 
-  1. **Restart backend server** with `qwen2.5:3b` model for manual testing
-  2. Test tool calling via frontend: "Find flights from LAX to JFK on June 1st 2025"
-  3. Begin Phase 4 - Enhanced Frontend & LLM Provider Flexibility
+  1. Begin Phase 4 - Enhanced Frontend & LLM Provider Flexibility
+  2. Display tool usage indicators in frontend UI
+  3. Add LLM provider abstraction for Gemini/OpenAI/Anthropic support
 
 ### Completed Milestones
 - ✅ Full project structure with monorepo setup (backend + frontend)
 - ✅ Development tooling configured (uv, ruff, mypy, pytest, just)
 - ✅ FastAPI backend with health check endpoint
-- ✅ LangChain chat agent integrated with Ollama (qwen2.5:3b - supports tools)
-- ✅ Session-based conversation memory working
+- ✅ LangChain chat agent integrated with Ollama (qwen3:8b - supports tools)
+- ✅ Session-based conversation memory with global store pattern
 - ✅ **Streaming chat responses via Server-Sent Events with tool calling**
 - ✅ React chat UI with Chakra UI v3, markdown rendering (tables, lists, code)
 - ✅ **Mock flight search tool fully integrated with LangChain agent**
-- ✅ **122/122 tests passing** (including 13 E2E tests)
+- ✅ **122/122 tests passing** (109 unit/integration + 13 E2E tests)
 - ✅ Vite proxy configured for seamless API calls
-- ✅ **Complete flight search workflow: query → tool call → mock API → formatted response**
+- ✅ **Complete flight search workflow: query → tool call → mock API → formatted response with route display**
+- ✅ **Multi-client session support with independent conversation histories**

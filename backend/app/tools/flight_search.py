@@ -161,6 +161,7 @@ def create_flight_search_tool(service: FlightService) -> Callable[..., Awaitable
 
                 result_lines.append(
                     f"{i}. {flight.carrier} {flight.flight_number}\n"
+                    f"   Route: {flight.origin} → {flight.destination}\n"
                     f"   Departs: {departure_time} → Arrives: {arrival_time}\n"
                     f"   Duration: {duration_str} ({stops_str})\n"
                     f"   Price: ${flight.price} {flight.currency} ({flight.booking_class})\n"
