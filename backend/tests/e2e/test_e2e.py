@@ -1,6 +1,9 @@
 """End-to-end integration tests for chat with tool calling.
 
 Tests full flow: User message → Agent → Tool call → Mock API → Response
+
+These tests make actual LLM calls and are marked as slow.
+Run with: pytest -m "e2e" or pytest tests/e2e/
 """
 
 import json
@@ -12,6 +15,9 @@ from fastapi.testclient import TestClient
 
 from app.domain.models import Flight
 from app.main import app
+
+# Mark all tests in this module as slow E2E tests
+pytestmark = [pytest.mark.slow, pytest.mark.e2e]
 
 
 def parse_sse_stream(response) -> tuple[list[str], str | None]:

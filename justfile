@@ -13,9 +13,25 @@ backend:
 frontend:
     cd frontend && npm run dev
 
-# Run backend tests
+# Run backend tests (fast - excludes slow E2E tests)
 test:
     cd backend && uv run pytest
+
+# Run all tests including slow E2E tests (13+ min)
+test-all:
+    cd backend && uv run pytest -m ""
+
+# Run only E2E tests with real LLM
+test-e2e:
+    cd backend && uv run pytest -m "e2e" -v -s
+
+# Run unit tests only
+test-unit:
+    cd backend && uv run pytest tests/unit/
+
+# Run integration tests only  
+test-integration:
+    cd backend && uv run pytest tests/integration/
 
 # Lint backend code
 lint:

@@ -28,6 +28,14 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "e2e: marks tests as end-to-end with real LLM calls",
+    "integration: marks tests with mocked external dependencies",
+    "unit: marks tests as pure unit tests",
+]
+# Default: skip slow tests for fast iteration
+addopts = "-m 'not slow'"
 
 [tool.mypy]
 python_version = "3.13"

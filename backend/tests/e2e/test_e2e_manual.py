@@ -1,8 +1,9 @@
 """Manual E2E tests to verify agent behavior with real LLM.
 
-Run with: pytest tests/test_e2e_manual.py -v -s
+Run with: pytest -m "e2e" -v -s or pytest tests/e2e/test_e2e_manual.py -v -s
 
 These tests make actual LLM calls and verify conversation flow.
+Marked as slow - skipped by default for fast iteration.
 """
 
 import json
@@ -11,6 +12,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+
+# Mark all tests in this module as slow E2E tests
+pytestmark = [pytest.mark.slow, pytest.mark.e2e]
 
 
 def parse_sse_stream(response) -> tuple[list[str], str | None]:
