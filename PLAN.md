@@ -75,39 +75,71 @@ Build an AI-powered trip planning chat agent that can leverage real-world APIs t
 ## Phase 3: Mock Flight Search Tool
 **Goal**: Agent can call a flight search tool and incorporate results into conversation
 
+### Important: LangChain 1.0 Patterns
+This phase uses **LangChain 1.0** (installed: `langchain==1.0.3`):
+- ✅ Use `create_agent()` from `langchain.agents` (NOT `langchain_classic`)
+- ✅ Tools are **plain Python functions** (no decorators needed)
+- ✅ Agent built on LangGraph (requires `langgraph` dependency)
+- ✅ Async-first for all I/O operations
+- ✅ Support concurrent tool calls (multiple LLMs/tools)
+
 ### Tasks
 - [ ] **Checkpoint 1**: Data models and base client abstraction
-  - [ ] Design Pydantic models: `FlightQuery`, `Flight`, `FlightResults`
-  - [ ] Create abstract base class: `FlightAPIClient(ABC)`
-  - [ ] Define retry decorator with circuit breaker pattern
-  - [ ] Add custom exception hierarchy for API errors
-  - [ ] Write unit tests for models and validators
+  - [x] Design Pydantic models: `FlightQuery` ✅, `Flight` ✅ (existing in `domain/models.py`)
+  - [x] Create abstract base class: `FlightAPIClient(ABC)` ✅ (existing in `infrastructure/clients/flight.py`)
+  - [ ] Define retry decorator with circuit breaker pattern (`app/utils/retry.py`)
+  - [ ] Add custom exception hierarchy for API errors (`app/exceptions.py`)
+  - [ ] Write unit tests for retry decorator and exceptions
+  - [ ] Update existing model tests if needed
 - [ ] **Checkpoint 2**: Mock client implementation
-  - [ ] Implement `MockFlightAPIClient` with realistic dummy data
-  - [ ] Add flight data generation logic (varied prices, airlines, times)
-  - [ ] Write unit tests for mock client
-  - [ ] Verify mock client returns valid `Flight` objects
-- [ ] **Checkpoint 3**: Service layer
-  - [ ] Create `FlightService` class with business logic
-  - [ ] Implement sorting and filtering logic
-  - [ ] Add dependency injection setup (FastAPI Depends)
-  - [ ] Write unit tests for service layer
-- [ ] **Checkpoint 4**: LangChain tool integration
-  - [ ] Create tool factory: `create_flight_search_tool(service)`
-  - [ ] Integrate tool with LangChain agent (ReAct or function calling)
-  - [ ] Add tool response formatting for LLM
-  - [ ] Update chat service to use agent with tools
-  - [ ] Add validation for tool inputs (IATA codes, dates)
-  - [ ] Handle tool execution errors (return to LLM for correction)
-  - [ ] Write functional tests for tool calling
-- [ ] **Checkpoint 5**: E2E testing and documentation
-  - [ ] E2E test: User message → Agent → Tool call → Mock API → Response
-  - [ ] Test error handling paths (invalid input, API failures)
-  - [ ] Test streaming with tool calls
-  - [ ] Update API documentation
+  - [ ] Install `langgraph` dependency (required by LangChain 1.0 agents)
+  - [ ] Implement `MockFlightAPIClient` in `infrastructure/clients/mock.py`
+  - [ ] Add realistic flight data generation (varied prices, airlines, times, layovers)
+  - [ ] Implement all abstract methods: `search()`, `get_flight_details()`, `check_availability()`, `health_check()`
+  - [ ] Write comprehensive unit tests in `tests/test_mock_client.py`
+  - [ ] Run quality checks: `just fix` → `just typecheck` → `just test`
+- [ ] **Checkpoint 3**: Service layer with dependency injection
+  - [ ] Create `FlightService` in `services/flight.py` with async methods
+  - [ ] Implement business logic: sorting (price/duration/time), filtering, pagination
+  - [ ] Create FastAPI dependency factory: `get_flight_client()` → `MockFlightAPIClient`
+  - [ ] Add flights endpoint: `POST /api/flights/search` in `api/routes/flights.py`
+  - [ ] Write unit tests for service (mock client, test business logic)
+  - [ ] Write integration tests for endpoint (TestClient)
+  - [ ] Update `main.py` to include flights router
+- [ ] **Checkpoint 4**: LangChain 1.0 agent integration (NON-STREAMING)
+  - [ ] Create plain Python function tool in `tools/flight_search.py`:
+    - Takes primitive types (str, int, bool) not Pydantic models
+    - Clear docstring describing when/how LLM should use it
+    - Returns formatted string (readable by LLM)
+    - Handles ValidationError → returns error message to LLM
+  - [ ] Update `ChatService` to use `create_agent()`:
+    - Import from `langchain.agents` (NOT `langchain_classic`)
+    - Inject `FlightService` via constructor
+    - Define tool function in `__init__` (closure over service)
+    - Agent supports concurrent tool calls
+  - [ ] Implement **non-streaming** agent responses first:
+    - Use `agent.invoke()` with message history
+    - Convert session history to messages format
+    - Return complete response (may include tool call metadata)
+  - [ ] Write unit tests: mock service, test tool function, test agent flow
+  - [ ] Write integration tests: full chat with tool calling
+  - [ ] Manual testing via frontend (verify tool calls work)
+- [ ] **Checkpoint 5**: Streaming support and E2E testing
+  - [ ] Add streaming agent responses:
+    - Use `agent.astream()` for chunk-by-chunk streaming
+    - Handle different chunk types (content, tool_calls, etc.)
+    - Update SSE endpoint to stream agent chunks
+  - [ ] Write E2E tests in `tests/test_e2e.py`:
+    - User message → Agent → Tool call → Mock API → Response
+    - Multi-turn conversations with tool calls
+    - Error paths: invalid IATA codes, API failures, validation errors
+    - Streaming with tool execution
+  - [ ] Update API documentation (OpenAPI/Swagger)
+  - [ ] Update README with architecture overview
+  - [ ] Run full test suite and quality checks
   - [ ] Review and refactor suggestions
 
-**Learning Focus**: LangChain tools/agents, function calling, tool integration patterns, retry logic, circuit breakers
+**Learning Focus**: LangChain 1.0 agent patterns, plain function tools, async tool execution, concurrent tool calls, streaming with LangGraph
 
 ---
 
