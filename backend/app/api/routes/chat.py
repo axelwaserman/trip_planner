@@ -24,7 +24,7 @@ def get_chat_service(
         flight_service: Injected FlightService
 
     Returns:
-        ChatService instance with tools
+        ChatService instance (uses global store for conversation history)
     """
     return create_chat_service(flight_service)
 

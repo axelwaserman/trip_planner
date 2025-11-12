@@ -43,11 +43,18 @@ def create_flight_search_tool(service: FlightService) -> Callable[..., Awaitable
         - Already have flight search results and user is just asking follow-up questions about them
 
         **Handling ambiguous requests:**
-        - If city name is provided instead of IATA code, try to infer the most likely airport
-          (e.g., "Los Angeles" -> "LAX", "New York" -> "JFK", "San Francisco" -> "SFO")
+        - If city name is provided instead of IATA code, infer the most likely major airport:
+          * "Los Angeles" or "LA" → "LAX"
+          * "New York" or "NYC" → "JFK"
+          * "San Francisco" or "SF" → "SFO"
+          * "Chicago" → "ORD"
+          * "Miami" → "MIA"
+          * "Seattle" → "SEA"
+          * "Boston" → "BOS"
         - If origin, destination, or date is missing, ask the user for clarification
-        - If date is relative ("tomorrow", "next week"), calculate the actual date
+        - If date is relative ("tomorrow", "next week"), calculate the actual date based on TODAY'S DATE
         - If user says "flights to X" without origin, ask where they're flying from
+        - If date format is wrong (like MM/DD/YYYY), convert it to YYYY-MM-DD
 
         **Expected output format:**
         - Returns formatted text with up to {limit} flight options
@@ -59,6 +66,7 @@ def create_flight_search_tool(service: FlightService) -> Callable[..., Awaitable
             origin: Origin airport IATA code (3 letters, e.g., "LAX", "JFK")
             destination: Destination airport IATA code (3 letters, e.g., "SFO", "ORD")
             departure_date: Departure date in YYYY-MM-DD format (e.g., "2025-06-15")
+                          IMPORTANT: Today is November 12, 2025. Use dates in 2025 or 2026.
             passengers: Number of passengers (default: 1, min: 1, max: 9)
             sort_by: Sort results by "price" (default), "duration", or "departure"
             max_price: Optional maximum price filter in USD (e.g., 500.00)

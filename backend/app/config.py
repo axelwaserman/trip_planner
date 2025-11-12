@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Ollama LLM
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:3b"  # Tool-compatible model (qwen2.5:3b or mistral:7b)
+    ollama_model: str = "qwen3:8b"  # Better reasoning with tool calling support
 
 
 settings = Settings()

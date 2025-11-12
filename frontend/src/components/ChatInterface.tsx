@@ -40,7 +40,7 @@ export function ChatInterface() {
 
     try {
       console.log('Sending message:', userMessage)
-      const response = await fetch('/api/chat/stream', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
