@@ -2,8 +2,8 @@
 
 from abc import abstractmethod
 
-from app.clients.base import BaseAPIClient
-from app.models.flight import Flight, FlightQuery
+from app.domain.models import Flight, FlightQuery
+from app.infrastructure.clients.base import BaseAPIClient
 
 
 class FlightAPIClient(BaseAPIClient):

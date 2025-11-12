@@ -3,12 +3,11 @@
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal, Self
+from typing import Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Type aliases for clarity
-BookingClass = Literal["economy", "premium_economy", "business", "first"]
+from app.domain.types import BookingClass
 
 
 class FlightQuery(BaseModel):
@@ -27,7 +26,7 @@ class FlightQuery(BaseModel):
         ..., min_length=3, max_length=3, description="Destination airport IATA code"
     )
     departure_date: date = Field(..., description="Departure date")
-    return_date: date | None = Field(None, description="Return date for round trip")
+    return_date: date | None = Field(default=None, description="Return date for round trip")
     passengers: int = Field(default=1, ge=1, le=9, description="Number of passengers")
 
     @field_validator("origin", "destination")
@@ -69,7 +68,7 @@ class FlightQuery(BaseModel):
 class Flight(BaseModel):
     """Base model for flight information.
 
-    This is the base class that all flight implementations inherit from.
+    Pure domain model with no external dependencies.
     Contains common fields across all flight API providers.
 
     Attributes:
@@ -120,29 +119,6 @@ class Flight(BaseModel):
             normalized = v.lower()
             valid_classes = {"economy", "premium_economy", "business", "first"}
             if normalized not in valid_classes:
-                raise ValueError(
-                    f"Invalid booking class: {v}. Must be one of {valid_classes}"
-                )
+                raise ValueError(f"Invalid booking class: {v}. Must be one of {valid_classes}")
             return normalized  # type: ignore[return-value]
         return v
-
-
-class MockFlight(Flight):
-    """Mock flight model for testing and development.
-
-    Inherits all fields from Flight base model.
-    Currently no additional fields, but structured for future extensions.
-    """
-
-
-class AmadeusFlight(Flight):
-    """Amadeus API flight model.
-
-    Extends base Flight model with Amadeus-specific fields.
-    Will be used in Phase 5 when integrating real Amadeus API.
-
-    Additional fields can be added here for Amadeus-specific data like:
-    - Baggage allowance
-    - Seat availability
-    - Fare rules
-    """

@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.models.flight import AmadeusFlight, Flight, FlightQuery, MockFlight
+from app.domain.models import Flight, FlightQuery
 
 
 def test_flight_query_valid() -> None:
@@ -176,7 +176,7 @@ def test_flight_booking_class_validation() -> None:
             carrier="American Airlines",
             flight_number="AA123",
             duration_minutes=330,
-            booking_class=booking_class,
+            booking_class=booking_class,  # type: ignore[arg-type]
         )
         assert flight.booking_class == booking_class
 
@@ -192,7 +192,7 @@ def test_flight_booking_class_validation() -> None:
             carrier="American Airlines",
             flight_number="AA123",
             duration_minutes=330,
-            booking_class="super_deluxe",
+            booking_class="super_deluxe",  # type: ignore[arg-type]
         )
 
 
@@ -208,7 +208,7 @@ def test_flight_booking_class_case_insensitive() -> None:
         carrier="American Airlines",
         flight_number="AA123",
         duration_minutes=330,
-        booking_class="BUSINESS",
+        booking_class="BUSINESS",  # type: ignore[arg-type]
     )
     assert flight.booking_class == "business"
 
@@ -244,40 +244,6 @@ def test_flight_negative_stops() -> None:
             duration_minutes=330,
             stops=-1,
         )
-
-
-def test_mock_flight_inherits_from_flight() -> None:
-    """Test MockFlight inherits from Flight."""
-    mock_flight = MockFlight(
-        id="MOCK123",
-        origin="LAX",
-        destination="JFK",
-        departure=datetime(2025, 6, 1, 10, 0, tzinfo=UTC),
-        arrival=datetime(2025, 6, 1, 18, 30, tzinfo=UTC),
-        price=Decimal("450.00"),
-        carrier="Mock Airlines",
-        flight_number="MK123",
-        duration_minutes=330,
-    )
-    assert isinstance(mock_flight, Flight)
-    assert mock_flight.id == "MOCK123"
-
-
-def test_amadeus_flight_inherits_from_flight() -> None:
-    """Test AmadeusFlight inherits from Flight."""
-    amadeus_flight = AmadeusFlight(
-        id="AMD123",
-        origin="LAX",
-        destination="JFK",
-        departure=datetime(2025, 6, 1, 10, 0, tzinfo=UTC),
-        arrival=datetime(2025, 6, 1, 18, 30, tzinfo=UTC),
-        price=Decimal("450.00"),
-        carrier="Amadeus Airlines",
-        flight_number="AD123",
-        duration_minutes=330,
-    )
-    assert isinstance(amadeus_flight, Flight)
-    assert amadeus_flight.id == "AMD123"
 
 
 def test_flight_model_validate() -> None:

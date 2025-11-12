@@ -1,5 +1,6 @@
 """Test chat endpoint."""
 
+from collections.abc import AsyncGenerator
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -12,12 +13,12 @@ client = TestClient(app)
 def test_chat_endpoint_streams_response() -> None:
     """Test chat endpoint returns streaming response."""
 
-    async def mock_stream(message: str, session_id: str | None):
+    async def mock_stream(message: str, session_id: str | None) -> AsyncGenerator[tuple[str, str]]:
         """Mock async generator for streaming."""
         yield ("Hello", "test-session-123")
         yield (" there!", "test-session-123")
 
-    with patch("app.main.chat_service.chat_stream", side_effect=mock_stream):
+    with patch("app.api.routes.chat.chat_service.chat_stream", side_effect=mock_stream):
         response = client.post(
             "/api/chat",
             json={"message": "Hello"},
