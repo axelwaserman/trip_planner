@@ -1,13 +1,14 @@
 """FastAPI application for Trip Planner."""
 
 import json
+from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.models import ChatRequest, ChatResponse
 from app.chat import chat_service
+from app.models.chat import ChatRequest, ChatResponse
 
 app = FastAPI(
     title="Trip Planner API",
@@ -40,13 +41,13 @@ async def health() -> dict[str, str]:
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     """Chat endpoint for conversational AI.
-    
+
     Args:
         request: Chat request with message and optional session_id
-        
+
     Returns:
         Chat response with agent's reply and session_id
-        
+
     Raises:
         HTTPException: If chat service fails
     """
@@ -54,21 +55,21 @@ async def chat(request: ChatRequest) -> ChatResponse:
         response, session_id = await chat_service.chat(request.message, request.session_id)
         return ChatResponse(response=response, session_id=session_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat service error: {e!s}")
+        raise HTTPException(status_code=500, detail=f"Chat service error: {e!s}") from e
 
 
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     """Streaming chat endpoint that returns Server-Sent Events.
-    
+
     Args:
         request: Chat request with message and optional session_id
-        
+
     Returns:
         StreamingResponse with SSE chunks
     """
 
-    async def event_generator():
+    async def event_generator() -> AsyncGenerator[str]:
         """Generate Server-Sent Events for streaming response."""
         try:
             session_id = None
@@ -93,4 +94,3 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",  # Disable nginx buffering
         },
     )
-
