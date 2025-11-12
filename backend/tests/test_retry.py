@@ -26,19 +26,19 @@ async def failing_function(fail_count: int) -> str:
     failing_function.attempts += 1  # type: ignore[attr-defined]
 
     if failing_function.attempts <= fail_count:  # type: ignore[attr-defined]
-        raise APITimeoutError("Temporary failure")
+        raise APITimeoutError(message="Temporary failure")
 
     return "success"
 
 
 async def always_failing_function() -> str:
     """Function that always fails."""
-    raise APIServerError("Always fails")
+    raise APIServerError(message="Always fails")
 
 
 async def non_retryable_error_function() -> str:
     """Function that raises non-retryable error."""
-    raise APIClientError("Bad request")
+    raise APIClientError(message="Bad request")
 
 
 @pytest.fixture(autouse=True)
@@ -103,7 +103,7 @@ async def test_retry_exponential_backoff() -> None:
     async def func() -> str:
         call_times.append(asyncio.get_event_loop().time())
         if len(call_times) <= 3:
-            raise APITimeoutError("Timeout")
+            raise APITimeoutError(message="Timeout")
         return "success"
 
     result = await func()
@@ -152,7 +152,7 @@ async def test_retry_with_zero_retries() -> None:
 
     @retry_on_failure(max_retries=0, backoff_base=0.01)
     async def func() -> str:
-        raise APITimeoutError("Immediate failure")
+        raise APITimeoutError(message="Immediate failure")
 
     with pytest.raises(APITimeoutError):
         await func()

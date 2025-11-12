@@ -3,9 +3,12 @@
 import re
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal, Self
 
-import pydantic
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Type aliases for clarity
+BookingClass = Literal["economy", "premium_economy", "business", "first"]
 
 
 class FlightQuery(BaseModel):
@@ -48,28 +51,19 @@ class FlightQuery(BaseModel):
             raise ValueError(f"Invalid IATA code: {v}. Must be 3 letters A-Z.")
         return code
 
-    @field_validator("return_date")
-    @classmethod
-    def validate_return_date(
-        cls, v: date | None, info: pydantic.ValidationInfo
-    ) -> date | None:
+    @model_validator(mode="after")
+    def validate_dates(self) -> Self:
         """Validate return date is after departure date.
 
-        Args:
-            v: Return date to validate
-            info: Validation info containing other fields
-
         Returns:
-            Validated return date
+            Validated model instance
 
         Raises:
             ValueError: If return date is before or same as departure date
         """
-        if v is not None and "departure_date" in info.data:
-            departure = info.data["departure_date"]
-            if v <= departure:
-                raise ValueError("Return date must be after departure date")
-        return v
+        if self.return_date and self.return_date <= self.departure_date:
+            raise ValueError("Return date must be after departure date")
+        return self
 
 
 class Flight(BaseModel):
@@ -104,17 +98,17 @@ class Flight(BaseModel):
     flight_number: str = Field(..., description="Flight number (e.g., 'AA123')")
     duration_minutes: int = Field(..., ge=0, description="Flight duration in minutes")
     stops: int = Field(default=0, ge=0, description="Number of stops (0 for direct)")
-    booking_class: str = Field(
+    booking_class: BookingClass = Field(
         default="economy", description="Cabin class (economy, business, first)"
     )
 
-    @field_validator("booking_class")
+    @field_validator("booking_class", mode="before")
     @classmethod
-    def validate_booking_class(cls, v: str) -> str:
-        """Validate booking class is one of the allowed values.
+    def normalize_booking_class(cls, v: str | BookingClass) -> BookingClass:
+        """Normalize booking class to lowercase for case-insensitive input.
 
         Args:
-            v: Booking class to validate
+            v: Booking class to normalize
 
         Returns:
             Lowercase booking class
@@ -122,11 +116,15 @@ class Flight(BaseModel):
         Raises:
             ValueError: If booking class is not valid
         """
-        allowed = {"economy", "premium_economy", "business", "first"}
-        normalized = v.lower()
-        if normalized not in allowed:
-            raise ValueError(f"Invalid booking class: {v}. Must be one of {allowed}")
-        return normalized
+        if isinstance(v, str):
+            normalized = v.lower()
+            valid_classes = {"economy", "premium_economy", "business", "first"}
+            if normalized not in valid_classes:
+                raise ValueError(
+                    f"Invalid booking class: {v}. Must be one of {valid_classes}"
+                )
+            return normalized  # type: ignore[return-value]
+        return v
 
 
 class MockFlight(Flight):

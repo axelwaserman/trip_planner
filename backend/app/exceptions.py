@@ -1,72 +1,50 @@
 """Exception hierarchy for Trip Planner application."""
 
+from dataclasses import dataclass
+
 
 class TripPlannerError(Exception):
     """Base exception for trip planner."""
 
 
+@dataclass
 class APIError(TripPlannerError):
     """Base API error with retry capability flag."""
 
-    def __init__(self, message: str, retryable: bool = False) -> None:
-        """Initialize API error.
+    message: str
+    retryable: bool = False
 
-        Args:
-            message: Error message
-            retryable: Whether this error should trigger a retry
-        """
-        super().__init__(message)
-        self.retryable = retryable
+    def __str__(self) -> str:
+        return self.message
 
 
+@dataclass
 class APITimeoutError(APIError):
     """Request timeout error - retryable."""
 
-    def __init__(self, message: str) -> None:
-        """Initialize timeout error.
-
-        Args:
-            message: Error message
-        """
-        super().__init__(message, retryable=True)
+    retryable: bool = True
 
 
+@dataclass
 class APIRateLimitError(APIError):
     """Rate limit exceeded error - retryable with backoff."""
 
-    def __init__(self, message: str, retry_after: int = 60) -> None:
-        """Initialize rate limit error.
-
-        Args:
-            message: Error message
-            retry_after: Seconds to wait before retrying
-        """
-        super().__init__(message, retryable=True)
-        self.retry_after = retry_after
+    retry_after: int = 60
+    retryable: bool = True
 
 
+@dataclass
 class APIServerError(APIError):
     """Server error (5xx) - retryable."""
 
-    def __init__(self, message: str) -> None:
-        """Initialize server error.
-
-        Args:
-            message: Error message
-        """
-        super().__init__(message, retryable=True)
+    retryable: bool = True
 
 
+@dataclass
 class APIClientError(APIError):
     """Client error (4xx) - not retryable."""
 
-    def __init__(self, message: str) -> None:
-        """Initialize client error.
-
-        Args:
-            message: Error message
-        """
-        super().__init__(message, retryable=False)
+    retryable: bool = False
 
 
 class FlightSearchError(TripPlannerError):
