@@ -3,7 +3,6 @@
 from collections.abc import Awaitable, Callable
 from datetime import date
 from decimal import Decimal
-from typing import Any
 
 from app.domain.models import FlightQuery
 from app.exceptions import FlightSearchError
@@ -33,25 +32,43 @@ def create_flight_search_tool(service: FlightService) -> Callable[..., Awaitable
     ) -> str:
         """Search for flights between two airports.
 
-        Use this tool when the user asks about flights, wants to search for flights,
-        or needs flight options for their trip. Always ask for origin, destination,
-        and departure date if not provided.
+        **When to use this tool:**
+        - User asks about flights, airfare, or travel options between cities/airports
+        - User wants to compare flight options or find the best flights
+        - User requests specific flight information (prices, times, duration, airlines)
+
+        **When NOT to use this tool:**
+        - General greetings or small talk ("Hello", "How are you?")
+        - Questions about hotels, cars, restaurants, or non-flight travel
+        - Already have flight search results and user is just asking follow-up questions about them
+
+        **Handling ambiguous requests:**
+        - If city name is provided instead of IATA code, try to infer the most likely airport
+          (e.g., "Los Angeles" -> "LAX", "New York" -> "JFK", "San Francisco" -> "SFO")
+        - If origin, destination, or date is missing, ask the user for clarification
+        - If date is relative ("tomorrow", "next week"), calculate the actual date
+        - If user says "flights to X" without origin, ask where they're flying from
+
+        **Expected output format:**
+        - Returns formatted text with up to {limit} flight options
+        - Each flight includes: carrier, flight number, times, duration, stops, price, booking class
+        - Includes Flight ID for potential future booking reference
+        - If no flights found, suggests broadening search criteria
 
         Args:
             origin: Origin airport IATA code (3 letters, e.g., "LAX", "JFK")
             destination: Destination airport IATA code (3 letters, e.g., "SFO", "ORD")
             departure_date: Departure date in YYYY-MM-DD format (e.g., "2025-06-15")
-            passengers: Number of passengers (default: 1)
-            sort_by: Sort results by "price", "duration", or "departure" (default: "price")
+            passengers: Number of passengers (default: 1, min: 1, max: 9)
+            sort_by: Sort results by "price" (default), "duration", or "departure"
             max_price: Optional maximum price filter in USD (e.g., 500.00)
             max_duration: Optional maximum duration filter in minutes (e.g., 360 for 6 hours)
-            max_stops: Optional maximum number of stops - 0 (direct), 1, or 2 (default: no filter)
+            max_stops: Optional maximum number of stops - 0 (direct only), 1, or 2 (default: no filter)
             limit: Maximum number of results to return (default: 5, max: 20)
 
         Returns:
             Formatted string with flight options or error message.
-            Returns flight details including: flight number, carrier, departure/arrival times,
-            duration, stops, price, and booking class.
+            Always returns a string - never raises exceptions to the LLM.
         """
         try:
             # Validate and parse inputs

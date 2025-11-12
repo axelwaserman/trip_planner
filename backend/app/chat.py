@@ -1,11 +1,11 @@
-"""Chat service using LangChain agent with tools."""
+"""Chat service using LangChain with tool calling via bind_tools()."""
 
 import uuid
 from collections.abc import AsyncGenerator
 
-from langchain.agents import create_agent
 from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.tools import StructuredTool
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 
 from app.config import settings
@@ -14,7 +14,7 @@ from app.tools.flight_search import create_flight_search_tool
 
 
 class ChatService:
-    """Service for managing chat conversations with LangChain agent."""
+    """Service for managing chat conversations with LangChain and tool calling."""
 
     def __init__(self, flight_service: FlightService) -> None:
         """Initialize the chat service with tools.
@@ -22,37 +22,21 @@ class ChatService:
         Args:
             flight_service: FlightService instance for flight search tool
         """
+        # Store chat histories by session_id
+        self.store: dict[str, InMemoryChatMessageHistory] = {}
+
+        # Create flight search tool function
+        flight_search_func = create_flight_search_tool(flight_service)
+
+        # Convert to LangChain tool decorator format
+        self.search_flights_tool = tool(flight_search_func)
+
+        # Create LLM with tools bound (correct API per LangChain docs)
         self.llm = ChatOllama(
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
             temperature=0.7,
-        )
-
-        # Store chat histories by session_id
-        self.store: dict[str, InMemoryChatMessageHistory] = {}
-
-        # Create tools with closure over services
-        flight_search_func = create_flight_search_tool(flight_service)
-        tools = [
-            StructuredTool.from_function(
-                coroutine=flight_search_func,
-                name="search_flights",
-                description=flight_search_func.__doc__ or "Search for flights",
-            )
-        ]
-
-        # Create ReAct agent using LangGraph
-        # Note: Using langchain.agents.create_agent (LangChain 1.0 API)
-        # which wraps LangGraph's create_react_agent
-        self.agent_executor = create_agent(
-            model=self.llm,
-            tools=tools,
-            system_prompt=(
-                "You are a helpful AI trip planning assistant. "
-                "Help users plan their trips by searching for flights, answering questions, "
-                "and providing recommendations. Use the available tools when needed to help users."
-            ),
-        )
+        ).bind_tools([self.search_flights_tool])
 
     def _get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         """Get or create chat history for a session.
@@ -68,7 +52,7 @@ class ChatService:
         return self.store[session_id]
 
     async def chat(self, message: str, session_id: str | None = None) -> tuple[str, str]:
-        """Send a message and get a response.
+        """Send a message and get a response with tool calling support.
 
         Args:
             message: User message
@@ -83,23 +67,44 @@ class ChatService:
         # Get chat history
         history = self._get_session_history(session_id)
 
-        # Invoke agent with message and history
-        result = await self.agent_executor.ainvoke(
-            {"messages": [*history.messages, ("user", message)]}
-        )
+        # Build messages with history
+        from langchain_core.messages import BaseMessage
+        
+        history_messages: list[BaseMessage] = list(history.messages)
+        messages: list[BaseMessage] = [*history_messages, HumanMessage(content=message)]
 
-        # Extract response from agent output
-        # LangGraph agent returns dict with 'messages' key containing message list
-        messages = result.get("messages", [])
-        if messages:
-            last_message = messages[-1]
-            response_text = (
-                last_message.content
-                if hasattr(last_message, "content")
-                else str(last_message)
-            )
+        # Invoke LLM (may return tool calls)
+        result = await self.llm.ainvoke(messages)
+
+        # Check if LLM wants to call tools
+        response_text: str
+        if isinstance(result, AIMessage) and result.tool_calls:
+            # Execute tool calls
+            from langchain_core.messages import ToolMessage
+            
+            tool_messages: list[ToolMessage] = []
+            for tool_call in result.tool_calls:
+                if tool_call["name"] == "search_flights":
+                    # Execute the tool
+                    tool_result = await self.search_flights_tool.ainvoke(tool_call["args"])
+                    tool_messages.append(
+                        ToolMessage(
+                            content=str(tool_result),
+                            tool_call_id=tool_call.get("id", ""),
+                        )
+                    )
+
+            # Get final response after tool execution
+            messages_with_tools: list[BaseMessage] = [
+                *messages,
+                result,  # AI message with tool calls
+                *tool_messages,  # Tool results
+            ]
+            final_result = await self.llm.ainvoke(messages_with_tools)
+            response_text = str(final_result.content) if hasattr(final_result, "content") else str(final_result)
         else:
-            response_text = "I'm sorry, I couldn't generate a response."
+            # No tool calls, use response directly
+            response_text = str(result.content) if hasattr(result, "content") else str(result)
 
         # Add messages to history
         history.add_user_message(message)

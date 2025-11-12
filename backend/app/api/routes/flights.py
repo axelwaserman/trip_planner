@@ -1,6 +1,7 @@
 """Flight search API endpoints."""
 
 from decimal import Decimal
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -12,10 +13,8 @@ from app.services.flight import FlightService, SortBy
 
 router = APIRouter(prefix="/flights", tags=["flights"])
 
-# Singleton mock client for consistent flight IDs across requests
-_mock_client: FlightAPIClient | None = None
 
-
+@lru_cache
 def get_flight_client() -> FlightAPIClient:
     """Dependency factory for flight API client.
 
@@ -23,13 +22,11 @@ def get_flight_client() -> FlightAPIClient:
         FlightAPIClient instance (MockFlightAPIClient for now)
 
     Note:
-        Returns singleton MockFlightAPIClient to maintain consistent
-        flight IDs and cache across requests.
+        Uses lru_cache to return singleton MockFlightAPIClient to maintain
+        consistent flight IDs and cache across requests. Will be replaced
+        with real API client in Phase 5.
     """
-    global _mock_client
-    if _mock_client is None:
-        _mock_client = MockFlightAPIClient(seed=42)
-    return _mock_client
+    return MockFlightAPIClient(seed=42)
 
 
 def get_flight_service(
