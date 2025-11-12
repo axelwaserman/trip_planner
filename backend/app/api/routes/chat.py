@@ -47,17 +47,37 @@ async def chat(
         """Generate Server-Sent Events for streaming response."""
         try:
             session_id = None
-            async for chunk, sid in chat_service.chat_stream(request.message, request.session_id):
+            async for chunk, sid, event_type, metadata in chat_service.chat_stream(request.message, request.session_id):
                 session_id = sid
-                # Send chunk as SSE
-                data = json.dumps({"chunk": chunk, "session_id": session_id})
-                yield f"data: {data}\n\n"
+                
+                # Send different SSE events based on event_type
+                if event_type == "tool_call":
+                    data = json.dumps({
+                        "type": "tool_call",
+                        "session_id": session_id,
+                        "metadata": metadata
+                    })
+                    yield f"data: {data}\n\n"
+                elif event_type == "tool_result":
+                    data = json.dumps({
+                        "type": "tool_result",
+                        "session_id": session_id,
+                        "metadata": metadata
+                    })
+                    yield f"data: {data}\n\n"
+                elif event_type == "content":
+                    data = json.dumps({
+                        "type": "content",
+                        "chunk": chunk,
+                        "session_id": session_id
+                    })
+                    yield f"data: {data}\n\n"
 
             # Send done event
-            yield f"data: {json.dumps({'done': True, 'session_id': session_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
         except Exception as e:
             # Send error event
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
     return StreamingResponse(
         event_generator(),

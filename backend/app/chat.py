@@ -2,6 +2,7 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.messages import AIMessage, HumanMessage
@@ -26,31 +27,6 @@ class ChatService:
             flight_service: FlightService instance for flight search tool
         """
         # Use global shared store for conversation history
-        self.store = _global_chat_store
-
-import uuid
-from collections.abc import AsyncGenerator
-
-from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import tool
-from langchain_ollama import ChatOllama
-
-from app.config import settings
-from app.services.flight import FlightService
-from app.tools.flight_search import create_flight_search_tool
-
-
-class ChatService:
-    """Service for managing chat conversations with LangChain and tool calling."""
-
-    def __init__(self, flight_service: FlightService) -> None:
-        """Initialize the chat service with tools.
-
-        Args:
-            flight_service: FlightService instance for flight search tool
-        """
-        # Point to global shared store - all ChatService instances share conversation history
         self.store = _global_chat_store
 
         # Create flight search tool function
@@ -142,7 +118,7 @@ class ChatService:
 
     async def chat_stream(
         self, message: str, session_id: str | None = None
-    ) -> AsyncGenerator[tuple[str, str]]:
+    ) -> AsyncGenerator[tuple[str, str, str, dict[str, Any] | None], None]:
         """Stream a chat response chunk by chunk with tool calling support.
 
         Args:
@@ -150,7 +126,11 @@ class ChatService:
             session_id: Optional session ID for conversation continuity
 
         Yields:
-            Tuples of (chunk, session_id) where chunk is a piece of the response
+            Tuples of (chunk, session_id, event_type, metadata) where:
+            - chunk: Content text or empty string
+            - session_id: Session identifier
+            - event_type: "content" | "tool_call" | "tool_result"
+            - metadata: Event-specific data or None
         """
         if session_id is None:
             session_id = str(uuid.uuid4())
@@ -175,22 +155,41 @@ class ChatService:
             if hasattr(chunk, "content") and chunk.content:
                 # Stream content chunks
                 accumulated_content += chunk.content
-                yield chunk.content, session_id
+                yield chunk.content, session_id, "content", None
 
             # Check if this chunk contains tool calls
             if isinstance(chunk, AIMessage) and chunk.tool_calls:
+                import time
                 tool_was_called = True
                 tool_call_message = chunk  # Save the tool call message
                 # Execute tool calls
                 from langchain_core.messages import ToolMessage
 
-                yield "\n\n🔍 **Searching for flights...**\n\n", session_id
-
                 tool_messages: list[ToolMessage] = []
                 for tool_call in chunk.tool_calls:
                     if tool_call["name"] == "search_flights":
+                        # Emit tool_call event with metadata
+                        tool_start_time = time.time()
+                        yield "", session_id, "tool_call", {
+                            "tool_name": tool_call["name"],
+                            "arguments": tool_call["args"],
+                            "started_at": tool_start_time,
+                            "status": "running"
+                        }
+                        
                         # Execute the tool
                         tool_result = await self.search_flights_tool.ainvoke(tool_call["args"])
+                        tool_end_time = time.time()
+                        elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
+                        
+                        # Emit tool_result event with metadata
+                        yield "", session_id, "tool_result", {
+                            "summary": f"Found flights from {tool_call['args'].get('origin')} to {tool_call['args'].get('destination')}",
+                            "full_result": str(tool_result),
+                            "status": "success",
+                            "elapsed_ms": elapsed_ms
+                        }
+                        
                         tool_messages.append(
                             ToolMessage(
                                 content=str(tool_result),
@@ -212,7 +211,7 @@ class ChatService:
                 async for final_chunk in self.llm.astream(messages_with_tools):
                     if hasattr(final_chunk, "content") and final_chunk.content:
                         accumulated_final += final_chunk.content
-                        yield final_chunk.content, session_id
+                        yield final_chunk.content, session_id, "content", None
 
                 accumulated_content = accumulated_final
                 break  # Exit the outer loop since we've handled the tool call
@@ -230,7 +229,7 @@ class ChatService:
 
         # If no content was accumulated, yield empty string to maintain stream
         if not accumulated_content:
-            yield "", session_id
+            yield "", session_id, "content", None
 
 
 def create_chat_service(flight_service: FlightService) -> ChatService:
