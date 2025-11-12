@@ -76,35 +76,60 @@ Build an AI-powered trip planning chat agent that can leverage real-world APIs t
 **Goal**: Agent can call a flight search tool and incorporate results into conversation
 
 ### Tasks
-- [ ] Design flight search tool interface (inputs: origin, destination, dates)
-- [ ] Create mock flight search function (returns realistic dummy data)
-- [ ] Integrate tool with LangChain agent (function calling)
-- [ ] Update agent to use ReAct or OpenAI Functions pattern
-- [ ] Add tool response formatting
-- [ ] Test agent's tool calling behavior
-- [ ] Add validation for tool inputs
-- [ ] Handle tool execution errors gracefully
+- [ ] **Checkpoint 1**: Data models and base client abstraction
+  - [ ] Design Pydantic models: `FlightQuery`, `Flight`, `FlightResults`
+  - [ ] Create abstract base class: `FlightAPIClient(ABC)`
+  - [ ] Define retry decorator with circuit breaker pattern
+  - [ ] Add custom exception hierarchy for API errors
+  - [ ] Write unit tests for models and validators
+- [ ] **Checkpoint 2**: Mock client implementation
+  - [ ] Implement `MockFlightAPIClient` with realistic dummy data
+  - [ ] Add flight data generation logic (varied prices, airlines, times)
+  - [ ] Write unit tests for mock client
+  - [ ] Verify mock client returns valid `Flight` objects
+- [ ] **Checkpoint 3**: Service layer
+  - [ ] Create `FlightService` class with business logic
+  - [ ] Implement sorting and filtering logic
+  - [ ] Add dependency injection setup (FastAPI Depends)
+  - [ ] Write unit tests for service layer
+- [ ] **Checkpoint 4**: LangChain tool integration
+  - [ ] Create tool factory: `create_flight_search_tool(service)`
+  - [ ] Integrate tool with LangChain agent (ReAct or function calling)
+  - [ ] Add tool response formatting for LLM
+  - [ ] Update chat service to use agent with tools
+  - [ ] Add validation for tool inputs (IATA codes, dates)
+  - [ ] Handle tool execution errors (return to LLM for correction)
+  - [ ] Write functional tests for tool calling
+- [ ] **Checkpoint 5**: E2E testing and documentation
+  - [ ] E2E test: User message → Agent → Tool call → Mock API → Response
+  - [ ] Test error handling paths (invalid input, API failures)
+  - [ ] Test streaming with tool calls
+  - [ ] Update API documentation
+  - [ ] Review and refactor suggestions
 
-**Learning Focus**: LangChain tools/agents, function calling, tool integration patterns
+**Learning Focus**: LangChain tools/agents, function calling, tool integration patterns, retry logic, circuit breakers
 
 ---
 
-## Phase 4: Basic React Frontend
-**Goal**: Functional chat UI that connects to backend
+## Phase 4: Enhanced Frontend & LLM Provider Flexibility
+**Goal**: Improve UI to show tool usage + support multiple LLM providers
 
 ### Tasks
-- [ ] Initialize React + TypeScript project (Vite)
-- [ ] Set up Tailwind CSS
-- [ ] Create chat interface component
-- [ ] Implement message list with user/agent messages
-- [ ] Add input field and send functionality
-- [ ] Connect to FastAPI backend (fetch/axios)
-- [ ] Add loading states
-- [ ] Basic error handling in UI
 - [ ] Display tool usage in chat (show when agent searches flights)
-- [ ] Make it responsive
+- [ ] Add loading states for tool execution
+- [ ] Improve message rendering (tool calls, results, thinking)
+- [ ] Make UI responsive for mobile
+- [ ] Add LLM provider selection UI (dropdown or config)
+- [ ] Create generic LLM provider wrapper/factory
+  - [ ] Support Ollama (local)
+  - [ ] Support Gemini (API key via UI or env var)
+  - [ ] Support OpenAI (API key via UI or env var)
+  - [ ] Support Anthropic (API key via UI or env var)
+- [ ] Add LLM provider configuration to backend settings
+- [ ] Test switching between providers
+- [ ] Update documentation for multi-provider setup
 
-**Learning Focus**: React basics, TypeScript, API integration, Tailwind
+**Learning Focus**: React UI patterns, LLM provider abstraction, configuration management
 
 ---
 
@@ -180,10 +205,12 @@ These are ideas to explore after MVP is working:
 ---
 
 ## Current Status
-- **Current Phase**: Phase 2 - ✅ COMPLETED, Ready for Phase 3
-- **Last Updated**: 2025-01-XX
+- **Current Phase**: Phase 3 - Mock Flight Search Tool (Ready to start)
+- **Last Updated**: 2025-01-12
 - **Blockers**: None
-- **Next Steps**: Implement mock flight search tool with LangChain tool/function calling
+- **Next Steps**: 
+  1. Review and finalize copilot-instructions.md
+  2. Begin Phase 3 Checkpoint 1 (data models + base client abstraction)
 
 ### Completed Milestones
 - ✅ Full project structure with monorepo setup (backend + frontend)
@@ -195,3 +222,4 @@ These are ideas to explore after MVP is working:
 - ✅ React chat UI with Chakra UI v3, markdown rendering (tables, lists, code)
 - ✅ All tests passing (6/6)
 - ✅ Vite proxy configured for seamless API calls
+- ✅ Copilot instructions finalized with team workflow
