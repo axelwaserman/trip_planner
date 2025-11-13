@@ -48,8 +48,31 @@ export function ChatInterface() {
     scrollToBottom()
   }, [messages, isLoading])
 
+  // Initialize session on component mount (one session per browser tab)
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const response = await fetch('/api/chat/session', { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to create session')
+        }
+        const { session_id } = await response.json()
+        setSessionId(session_id)
+        console.log('Session created:', session_id)
+      } catch (error) {
+        console.error('Failed to create session:', error)
+        // Show error to user
+        setMessages([{
+          role: 'assistant',
+          content: '❌ Failed to initialize chat session. Please refresh the page.',
+        }])
+      }
+    }
+    initSession()
+  }, [])  // Empty deps - only run on mount
+
   const sendMessage = async () => {
-    if (!input.trim() || isLoading) return
+    if (!input.trim() || isLoading || !sessionId) return
 
     const userMessage = input.trim()
     setInput('')

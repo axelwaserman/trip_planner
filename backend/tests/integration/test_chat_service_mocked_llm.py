@@ -10,6 +10,7 @@ import pytest
 
 from app.chat import ChatService
 from app.domain.chat import ToolCallMetadata, ToolResultMetadata
+from app.infrastructure.storage.session import InMemorySessionStore
 from app.services.flight import FlightService
 from tests.fixtures.mock_llm import (
     MockChatModel,
@@ -23,18 +24,11 @@ from tests.fixtures.mock_llm import (
 pytestmark = [pytest.mark.integration]
 
 
-@pytest.fixture
-def mock_flight_service() -> FlightService:
-    """Create a real FlightService with mocked client."""
-    from app.infrastructure.clients.mock import MockFlightAPIClient
-
-    client = MockFlightAPIClient()
-    return FlightService(client=client)
-
-
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_chat_stream_emits_tool_call_event(mock_flight_service: FlightService) -> None:
+async def test_chat_stream_emits_tool_call_event(
+    mock_flight_service: FlightService, session_store: InMemorySessionStore
+) -> None:
     """Test that chat_stream emits tool_call event when LLM requests tool."""
     with patch("app.chat.ChatOllama") as mock_ollama_class:
         # Create mock LLM that will call search_flights tool
@@ -43,11 +37,16 @@ async def test_chat_stream_emits_tool_call_event(mock_flight_service: FlightServ
         mock_ollama_instance.bind_tools.return_value = mock_llm
         mock_ollama_class.return_value = mock_ollama_instance
 
-        chat_service = ChatService(flight_service=mock_flight_service)
+        chat_service = ChatService(
+            flight_service=mock_flight_service, session_store=session_store
+        )
+        session = await session_store.create_session()
 
         # Stream chat and collect events
         events = []
-        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+        async for event in chat_service.chat_stream(
+            "Find flights from LAX to JFK", session.session_id
+        ):
             events.append((event.event_type, event.metadata))
 
         # Verify tool_call event was emitted
@@ -65,7 +64,9 @@ async def test_chat_stream_emits_tool_call_event(mock_flight_service: FlightServ
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_chat_stream_emits_tool_result_event(mock_flight_service: FlightService) -> None:
+async def test_chat_stream_emits_tool_result_event(
+    mock_flight_service: FlightService, session_store: InMemorySessionStore
+) -> None:
     """Test that chat_stream emits tool_result event after tool execution."""
     with patch("app.chat.ChatOllama") as mock_ollama_class:
         # Mock LLM that calls tool
@@ -74,11 +75,16 @@ async def test_chat_stream_emits_tool_result_event(mock_flight_service: FlightSe
         mock_ollama_instance.bind_tools.return_value = mock_llm
         mock_ollama_class.return_value = mock_ollama_instance
 
-        chat_service = ChatService(flight_service=mock_flight_service)
+        chat_service = ChatService(
+            flight_service=mock_flight_service, session_store=session_store
+        )
+        session = await session_store.create_session()
 
         # Stream chat and collect events
         events = []
-        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+        async for event in chat_service.chat_stream(
+            "Find flights from LAX to JFK", session.session_id
+        ):
             events.append((event.event_type, event.metadata))
 
         # Verify tool_result event was emitted
@@ -98,7 +104,7 @@ async def test_chat_stream_emits_tool_result_event(mock_flight_service: FlightSe
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chat_stream_executes_tool_with_correct_arguments(
-    mock_flight_service: FlightService,
+    mock_flight_service: FlightService, session_store: InMemorySessionStore
 ) -> None:
     """Test that tool is executed with arguments from LLM."""
     with patch("app.chat.ChatOllama") as mock_ollama_class:
@@ -107,11 +113,16 @@ async def test_chat_stream_executes_tool_with_correct_arguments(
         mock_ollama_instance.bind_tools.return_value = mock_llm
         mock_ollama_class.return_value = mock_ollama_instance
 
-        chat_service = ChatService(flight_service=mock_flight_service)
+        chat_service = ChatService(
+            flight_service=mock_flight_service, session_store=session_store
+        )
+        session = await session_store.create_session()
 
         # Collect tool call arguments
         tool_args = None
-        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+        async for event in chat_service.chat_stream(
+            "Find flights from LAX to JFK", session.session_id
+        ):
             if event.event_type == "tool_call" and event.metadata:
                 tool_args = event.metadata.arguments
 
@@ -125,7 +136,7 @@ async def test_chat_stream_executes_tool_with_correct_arguments(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chat_stream_no_tool_events_for_general_conversation(
-    mock_flight_service: FlightService,
+    mock_flight_service: FlightService, session_store: InMemorySessionStore
 ) -> None:
     """Test that no tool events are emitted for general conversation."""
     with patch("app.chat.ChatOllama") as mock_ollama_class:
@@ -135,11 +146,16 @@ async def test_chat_stream_no_tool_events_for_general_conversation(
         mock_ollama_instance.bind_tools.return_value = mock_llm
         mock_ollama_class.return_value = mock_ollama_instance
 
-        chat_service = ChatService(flight_service=mock_flight_service)
+        chat_service = ChatService(
+            flight_service=mock_flight_service, session_store=session_store
+        )
+        session = await session_store.create_session()
 
         # Stream chat and collect events
         events = []
-        async for event in chat_service.chat_stream("Hello, how are you?"):
+        async for event in chat_service.chat_stream(
+            "Hello, how are you?", session.session_id
+        ):
             events.append((event.event_type, event.metadata))
 
         # Verify no tool events
@@ -156,7 +172,7 @@ async def test_chat_stream_no_tool_events_for_general_conversation(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chat_stream_includes_summary_in_tool_result(
-    mock_flight_service: FlightService,
+    mock_flight_service: FlightService, session_store: InMemorySessionStore
 ) -> None:
     """Test that tool_result includes a summary (first 2-3 lines)."""
     with patch("app.chat.ChatOllama") as mock_ollama_class:
@@ -165,11 +181,16 @@ async def test_chat_stream_includes_summary_in_tool_result(
         mock_ollama_instance.bind_tools.return_value = mock_llm
         mock_ollama_class.return_value = mock_ollama_instance
 
-        chat_service = ChatService(flight_service=mock_flight_service)
+        chat_service = ChatService(
+            flight_service=mock_flight_service, session_store=session_store
+        )
+        session = await session_store.create_session()
 
         # Get tool result
         result_metadata = None
-        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+        async for event in chat_service.chat_stream(
+            "Find flights from LAX to JFK", session.session_id
+        ):
             if event.event_type == "tool_result" and event.metadata:
                 result_metadata = event.metadata
                 break
@@ -189,7 +210,7 @@ async def test_chat_stream_includes_summary_in_tool_result(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chat_stream_measures_tool_execution_time(
-    mock_flight_service: FlightService,
+    mock_flight_service: FlightService, session_store: InMemorySessionStore
 ) -> None:
     """Test that tool execution time is measured and included in metadata."""
     with patch("app.chat.ChatOllama") as mock_ollama_class:
@@ -198,11 +219,16 @@ async def test_chat_stream_measures_tool_execution_time(
         mock_ollama_instance.bind_tools.return_value = mock_llm
         mock_ollama_class.return_value = mock_ollama_instance
 
-        chat_service = ChatService(flight_service=mock_flight_service)
+        chat_service = ChatService(
+            flight_service=mock_flight_service, session_store=session_store
+        )
+        session = await session_store.create_session()
 
         # Get tool result
         result_metadata = None
-        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+        async for event in chat_service.chat_stream(
+            "Find flights from LAX to JFK", session.session_id
+        ):
             if event.event_type == "tool_result" and event.metadata:
                 result_metadata = event.metadata
                 break
@@ -217,7 +243,7 @@ async def test_chat_stream_measures_tool_execution_time(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chat_stream_preserves_session_across_tool_calls(
-    mock_flight_service: FlightService,
+    mock_flight_service: FlightService, session_store: InMemorySessionStore
 ) -> None:
     """Test that session_id is consistent across all events."""
     with patch("app.chat.ChatOllama") as mock_ollama_class:
@@ -226,24 +252,27 @@ async def test_chat_stream_preserves_session_across_tool_calls(
         mock_ollama_instance.bind_tools.return_value = mock_llm
         mock_ollama_class.return_value = mock_ollama_instance
 
-        chat_service = ChatService(flight_service=mock_flight_service)
+        chat_service = ChatService(
+            flight_service=mock_flight_service, session_store=session_store
+        )
+        session = await session_store.create_session()
 
         # Collect session IDs
         session_ids = set()
         async for event in chat_service.chat_stream(
-            "Find flights from LAX to JFK", session_id="test-session-123"
+            "Find flights from LAX to JFK", session.session_id
         ):
             session_ids.add(event.session_id)
 
         # All events should have the same session ID
         assert len(session_ids) == 1
-        assert "test-session-123" in session_ids
+        assert session.session_id in session_ids
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chat_stream_adds_tool_messages_to_history(
-    mock_flight_service: FlightService,
+    mock_flight_service: FlightService, session_store: InMemorySessionStore
 ) -> None:
     """Test that tool calls and results are added to conversation history."""
     with patch("app.chat.ChatOllama") as mock_ollama_class:
@@ -252,15 +281,19 @@ async def test_chat_stream_adds_tool_messages_to_history(
         mock_ollama_instance.bind_tools.return_value = mock_llm
         mock_ollama_class.return_value = mock_ollama_instance
 
-        chat_service = ChatService(flight_service=mock_flight_service)
+        chat_service = ChatService(
+            flight_service=mock_flight_service, session_store=session_store
+        )
+        session = await session_store.create_session()
 
         # First message with tool call
-        session_id = None
-        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
-            session_id = event.session_id
+        async for event in chat_service.chat_stream(
+            "Find flights from LAX to JFK", session.session_id
+        ):
+            pass
 
         # Check conversation history
-        history = chat_service._get_session_history(session_id)
+        history = await chat_service._get_session_history(session.session_id)
         messages = list(history.messages)
 
         # Should have: user message, AI with tool calls, tool result, final AI response

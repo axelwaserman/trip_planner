@@ -619,14 +619,91 @@ These are ideas to explore after MVP is working:
 
 ---
 
+## Pre-Phase 4 Refactor: Technical Debt Resolution
+**Goal**: Address critical architectural issues before Phase 4 implementation
+
+### Refactoring Tasks (Estimated: 17-23 hours over 2-3 days)
+
+**Priority 0 (Must Fix - 10-14h):**
+1. **Session Management & Multi-Tab Support** (3-4h)
+   - Create `ChatSession` domain model with metadata
+   - Implement `SessionStore` ABC with `InMemorySessionStore`
+   - Add session lifecycle API: `POST /api/chat/session`
+   - Remove global `_global_chat_store` anti-pattern
+   - Frontend: Initialize session per browser tab on mount
+
+2. **LLM Provider Abstraction Layer** (4-5h)
+   - Create `LLMProvider` Protocol with `ainvoke()`, `astream()`, `bind_tools()`
+   - Implement `OllamaProvider` class
+   - Create `LLMProviderFactory` with session-scoped provider selection
+   - Refactor `ChatService` to accept injected provider
+   - Store provider choice in `ChatSession.metadata`
+
+3. **StreamEvent Inheritance (Single Responsibility)** (2-3h)
+   - Replace monolithic `StreamEvent` with event hierarchy
+   - Create: `ContentEvent`, `ThinkingEvent`, `ToolCallEvent`, `ToolResultEvent`, `ErrorEvent`
+   - Use discriminated union: `ChatStreamEvent = ContentEvent | ThinkingEvent | ...`
+   - Update SSE serialization and frontend parsing
+
+4. **JSON Tool Output (LLM-Friendly Format)** (1-2h)
+   - Refactor `search_flights()` to return structured JSON
+   - Include: status, query, results with nested objects
+   - Remove verbose string formatting (let LLM present naturally)
+   - Update tool docstring for JSON parsing instructions
+
+**Priority 1 (Should Fix - 5-7h):**
+5. **Frontend State Management with useReducer** (3-4h)
+   - Create `ChatAction` discriminated union
+   - Implement `chatReducer` with immutable updates
+   - Extract logic into `useChatStream` custom hook
+   - Remove imperative index tracking and side effects
+
+6. **Structured Logging (FastAPI Best Practices)** (2h)
+   - Add `structlog` dependency
+   - Create `RequestLoggingMiddleware` with request_id
+   - Instrument chat streaming with timing and error logging
+   - Add contextual logging to ChatService
+
+**Priority 2 (Quick Wins - 2-3h):**
+7. **Pydantic Model Validators** (30min)
+   - Add `validate_flight_times()`: arrival > departure
+   - Add `validate_future_date()`: departure_date >= today
+   - Add `validate_different_airports()`: origin != destination
+
+8. **Deduplicate Test Logic** (1-2h)
+   - Extract `create_mock_flight()` factory to `tests/fixtures/flights.py`
+   - Extract `parse_sse_events()` helper to `tests/utils/sse.py`
+   - Refactor duplicate setup code in E2E tests
+
+9. **Fix Dependency Injection Pattern** (30min)
+   - Remove `@lru_cache` singleton pattern
+   - Use FastAPI `lifespan` context manager
+   - Store singletons in `app.state` (flight_client, session_store)
+
+10. **XSS Protection for Markdown** (5min)
+    - Install `rehype-sanitize`
+    - Add to ReactMarkdown `rehypePlugins`
+
+**Done Criteria:**
+- ✅ All 122 tests passing
+- ✅ `just typecheck` passes (no type errors)
+- ✅ Multi-tab support: Each browser tab has independent session
+- ✅ Structured logs with request_id correlation
+- ✅ No global mutable state in codebase
+- ✅ ChatService.chat() removed (streaming only)
+
+**Status**: 🔄 **IN PROGRESS** (Task 1: Session Management)
+
+---
+
 ## Current Status
-- **Current Phase**: Phase 3 - Mock Flight Search Tool ✅ **COMPLETE**
-- **Last Updated**: 2025-11-12
+- **Current Phase**: Pre-Phase 4 Refactor ✅ **IN PROGRESS**
+- **Last Updated**: 2025-11-13
 - **Blockers**: None
 - **Next Steps**: 
-  1. Begin Phase 4 - Enhanced Frontend & LLM Provider Flexibility
-  2. Display tool usage indicators in frontend UI
-  3. Add LLM provider abstraction for Gemini/OpenAI/Anthropic support
+  1. ✅ Implement Session Management (Task 1)
+  2. Implement LLM Provider Abstraction (Task 2)
+  3. Refactor StreamEvent with inheritance (Task 3)
 
 ### Completed Milestones
 - ✅ Full project structure with monorepo setup (backend + frontend)

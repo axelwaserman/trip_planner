@@ -11,24 +11,22 @@ from langchain_ollama import ChatOllama
 
 from app.config import settings
 from app.domain.chat import StreamEvent, ToolCallMetadata, ToolResultMetadata
+from app.infrastructure.storage.session import SessionStore
 from app.services.flight import FlightService
 from app.tools.flight_search import create_flight_search_tool
-
-# Global shared store for conversation history across all ChatService instances
-_global_chat_store: dict[str, InMemoryChatMessageHistory] = {}
 
 
 class ChatService:
     """Service for managing chat conversations with LangChain and tool calling."""
 
-    def __init__(self, flight_service: FlightService) -> None:
-        """Initialize the chat service with tools.
+    def __init__(self, flight_service: FlightService, session_store: SessionStore) -> None:
+        """Initialize the chat service with tools and session storage.
 
         Args:
             flight_service: FlightService instance for flight search tool
+            session_store: SessionStore for managing conversation history
         """
-        # Use global shared store for conversation history
-        self.store = _global_chat_store
+        self.session_store = session_store
 
         # Create flight search tool function
         flight_search_func = create_flight_search_tool(flight_service)
@@ -44,8 +42,8 @@ class ChatService:
             reasoning=True,  # Enable thinking tokens for qwen3:4b
         ).bind_tools([self.search_flights_tool])
 
-    def _get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
-        """Get or create chat history for a session.
+    async def _get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
+        """Get chat history for a session from storage.
 
         Args:
             session_id: Session identifier
@@ -53,25 +51,23 @@ class ChatService:
         Returns:
             Chat message history for the session
         """
-        if session_id not in self.store:
-            self.store[session_id] = InMemoryChatMessageHistory()
-        return self.store[session_id]
+        return await self.session_store.get_history(session_id)
 
-    async def chat(self, message: str, session_id: str | None = None) -> tuple[str, str]:
+    async def chat(self, message: str, session_id: str) -> tuple[str, str]:
         """Send a message and get a response with tool calling support.
 
         Args:
             message: User message
-            session_id: Optional session ID for conversation continuity
+            session_id: Session ID (required - no auto-generation)
 
         Returns:
             Tuple of (response, session_id)
-        """
-        if session_id is None:
-            session_id = str(uuid.uuid4())
 
-        # Get chat history
-        history = self._get_session_history(session_id)
+        Note:
+            This method is deprecated. Use chat_stream() for streaming responses.
+        """
+        # Get chat history from session store
+        history = await self._get_session_history(session_id)
 
         # Build messages with history
         from langchain_core.messages import BaseMessage
@@ -119,22 +115,19 @@ class ChatService:
         return response_text, session_id
 
     async def chat_stream(
-        self, message: str, session_id: str | None = None
+        self, message: str, session_id: str
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a chat response chunk by chunk with tool calling support.
 
         Args:
             message: User message
-            session_id: Optional session ID for conversation continuity
+            session_id: Session ID (required - no auto-generation)
 
         Yields:
             StreamEvent objects with chunk, session_id, event_type, and metadata
         """
-        if session_id is None:
-            session_id = str(uuid.uuid4())
-
-        # Get chat history
-        history = self._get_session_history(session_id)
+        # Get chat history from session store
+        history = await self._get_session_history(session_id)
 
         # Build messages with history
         from langchain_core.messages import BaseMessage
@@ -275,13 +268,14 @@ class ChatService:
             )
 
 
-def create_chat_service(flight_service: FlightService) -> ChatService:
+def create_chat_service(flight_service: FlightService, session_store: SessionStore) -> ChatService:
     """Factory function to create ChatService with dependencies.
 
     Args:
         flight_service: FlightService instance for tools
+        session_store: SessionStore for conversation history
 
     Returns:
         Configured ChatService instance
     """
-    return ChatService(flight_service=flight_service)
+    return ChatService(flight_service=flight_service, session_store=session_store)

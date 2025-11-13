@@ -13,61 +13,65 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.chat import ChatService
+from app.infrastructure.storage.session import InMemorySessionStore
 from app.services.flight import FlightService
 
 
-@pytest.fixture
-def mock_flight_service() -> AsyncMock:
-    """Create mock flight service."""
-    return AsyncMock(spec=FlightService)
-
-
-def test_chat_service_creates_agent_with_tools(
+@pytest.mark.asyncio
+async def test_chat_service_creates_agent_with_tools(
     mock_flight_service: AsyncMock,
+    session_store: InMemorySessionStore,
 ) -> None:
     """Test ChatService initializes LLM with flight search tool."""
-    chat_service = ChatService(flight_service=mock_flight_service)
+    chat_service = ChatService(
+        flight_service=mock_flight_service, session_store=session_store
+    )
 
     # LLM with tools should be created
     assert chat_service.llm is not None
     assert chat_service.search_flights_tool is not None
 
 
-def test_chat_service_creates_unique_sessions(
+@pytest.mark.asyncio
+async def test_chat_service_creates_unique_sessions(
     mock_flight_service: AsyncMock,
+    session_store: InMemorySessionStore,
 ) -> None:
     """Test chat service can create new sessions and retrieve histories."""
-    chat_service = ChatService(flight_service=mock_flight_service)
+    chat_service = ChatService(
+        flight_service=mock_flight_service, session_store=session_store
+    )
 
-    # Get two different session histories
-    session_id1 = "test-session-1"
-    session_id2 = "test-session-2"
+    # Create two sessions
+    session1 = await session_store.create_session()
+    session2 = await session_store.create_session()
 
-    history1 = chat_service._get_session_history(session_id1)
-    history2 = chat_service._get_session_history(session_id2)
+    # Get histories
+    history1 = await chat_service._get_session_history(session1.session_id)
+    history2 = await chat_service._get_session_history(session2.session_id)
 
     # Should be different history objects
     assert history1 is not history2
 
-    # Should be stored in the store
-    assert session_id1 in chat_service.store
-    assert session_id2 in chat_service.store
 
-
-def test_chat_service_session_history_persists(
+@pytest.mark.asyncio
+async def test_chat_service_session_history_persists(
     mock_flight_service: AsyncMock,
+    session_store: InMemorySessionStore,
 ) -> None:
     """Test session history is preserved across multiple retrievals."""
-    chat_service = ChatService(flight_service=mock_flight_service)
+    chat_service = ChatService(
+        flight_service=mock_flight_service, session_store=session_store
+    )
 
-    session_id = "test-session"
+    session = await session_store.create_session()
 
     # Get history and add a message
-    history1 = chat_service._get_session_history(session_id)
+    history1 = await chat_service._get_session_history(session.session_id)
     history1.add_user_message("Hello")
 
     # Retrieve history again
-    history2 = chat_service._get_session_history(session_id)
+    history2 = await chat_service._get_session_history(session.session_id)
 
     # Should be the same object
     assert history1 is history2
@@ -76,11 +80,15 @@ def test_chat_service_session_history_persists(
     assert history2.messages[0].content == "Hello"
 
 
-def test_flight_search_tool_is_available(
+@pytest.mark.asyncio
+async def test_flight_search_tool_is_available(
     mock_flight_service: AsyncMock,
+    session_store: InMemorySessionStore,
 ) -> None:
     """Test that flight search tool is properly registered."""
-    chat_service = ChatService(flight_service=mock_flight_service)
+    chat_service = ChatService(
+        flight_service=mock_flight_service, session_store=session_store
+    )
 
     # Tool should be available
     assert chat_service.search_flights_tool is not None

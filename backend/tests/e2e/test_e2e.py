@@ -46,9 +46,10 @@ def parse_sse_stream(response) -> tuple[list[str], str | None]:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    """Create test client."""
-    return TestClient(app)
+def client():
+    """Create test client with lifespan."""
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture
@@ -90,18 +91,27 @@ def sample_flights() -> list[Flight]:
 
 def test_chat_endpoint_exists(client: TestClient) -> None:
     """Test that chat endpoint is accessible."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    assert session_response.status_code == 200
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "Hello"},
+        json={"message": "Hello", "session_id": session_id},
     )
     assert response.status_code == 200
 
 
 def test_chat_returns_streaming_response(client: TestClient) -> None:
     """Test that chat endpoint returns Server-Sent Events."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "Hello, how are you?"},
+        json={"message": "Hello, how are you?", "session_id": session_id},
     )
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
@@ -109,9 +119,13 @@ def test_chat_returns_streaming_response(client: TestClient) -> None:
 
 def test_chat_streams_chunks(client: TestClient) -> None:
     """Test that chat endpoint streams response chunks."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "Say hello"},
+        json={"message": "Say hello", "session_id": session_id},
     )
 
     # Parse stream
@@ -127,35 +141,47 @@ def test_chat_streams_chunks(client: TestClient) -> None:
 
 def test_chat_maintains_session_across_requests(client: TestClient) -> None:
     """Test that session_id is returned and maintained across requests."""
+    # Create session explicitly
+    session_response = client.post("/api/chat/session")
+    assert session_response.status_code == 200
+    session_id = session_response.json()["session_id"]
+
     # First message
     response1 = client.post(
         "/api/chat",
-        json={"message": "Hello, I want to plan a trip"},
+        json={"message": "Hello, I want to plan a trip", "session_id": session_id},
     )
 
     # Extract session_id
     _, session_id1 = parse_sse_stream(response1)
-    assert session_id1 is not None
+    assert session_id1 == session_id
 
     # Second message with same session
     response2 = client.post(
         "/api/chat",
-        json={"message": "Thank you", "session_id": session_id1},
+        json={"message": "Thank you", "session_id": session_id},
     )
 
     # Extract session_id from second response
     _, session_id2 = parse_sse_stream(response2)
-    
+
     # Session IDs should be the same
-    assert session_id2 == session_id1, "Session ID should persist across requests"
+    assert session_id2 == session_id, "Session ID should persist across requests"
 
 
 @pytest.mark.asyncio
 async def test_e2e_flight_search_tool_is_called(client: TestClient) -> None:
     """Test that flight search query triggers tool call."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "Find flights from LAX to JFK on 2025-06-01"},
+        json={
+            "message": "Find flights from LAX to JFK on 2025-06-01",
+            "session_id": session_id,
+        },
     )
 
     # Parse stream
@@ -172,9 +198,16 @@ async def test_e2e_flight_search_tool_is_called(client: TestClient) -> None:
 @pytest.mark.asyncio
 async def test_e2e_flight_search_shows_search_indicator(client: TestClient) -> None:
     """Test that streaming shows search indicator during tool execution."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "Search for flights from SFO to LAX on June 15th 2025"},
+        json={
+            "message": "Search for flights from SFO to LAX on June 15th 2025",
+            "session_id": session_id,
+        },
     )
 
     # Look for search indicator in chunks
@@ -188,10 +221,15 @@ async def test_e2e_flight_search_shows_search_indicator(client: TestClient) -> N
 @pytest.mark.asyncio
 async def test_e2e_flight_search_with_filters(client: TestClient) -> None:
     """Test flight search with filters (max price, stops, etc.)."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
         json={
             "message": "Find direct flights from LAX to JFK under $400 on June 1st 2025",
+            "session_id": session_id,
         },
     )
 
@@ -206,14 +244,21 @@ async def test_e2e_flight_search_with_filters(client: TestClient) -> None:
 @pytest.mark.asyncio
 async def test_e2e_multi_turn_conversation_with_tools(client: TestClient) -> None:
     """Test multi-turn conversation with tool calls."""
+    # Create session explicitly
+    session_response = client.post("/api/chat/session")
+    assert session_response.status_code == 200
+    session_id = session_response.json()["session_id"]
+
     # First turn: Search flights
     response1 = client.post(
         "/api/chat",
-        json={"message": "Find flights from ORD to SFO on July 1st 2025"},
+        json={
+            "message": "Find flights from ORD to SFO on July 1st 2025",
+            "session_id": session_id,
+        },
     )
 
-    chunks1, session_id = parse_sse_stream(response1)
-    assert session_id is not None
+    chunks1, _ = parse_sse_stream(response1)
 
     response1_text = "".join(chunks1)
     assert "flight" in response1_text.lower()
@@ -237,9 +282,16 @@ async def test_e2e_multi_turn_conversation_with_tools(client: TestClient) -> Non
 @pytest.mark.asyncio
 async def test_e2e_invalid_iata_code_error(client: TestClient) -> None:
     """Test error handling for invalid IATA codes."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "Find flights from INVALID to XYZ123 on June 1st 2025"},
+        json={
+            "message": "Find flights from INVALID to XYZ123 on June 1st 2025",
+            "session_id": session_id,
+        },
     )
 
     # Parse stream
@@ -255,9 +307,16 @@ async def test_e2e_invalid_iata_code_error(client: TestClient) -> None:
 @pytest.mark.asyncio
 async def test_e2e_invalid_date_format_error(client: TestClient) -> None:
     """Test error handling for invalid date format."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "Find flights from LAX to JFK on 06/01/2025"},
+        json={
+            "message": "Find flights from LAX to JFK on 06/01/2025",
+            "session_id": session_id,
+        },
     )
 
     # Parse stream
@@ -272,9 +331,13 @@ async def test_e2e_invalid_date_format_error(client: TestClient) -> None:
 @pytest.mark.asyncio
 async def test_e2e_general_conversation_without_tools(client: TestClient) -> None:
     """Test that general conversation works without triggering tools."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "What's the weather like today?"},
+        json={"message": "What's the weather like today?", "session_id": session_id},
     )
 
     # Parse stream
@@ -290,9 +353,16 @@ async def test_e2e_general_conversation_without_tools(client: TestClient) -> Non
 @pytest.mark.asyncio
 async def test_e2e_streaming_with_tool_execution(client: TestClient) -> None:
     """Test that streaming works correctly during tool execution."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     response = client.post(
         "/api/chat",
-        json={"message": "Show me flights from LAX to SFO tomorrow"},
+        json={
+            "message": "Show me flights from LAX to SFO tomorrow",
+            "session_id": session_id,
+        },
     )
 
     # Parse stream
@@ -308,10 +378,14 @@ async def test_e2e_streaming_with_tool_execution(client: TestClient) -> None:
 @pytest.mark.asyncio
 async def test_e2e_error_handling_in_stream(client: TestClient) -> None:
     """Test that errors in streaming are handled gracefully."""
+    # Create session first
+    session_response = client.post("/api/chat/session")
+    session_id = session_response.json()["session_id"]
+
     # Use message that should still work
     response = client.post(
         "/api/chat",
-        json={"message": "Hi"},
+        json={"message": "Hi", "session_id": session_id},
     )
 
     # Should get a successful response
