@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
 import { ThinkingCard } from './ThinkingCard'
+import { ProviderSelector } from './ProviderSelector'
 
 type MessageType = 'user' | 'assistant' | 'tool_execution' | 'thinking'
 
@@ -37,6 +38,8 @@ export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [currentProvider, setCurrentProvider] = useState('ollama')
+  const [currentModel, setCurrentModel] = useState('qwen3:4b')
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -48,28 +51,49 @@ export function ChatInterface() {
     scrollToBottom()
   }, [messages, isLoading])
 
-  // Initialize session on component mount (one session per browser tab)
-  useEffect(() => {
-    const initSession = async () => {
-      try {
-        const response = await fetch('/api/chat/session', { method: 'POST' })
-        if (!response.ok) {
-          throw new Error('Failed to create session')
-        }
-        const { session_id } = await response.json()
-        setSessionId(session_id)
-        console.log('Session created:', session_id)
-      } catch (error) {
-        console.error('Failed to create session:', error)
-        // Show error to user
-        setMessages([{
-          role: 'assistant',
-          content: '❌ Failed to initialize chat session. Please refresh the page.',
-        }])
+  // Create a new session with the selected provider/model
+  const createSession = async (provider: string, model: string) => {
+    try {
+      const response = await fetch('/api/chat/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, model }),
+      })
+      if (!response.ok) {
+        throw new Error('Failed to create session')
       }
+      const data = await response.json()
+      setSessionId(data.session_id)
+      setCurrentProvider(data.provider)
+      setCurrentModel(data.model)
+      console.log('Session created:', data)
+    } catch (error) {
+      console.error('Failed to create session:', error)
+      setMessages([{
+        role: 'assistant',
+        content: '❌ Failed to initialize chat session. Please refresh the page.',
+      }])
     }
-    initSession()
+  }
+
+  // Initialize session on component mount
+  useEffect(() => {
+    // Try to load saved provider config
+    const saved = localStorage.getItem('llm_provider_config')
+    if (saved) {
+      const { provider, model } = JSON.parse(saved)
+      createSession(provider, model)
+    } else {
+      createSession('ollama', 'qwen3:4b')
+    }
   }, [])  // Empty deps - only run on mount
+
+  // Handle provider/model change
+  const handleProviderChange = (provider: string, model: string) => {
+    // Clear messages and create new session with new provider/model
+    setMessages([])
+    createSession(provider, model)
+  }
 
   const sendMessage = async () => {
     if (!input.trim() || isLoading || !sessionId) return
@@ -268,11 +292,25 @@ export function ChatInterface() {
     <Flex direction="column" h="100vh" bg="gray.50">
       {/* Header */}
       <Box bg="white" borderBottom="1px" borderColor="gray.200" p={4}>
-        <Text fontSize="xl" fontWeight="bold">
-          Trip Planning Assistant
-        </Text>
-        <Text fontSize="sm" color="gray.600">
-          Ask me anything about planning your trip!
+        <Flex justify="space-between" align="center" mb={2}>
+          <Box>
+            <Text fontSize="xl" fontWeight="bold">
+              Trip Planning Assistant
+            </Text>
+            <Text fontSize="sm" color="gray.600">
+              Ask me anything about planning your trip!
+            </Text>
+          </Box>
+          <Box>
+            <ProviderSelector
+              onProviderChange={handleProviderChange}
+              initialProvider={currentProvider}
+              initialModel={currentModel}
+            />
+          </Box>
+        </Flex>
+        <Text fontSize="xs" color="gray.500">
+          Using: {currentProvider} / {currentModel}
         </Text>
       </Box>
 
