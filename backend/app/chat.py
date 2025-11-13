@@ -26,16 +26,16 @@ class ChatService:
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
         self._metadata: dict[str, dict[str, str]] = {}  # Session metadata (provider, model)
         self._last_activity: dict[str, float] = {}
-        
+
         # Inject flight client into the tool
-        setattr(search_flights, "_flight_client", flight_client)
-        
+        search_flights._flight_client = flight_client
+
         # Bind tools to LLM
         self.llm = llm.bind_tools([search_flights])
 
     def create_session(
-        self, 
-        provider: str | None = None, 
+        self,
+        provider: str | None = None,
         model: str | None = None
     ) -> str:
         """Create a new chat session with optional provider/model selection.
@@ -96,7 +96,7 @@ class ChatService:
 
     async def chat_stream(
         self, message: str, session_id: str
-    ) -> AsyncGenerator[StreamEvent, None]:
+    ) -> AsyncGenerator[StreamEvent]:
         """Stream a chat response chunk by chunk with tool calling support.
 
         Args:
@@ -156,7 +156,7 @@ class ChatService:
             if isinstance(chunk, AIMessage) and chunk.tool_calls:
                 tool_was_called = True
                 tool_call_message = chunk
-                
+
                 from langchain_core.messages import ToolMessage
 
                 tool_messages: list[ToolMessage] = []

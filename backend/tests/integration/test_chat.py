@@ -1,13 +1,13 @@
 """Test chat endpoint."""
 
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import StreamEvent
 from app.main import app
+from app.models import StreamEvent
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def test_chat_endpoint_streams_response(client: TestClient) -> None:
 
     async def mock_stream(
         message: str, session_id: str
-    ) -> AsyncGenerator[StreamEvent, None]:
+    ) -> AsyncGenerator[StreamEvent]:
         """Mock async generator for streaming."""
         yield StreamEvent(
             type="content",

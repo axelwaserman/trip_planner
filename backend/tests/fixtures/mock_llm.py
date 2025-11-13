@@ -29,7 +29,7 @@ class MockAIMessageChunk(AIMessage):
         self.tool_calls = tool_calls or []
 
 
-async def mock_llm_stream_with_tool_call() -> AsyncGenerator[MockAIMessageChunk, None]:
+async def mock_llm_stream_with_tool_call() -> AsyncGenerator[MockAIMessageChunk]:
     """Mock LLM stream that calls search_flights tool.
 
     Simulates LangChain 1.0 behavior:
@@ -56,7 +56,7 @@ async def mock_llm_stream_with_tool_call() -> AsyncGenerator[MockAIMessageChunk,
     )
 
 
-async def mock_llm_stream_after_tool_execution() -> AsyncGenerator[MockAIMessageChunk, None]:
+async def mock_llm_stream_after_tool_execution() -> AsyncGenerator[MockAIMessageChunk]:
     """Mock LLM stream after tool has executed.
 
     Simulates LangChain 1.0 behavior when LLM receives tool results
@@ -71,7 +71,7 @@ async def mock_llm_stream_after_tool_execution() -> AsyncGenerator[MockAIMessage
     yield MockAIMessageChunk(content="The cheapest option is $280.")
 
 
-async def mock_llm_stream_no_tools() -> AsyncGenerator[MockAIMessageChunk, None]:
+async def mock_llm_stream_no_tools() -> AsyncGenerator[MockAIMessageChunk]:
     """Mock LLM stream for general conversation without tool calls.
 
     Yields:
@@ -83,7 +83,7 @@ async def mock_llm_stream_no_tools() -> AsyncGenerator[MockAIMessageChunk, None]
     yield MockAIMessageChunk(content="How can I help you today?")
 
 
-async def mock_llm_stream_multi_turn() -> AsyncGenerator[MockAIMessageChunk, None]:
+async def mock_llm_stream_multi_turn() -> AsyncGenerator[MockAIMessageChunk]:
     """Mock LLM stream for multi-turn conversation.
 
     Simulates remembering context from previous messages.
@@ -131,7 +131,7 @@ class MockChatModel:
     Compatible with LangChain 1.0 bind_tools() pattern.
     """
 
-    def __init__(self, stream_generator: AsyncGenerator[MockAIMessageChunk, None]):
+    def __init__(self, stream_generator: AsyncGenerator[MockAIMessageChunk]):
         """Initialize with stream generator.
 
         Args:
@@ -152,7 +152,7 @@ class MockChatModel:
         self._tools = tools
         return self
 
-    def astream(self, messages: list[Any]) -> AsyncGenerator[MockAIMessageChunk, None]:
+    def astream(self, messages: list[Any]) -> AsyncGenerator[MockAIMessageChunk]:
         """Mock astream() method.
 
         Args:

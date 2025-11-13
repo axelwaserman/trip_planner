@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     def get_available_providers(self) -> dict[str, dict[str, list[str] | bool]]:
         """Get available providers with their models and credential status.
-        
+
         Returns:
             Dict mapping provider names to their config:
             {

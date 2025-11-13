@@ -2,12 +2,15 @@
 
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from langchain_core.tools import tool
 
 from app.exceptions import FlightSearchError
 from app.models import FlightQuery, SortBy
-from app.tools.flight_client import FlightAPIClient
+
+if TYPE_CHECKING:
+    from app.tools.flight_client import FlightAPIClient
 
 
 @tool
@@ -73,10 +76,10 @@ async def search_flights(
     # Get the flight client from the tool's context
     # NOTE: This will be injected when the tool is bound to the ChatService
     client: FlightAPIClient = getattr(search_flights, "_flight_client", None)
-    
+
     if client is None:
         return "Error: Flight search service not initialized. Please contact support."
-    
+
     try:
         # Validate and parse inputs
         try:

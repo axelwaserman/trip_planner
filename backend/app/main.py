@@ -1,7 +1,7 @@
 """FastAPI application for Trip Planner."""
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,13 +9,13 @@ from langchain.chat_models import init_chat_model
 
 from app.chat import ChatService
 from app.config import Settings
-from app.routes import router
+from app.routes import get_chat_service, router
 from app.tools.flight_client import MockFlightAPIClient
 from app.tools.flight_search import search_flights
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan - manage singleton resources.
 
     Startup:
@@ -29,10 +29,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # Startup
     settings = Settings()
-    
+
     # Initialize flight client
     flight_client = MockFlightAPIClient(seed=42)
-    
+
     # Initialize LLM using init_chat_model with reasoning enabled
     llm = init_chat_model(
         model=settings.ollama_model,
@@ -40,16 +40,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         base_url=settings.ollama_base_url,
         reasoning=True,  # Enable reasoning/thinking tokens for supported models
     )
-    
+
     # Inject flight_client into search_flights tool
-    setattr(search_flights, "_flight_client", flight_client)
-    
+    search_flights._flight_client = flight_client
+
     # Initialize chat service
     chat_service = ChatService(
         flight_client=flight_client,
         llm=llm,
     )
-    
+
     # Store in app state
     app.state.chat_service = chat_service
 
@@ -83,8 +83,6 @@ async def get_chat_service_override(request: Request) -> ChatService:
     return request.app.state.chat_service
 
 
-# Replace the dependency in routes
-from app.routes import get_chat_service
 app.dependency_overrides[get_chat_service] = get_chat_service_override
 
 # Include router

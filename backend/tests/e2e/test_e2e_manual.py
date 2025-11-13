@@ -59,7 +59,7 @@ def test_simple_flight_search(client: TestClient) -> None:
 
     print("\n=== SIMPLE FLIGHT SEARCH ===")
     print(f"Response: {full_response[:500]}...")
-    
+
     # Should mention flights and show results
     assert "flight" in full_response, "Expected flight information"
     assert any(word in full_response for word in ["lax", "jfk"]), "Expected airport codes"
@@ -75,11 +75,11 @@ def test_conversation_memory_simple(client: TestClient) -> None:
     )
     chunks1, session_id = parse_sse_stream(response1)
     response1_text = "".join(chunks1)
-    
+
     print("\n=== MEMORY TEST - First Message ===")
     print(f"Session ID: {session_id}")
     print(f"Response: {response1_text[:300]}...")
-    
+
     assert session_id is not None, "Session ID should not be None"
 
     # Second message - ask about name
@@ -90,7 +90,7 @@ def test_conversation_memory_simple(client: TestClient) -> None:
     )
     chunks2, session_id2 = parse_sse_stream(response2)
     response2_text = "".join(chunks2).lower()
-    
+
     print(f"Session ID 2: {session_id2}")
     print(f"Response: {response2_text[:300] if response2_text else '(EMPTY)'}...")
     print(f"Full response: {response2_text}")
@@ -109,10 +109,10 @@ def test_followup_on_flight_search(client: TestClient) -> None:
     )
     chunks1, session_id = parse_sse_stream(response1)
     response1_text = "".join(chunks1)
-    
+
     print("\n=== FOLLOW-UP TEST - Initial Search ===")
     print(f"Response: {response1_text[:500]}...")
-    
+
     assert session_id is not None
     assert "flight" in response1_text.lower()
 
@@ -123,7 +123,7 @@ def test_followup_on_flight_search(client: TestClient) -> None:
     )
     chunks2, _ = parse_sse_stream(response2)
     response2_text = "".join(chunks2).lower()
-    
+
     print("\n=== FOLLOW-UP TEST - Cheapest Question ===")
     print(f"Response: {response2_text[:500]}...")
 
@@ -145,7 +145,7 @@ def test_city_name_inference(client: TestClient) -> None:
 
     print("\n=== CITY NAME INFERENCE ===")
     print(f"Response: {full_response[:500]}...")
-    
+
     # Should call tool and show flights (LLM should infer LAX and JFK)
     assert "flight" in full_response, "Expected flight results"
     # Should mention Los Angeles/LA or LAX, and New York/NY or JFK
@@ -160,19 +160,19 @@ def test_multiple_dates(client: TestClient) -> None:
         "January 10th 2026",
         "February 14th 2026",
     ]
-    
+
     for test_date in dates:
         response = client.post(
             "/api/chat",
             json={"message": f"Find flights from SFO to SEA on {test_date}"},
         )
-        
+
         chunks, _ = parse_sse_stream(response)
         full_response = "".join(chunks).lower()
-        
+
         print(f"\n=== DATE TEST: {test_date} ===")
         print(f"Response: {full_response[:300]}...")
-        
+
         # Should find flights for any date
         assert "flight" in full_response, f"Expected flights for {test_date}"
         assert any(word in full_response for word in ["sfo", "sea"]), f"Expected airport codes for {test_date}"
@@ -190,7 +190,7 @@ def test_no_tool_for_general_chat(client: TestClient) -> None:
 
     print("\n=== GENERAL CHAT (NO TOOL) ===")
     print(f"Response: {full_response[:300]}...")
-    
+
     # Should respond but not search for flights
     assert len(full_response) > 0
     # Should NOT show the flight search indicator
@@ -209,7 +209,7 @@ def test_ambiguous_location_handling(client: TestClient) -> None:
 
     print("\n=== AMBIGUOUS LOCATION ===")
     print(f"Response: {full_response[:500]}...")
-    
+
     # Should either ask for clarification OR make a reasonable inference
     # Looking for signs it's handling the ambiguity properly
     assert len(full_response) > 0

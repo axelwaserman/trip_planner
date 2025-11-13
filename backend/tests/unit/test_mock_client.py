@@ -5,8 +5,8 @@ from decimal import Decimal
 
 import pytest
 
-from app.models import FlightQuery
 from app.exceptions import FlightSearchError
+from app.models import FlightQuery
 from app.tools.flight_client import MockFlightAPIClient
 
 

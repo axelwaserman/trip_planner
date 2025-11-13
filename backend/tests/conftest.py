@@ -1,8 +1,8 @@
 """Shared pytest fixtures for tests."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
+import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.tools.flight_client import MockFlightAPIClient

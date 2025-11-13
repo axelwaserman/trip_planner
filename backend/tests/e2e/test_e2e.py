@@ -13,8 +13,8 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import Flight
 from app.main import app
+from app.models import Flight
 
 # Mark all tests in this module as slow E2E tests
 pytestmark = [pytest.mark.slow, pytest.mark.e2e]

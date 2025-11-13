@@ -1,7 +1,6 @@
 """Unified routes for Trip Planner API."""
 
-from typing import AsyncGenerator
-from uuid import uuid4
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -10,14 +9,13 @@ from app.chat import ChatService
 from app.config import settings
 from app.models import ChatRequest, SessionCreateRequest, StreamEvent
 
-
 router = APIRouter()
 
 
 # Dependency injection for ChatService
 async def get_chat_service() -> ChatService:
     """Get the chat service instance from app state.
-    
+
     This dependency will be injected by FastAPI when the app is configured.
     """
     # This will be replaced by the actual chat service from app.state in main.py
@@ -30,22 +28,22 @@ async def chat(
     chat_service: ChatService = Depends(get_chat_service),
 ) -> StreamingResponse:
     """Chat endpoint with streaming responses.
-    
+
     Accepts a chat message and session ID, returns a stream of events including
     AI responses, tool calls, and tool results.
-    
+
     Args:
         request: ChatRequest with message and session_id
         chat_service: Injected ChatService instance
-        
+
     Returns:
         StreamingResponse with server-sent events
-        
+
     Raises:
         HTTPException: If session doesn't exist (404) or other errors occur (500)
     """
-    
-    async def event_generator() -> AsyncGenerator[str, None]:
+
+    async def event_generator() -> AsyncGenerator[str]:
         """Generate server-sent events from chat stream."""
         try:
             async for event in chat_service.chat_stream(
@@ -54,8 +52,8 @@ async def chat(
             ):
                 # Format as server-sent event
                 yield f"data: {event.model_dump_json()}\n\n"
-                
-        except ValueError as e:
+
+        except ValueError:
             # Session not found
             error_event = StreamEvent(
                 chunk="",
@@ -63,7 +61,7 @@ async def chat(
                 type="content",  # Use content for error messages
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
-            
+
         except Exception as e:
             # Other errors
             error_event = StreamEvent(
@@ -72,7 +70,7 @@ async def chat(
                 type="content",
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -86,21 +84,24 @@ async def chat(
 
 @router.post("/api/chat/session", status_code=status.HTTP_201_CREATED)
 async def create_session(
-    request: SessionCreateRequest = SessionCreateRequest(),
     chat_service: ChatService = Depends(get_chat_service),
+    request: SessionCreateRequest | None = None,
 ) -> dict[str, str]:
     """Create a new chat session with optional provider/model selection.
-    
+
     Generates a new session ID and initializes chat history for that session.
     Optionally accepts provider and model selection to override defaults.
-    
+
     Args:
         request: Session creation request with optional provider/model
         chat_service: Injected ChatService instance
-        
+
     Returns:
         Dictionary with session_id, provider, and model fields
     """
+    if request is None:
+        request = SessionCreateRequest()
+
     # Validate provider and model if specified
     if request.provider:
         providers = settings.get_available_providers()
@@ -119,12 +120,12 @@ async def create_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid model {request.model} for provider {request.provider}",
             )
-    
+
     session_id = chat_service.create_session(
         provider=request.provider,
         model=request.model,
     )
-    
+
     # Return session info including the resolved provider/model
     metadata = chat_service._metadata[session_id]
     return {
@@ -140,25 +141,25 @@ async def delete_session(
     chat_service: ChatService = Depends(get_chat_service),
 ) -> None:
     """Delete a chat session.
-    
+
     Removes the session and its chat history from memory.
-    
+
     Args:
         session_id: Session ID to delete
         chat_service: Injected ChatService instance
-        
+
     Raises:
         HTTPException: If session doesn't exist (404)
     """
     # Check if session exists
     try:
         chat_service.get_session_history(session_id)
-    except ValueError:
+    except ValueError as err:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Session {session_id} not found",
-        )
-    
+        ) from err
+
     # Delete the session
     if session_id in chat_service._histories:
         del chat_service._histories[session_id]
@@ -169,10 +170,10 @@ async def delete_session(
 @router.get("/health")
 async def health_check() -> dict[str, str]:
     """Health check endpoint.
-    
+
     Returns basic health status. Can be extended to check dependencies
     (database, LLM availability, etc.) in the future.
-    
+
     Returns:
         Dictionary with status field
     """
@@ -182,10 +183,10 @@ async def health_check() -> dict[str, str]:
 @router.get("/api/providers")
 async def get_providers() -> dict[str, dict[str, list[str] | bool]]:
     """Get available LLM providers and their models.
-    
+
     Returns information about which providers are available (have credentials)
     and what models each provider supports.
-    
+
     Returns:
         Dictionary mapping provider names to their configuration:
         {

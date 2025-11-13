@@ -197,7 +197,7 @@ class MockFlightAPIClient(FlightAPIClient):
         """
         flights: list[Flight] = []
 
-        for i in range(count):
+        for _i in range(count):
             # Generate carrier and flight number
             carrier_code = self._rng.choice(list(self.CARRIERS.keys()))
             carrier_name = self.CARRIERS[carrier_code]
@@ -225,11 +225,11 @@ class MockFlightAPIClient(FlightAPIClient):
                 ("SFO", "LAX"): 337,   # Short
                 ("JFK", "LAX"): 2475,  # Long
             }
-            
+
             route_key = (query.origin, query.destination)
             reverse_route = (query.destination, query.origin)
             distance = distance_map.get(route_key) or distance_map.get(reverse_route, 1500)
-            
+
             # Base duration: ~500 mph average speed + extra time for stops
             base_duration = int((distance / 500) * 60)
             variation = self._rng.randint(-20, 30)
