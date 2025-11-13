@@ -55,14 +55,14 @@ async def chat(
                     data = json.dumps({
                         "type": "tool_call",
                         "session_id": session_id,
-                        "metadata": event.metadata
+                        "metadata": event.metadata.model_dump() if event.metadata else None
                     })
                     yield f"data: {data}\n\n"
                 elif event.event_type == "tool_result":
                     data = json.dumps({
                         "type": "tool_result",
                         "session_id": session_id,
-                        "metadata": event.metadata
+                        "metadata": event.metadata.model_dump() if event.metadata else None
                     })
                     yield f"data: {data}\n\n"
                 elif event.event_type == "content":

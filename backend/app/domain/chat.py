@@ -21,18 +21,16 @@ class ToolCallMetadata(BaseModel):
 
     tool_name: str = Field(..., description="Name of the tool being called")
     arguments: dict[str, Any] = Field(..., description="Arguments passed to the tool")
-    started_at: datetime = Field(..., description="When tool execution started")
-    status: str = Field(default="executing", description="Tool execution status")
+    started_at: float = Field(..., description="Unix timestamp when tool execution started")
+    status: str = Field(default="running", description="Tool execution status")
 
 
 class ToolResultMetadata(BaseModel):
     """Metadata for tool result messages."""
 
-    tool_name: str = Field(..., description="Name of the tool that was executed")
     summary: str = Field(..., description="Brief summary of the result (2-3 lines)")
     full_result: str = Field(..., description="Complete result in markdown format")
-    status: str = Field(..., description="Result status: complete or error")
-    completed_at: datetime = Field(..., description="When tool execution completed")
+    status: str = Field(..., description="Result status: success or error")
     elapsed_ms: int = Field(..., description="Execution time in milliseconds")
 
 
@@ -63,7 +61,7 @@ class StreamEvent(BaseModel):
     event_type: Literal["content", "tool_call", "tool_result"] = Field(
         ..., description="Type of event being streamed"
     )
-    metadata: dict[str, Any] | None = Field(
-        default=None, description="Event-specific metadata (ToolCallMetadata or ToolResultMetadata as dict)"
+    metadata: ToolCallMetadata | ToolResultMetadata | None = Field(
+        default=None, description="Event-specific metadata (typed Pydantic model)"
     )
 

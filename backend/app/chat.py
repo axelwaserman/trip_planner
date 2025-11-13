@@ -10,7 +10,7 @@ from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 
 from app.config import settings
-from app.domain.chat import StreamEvent
+from app.domain.chat import StreamEvent, ToolCallMetadata, ToolResultMetadata
 from app.services.flight import FlightService
 from app.tools.flight_search import create_flight_search_tool
 
@@ -176,12 +176,12 @@ class ChatService:
                             chunk="",
                             session_id=session_id,
                             event_type="tool_call",
-                            metadata={
-                                "tool_name": tool_call["name"],
-                                "arguments": tool_call["args"],
-                                "started_at": tool_start_time,
-                                "status": "running"
-                            }
+                            metadata=ToolCallMetadata(
+                                tool_name=tool_call["name"],
+                                arguments=tool_call["args"],
+                                started_at=tool_start_time,
+                                status="running"
+                            )
                         )
                         
                         # Execute the tool
@@ -194,12 +194,12 @@ class ChatService:
                             chunk="",
                             session_id=session_id,
                             event_type="tool_result",
-                            metadata={
-                                "summary": f"Found flights from {tool_call['args'].get('origin')} to {tool_call['args'].get('destination')}",
-                                "full_result": str(tool_result),
-                                "status": "success",
-                                "elapsed_ms": elapsed_ms
-                            }
+                            metadata=ToolResultMetadata(
+                                summary=f"Found flights from {tool_call['args'].get('origin')} to {tool_call['args'].get('destination')}",
+                                full_result=str(tool_result),
+                                status="success",
+                                elapsed_ms=elapsed_ms
+                            )
                         )
                         
                         tool_messages.append(

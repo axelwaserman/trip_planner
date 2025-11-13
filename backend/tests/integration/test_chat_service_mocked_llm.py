@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.chat import ChatService
+from app.domain.chat import ToolCallMetadata, ToolResultMetadata
 from app.services.flight import FlightService
 from tests.fixtures.mock_llm import (
     MockChatModel,
@@ -56,9 +57,10 @@ async def test_chat_stream_emits_tool_call_event(mock_flight_service: FlightServ
         # Verify tool_call metadata
         tool_call_metadata = tool_call_events[0][1]
         assert tool_call_metadata is not None
-        assert tool_call_metadata["tool_name"] == "search_flights"
-        assert "arguments" in tool_call_metadata
-        assert tool_call_metadata["status"] == "running"
+        assert isinstance(tool_call_metadata, ToolCallMetadata)
+        assert tool_call_metadata.tool_name == "search_flights"
+        assert "origin" in tool_call_metadata.arguments
+        assert tool_call_metadata.status == "running"
 
 
 @pytest.mark.integration
@@ -86,10 +88,11 @@ async def test_chat_stream_emits_tool_result_event(mock_flight_service: FlightSe
         # Verify tool_result metadata
         result_metadata = tool_result_events[0][1]
         assert result_metadata is not None
-        assert "summary" in result_metadata
-        assert "full_result" in result_metadata
-        assert result_metadata["status"] == "success"
-        assert "elapsed_ms" in result_metadata
+        assert isinstance(result_metadata, ToolResultMetadata)
+        assert result_metadata.summary
+        assert result_metadata.full_result
+        assert result_metadata.status == "success"
+        assert result_metadata.elapsed_ms >= 0
 
 
 @pytest.mark.integration
@@ -110,7 +113,7 @@ async def test_chat_stream_executes_tool_with_correct_arguments(
         tool_args = None
         async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
             if event.event_type == "tool_call" and event.metadata:
-                tool_args = event.metadata["arguments"]
+                tool_args = event.metadata.arguments
 
         # Verify tool was called with correct arguments
         assert tool_args is not None
@@ -172,15 +175,15 @@ async def test_chat_stream_includes_summary_in_tool_result(
                 break
 
         assert result_metadata is not None
-        assert "summary" in result_metadata
-        assert "full_result" in result_metadata
+        assert result_metadata.summary
+        assert result_metadata.full_result
 
         # Summary should be a string
-        assert isinstance(result_metadata["summary"], str)
-        assert len(result_metadata["summary"]) > 0
+        assert isinstance(result_metadata.summary, str)
+        assert len(result_metadata.summary) > 0
         # Full result should also be a string
-        assert isinstance(result_metadata["full_result"], str)
-        assert len(result_metadata["full_result"]) > 0
+        assert isinstance(result_metadata.full_result, str)
+        assert len(result_metadata.full_result) > 0
 
 
 @pytest.mark.integration
@@ -205,11 +208,10 @@ async def test_chat_stream_measures_tool_execution_time(
                 break
 
         assert result_metadata is not None
-        assert "elapsed_ms" in result_metadata
-        assert isinstance(result_metadata["elapsed_ms"], int)
-        assert result_metadata["elapsed_ms"] >= 0
+        assert result_metadata.elapsed_ms >= 0
+        assert isinstance(result_metadata.elapsed_ms, int)
         # Should be reasonably fast (mock client)
-        assert result_metadata["elapsed_ms"] < 5000, "Mock tool should execute quickly"
+        assert result_metadata.elapsed_ms < 5000, "Mock tool should execute quickly"
 
 
 @pytest.mark.integration
