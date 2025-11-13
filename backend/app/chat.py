@@ -24,6 +24,7 @@ class ChatService:
             llm: LangChain BaseChatModel instance (ChatOllama, ChatOpenAI, etc.)
         """
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
+        self._metadata: dict[str, dict[str, str]] = {}  # Session metadata (provider, model)
         self._last_activity: dict[str, float] = {}
         
         # Inject flight client into the tool
@@ -32,14 +33,27 @@ class ChatService:
         # Bind tools to LLM
         self.llm = llm.bind_tools([search_flights])
 
-    def create_session(self) -> str:
-        """Create a new chat session.
+    def create_session(
+        self, 
+        provider: str | None = None, 
+        model: str | None = None
+    ) -> str:
+        """Create a new chat session with optional provider/model selection.
+
+        Args:
+            provider: LLM provider name (ollama, openai, anthropic)
+            model: Model name for the provider
 
         Returns:
             New session ID (UUID)
         """
         session_id = str(uuid.uuid4())
         self._histories[session_id] = InMemoryChatMessageHistory()
+        self._metadata[session_id] = {
+            "provider": provider or "ollama",
+            "model": model or "qwen3:4b",
+            "created_at": str(time.time()),
+        }
         self._last_activity[session_id] = time.time()
         return session_id
 
@@ -75,6 +89,7 @@ class ChatService:
 
         for session_id in expired:
             self._histories.pop(session_id, None)
+            self._metadata.pop(session_id, None)
             self._last_activity.pop(session_id, None)
 
         return len(expired)

@@ -13,9 +13,68 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = True
 
-    # Ollama LLM
+    # Default LLM Provider
+    default_provider: str = "ollama"
+    default_model: str = "qwen3:4b"
+
+    # Ollama Configuration
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3:4b"  # Supports reasoning/thinking tokens and tool calling
+    ollama_model: str = "qwen3:4b"  # Fallback if not specified
+
+    # OpenAI Configuration (optional)
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+
+    # Anthropic Configuration (optional)
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-3-5-sonnet-20241022"
+
+    def get_available_providers(self) -> dict[str, dict[str, list[str] | bool]]:
+        """Get available providers with their models and credential status.
+        
+        Returns:
+            Dict mapping provider names to their config:
+            {
+                "ollama": {
+                    "available": True,
+                    "models": ["qwen3:4b", "qwen3:8b", ...]
+                },
+                "openai": {
+                    "available": bool(self.openai_api_key),
+                    "models": ["gpt-4o", "gpt-4o-mini", ...]
+                },
+                ...
+            }
+        """
+        return {
+            "ollama": {
+                "available": True,  # Always available (local)
+                "models": [
+                    "qwen3:4b",
+                    "qwen3:8b",
+                    "mistral:7b",
+                    "deepseek-r1:8b",
+                ],
+            },
+            "openai": {
+                "available": bool(self.openai_api_key),
+                "models": [
+                    "gpt-4o",
+                    "gpt-4o-mini",
+                    "gpt-4-turbo",
+                    "o1-mini",
+                    "o3-mini",
+                ],
+            },
+            "anthropic": {
+                "available": bool(self.anthropic_api_key),
+                "models": [
+                    "claude-3-5-sonnet-20241022",
+                    "claude-3-5-haiku-20241022",
+                    "claude-3-opus-20240229",
+                ],
+            },
+        }
 
 
 settings = Settings()

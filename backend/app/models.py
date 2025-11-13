@@ -136,6 +136,13 @@ class Flight(BaseModel):
 # ============================================================================
 
 
+class SessionCreateRequest(BaseModel):
+    """Request model for creating a new chat session."""
+
+    provider: str | None = Field(default=None, description="LLM provider (ollama, openai, anthropic)")
+    model: str | None = Field(default=None, description="Model name for the provider")
+
+
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
 

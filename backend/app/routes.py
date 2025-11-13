@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.chat import ChatService
-from app.models import ChatRequest, StreamEvent
+from app.config import settings
+from app.models import ChatRequest, SessionCreateRequest, StreamEvent
 
 
 router = APIRouter()
@@ -85,20 +86,52 @@ async def chat(
 
 @router.post("/api/chat/session", status_code=status.HTTP_201_CREATED)
 async def create_session(
+    request: SessionCreateRequest = SessionCreateRequest(),
     chat_service: ChatService = Depends(get_chat_service),
 ) -> dict[str, str]:
-    """Create a new chat session.
+    """Create a new chat session with optional provider/model selection.
     
     Generates a new session ID and initializes chat history for that session.
+    Optionally accepts provider and model selection to override defaults.
     
     Args:
+        request: Session creation request with optional provider/model
         chat_service: Injected ChatService instance
         
     Returns:
-        Dictionary with session_id field
+        Dictionary with session_id, provider, and model fields
     """
-    session_id = chat_service.create_session()
-    return {"session_id": session_id}
+    # Validate provider and model if specified
+    if request.provider:
+        providers = settings.get_available_providers()
+        if request.provider not in providers:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid provider: {request.provider}. Available: {list(providers.keys())}",
+            )
+        if not providers[request.provider]["available"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Provider {request.provider} not available (missing API key)",
+            )
+        if request.model and request.model not in providers[request.provider]["models"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid model {request.model} for provider {request.provider}",
+            )
+    
+    session_id = chat_service.create_session(
+        provider=request.provider,
+        model=request.model,
+    )
+    
+    # Return session info including the resolved provider/model
+    metadata = chat_service._metadata[session_id]
+    return {
+        "session_id": session_id,
+        "provider": metadata["provider"],
+        "model": metadata["model"],
+    }
 
 
 @router.delete("/api/chat/session/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -144,3 +177,21 @@ async def health_check() -> dict[str, str]:
         Dictionary with status field
     """
     return {"status": "healthy"}
+
+
+@router.get("/api/providers")
+async def get_providers() -> dict[str, dict[str, list[str] | bool]]:
+    """Get available LLM providers and their models.
+    
+    Returns information about which providers are available (have credentials)
+    and what models each provider supports.
+    
+    Returns:
+        Dictionary mapping provider names to their configuration:
+        {
+            "ollama": {"available": True, "models": [...]},
+            "openai": {"available": False, "models": [...]},
+            ...
+        }
+    """
+    return settings.get_available_providers()
