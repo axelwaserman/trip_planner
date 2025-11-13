@@ -3,10 +3,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ToolCallCard } from './ToolCallCard'
-import { ToolResultCard } from './ToolResultCard'
+import { ToolExecutionCard } from './ToolExecutionCard'
 
-type MessageType = 'user' | 'assistant' | 'tool_call' | 'tool_result'
+type MessageType = 'user' | 'assistant' | 'tool_execution'
 
 interface ToolCallMetadata {
   tool_name: string
@@ -22,10 +21,15 @@ interface ToolResultMetadata {
   elapsed_ms: number
 }
 
+interface ToolExecutionData {
+  callMetadata: ToolCallMetadata
+  resultMetadata?: ToolResultMetadata
+}
+
 interface Message {
   role: MessageType
   content: string
-  metadata?: ToolCallMetadata | ToolResultMetadata
+  toolExecution?: ToolExecutionData
 }
 
 export function ChatInterface() {
@@ -125,20 +129,47 @@ export function ChatInterface() {
             }
 
             if (data.type === 'tool_call' && data.metadata) {
-              // Add tool_call message
+              // Add tool_execution message with call metadata
               setMessages((prev) => [
                 ...prev,
-                { role: 'tool_call', content: '', metadata: data.metadata },
+                {
+                  role: 'tool_execution',
+                  content: '',
+                  toolExecution: {
+                    callMetadata: data.metadata,
+                  },
+                },
               ])
               setSessionId(data.session_id)
             }
 
             if (data.type === 'tool_result' && data.metadata) {
-              // Add tool_result message
-              setMessages((prev) => [
-                ...prev,
-                { role: 'tool_result', content: '', metadata: data.metadata },
-              ])
+              // Update the last tool_execution message with result metadata
+              setMessages((prev) => {
+                // Find last tool_execution message
+                let lastToolIndex = -1
+                for (let i = prev.length - 1; i >= 0; i--) {
+                  if (prev[i].role === 'tool_execution') {
+                    lastToolIndex = i
+                    break
+                  }
+                }
+                
+                if (lastToolIndex !== -1) {
+                  return prev.map((msg, idx) =>
+                    idx === lastToolIndex && msg.toolExecution
+                      ? {
+                          ...msg,
+                          toolExecution: {
+                            ...msg.toolExecution,
+                            resultMetadata: data.metadata,
+                          },
+                        }
+                      : msg
+                  )
+                }
+                return prev
+              })
               // Reset for next assistant response
               accumulatedContent = ''
               currentAssistantIndex = -1
@@ -204,12 +235,15 @@ export function ChatInterface() {
                 return null
               }
 
-              // Tool messages render inline without flex wrapper
-              if (msg.role === 'tool_call' && msg.metadata) {
-                return <ToolCallCard key={idx} metadata={msg.metadata as ToolCallMetadata} />
-              }
-              if (msg.role === 'tool_result' && msg.metadata) {
-                return <ToolResultCard key={idx} metadata={msg.metadata as ToolResultMetadata} />
+              // Tool execution message
+              if (msg.role === 'tool_execution' && msg.toolExecution) {
+                return (
+                  <ToolExecutionCard
+                    key={idx}
+                    callMetadata={msg.toolExecution.callMetadata}
+                    resultMetadata={msg.toolExecution.resultMetadata}
+                  />
+                )
               }
 
               // User and assistant messages
