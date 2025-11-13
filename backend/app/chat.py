@@ -5,11 +5,11 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from app.domain.chat import StreamEvent, ToolCallMetadata, ToolResultMetadata
-from app.infrastructure.llm.provider import LLMProvider
 from app.infrastructure.storage.session import SessionStore
 from app.services.flight import FlightService
 from app.tools.flight_search import create_flight_search_tool
@@ -22,14 +22,14 @@ class ChatService:
         self,
         flight_service: FlightService,
         session_store: SessionStore,
-        llm_provider: LLMProvider,
+        llm_provider: BaseChatModel,
     ) -> None:
         """Initialize the chat service with tools, session storage, and LLM provider.
 
         Args:
             flight_service: FlightService instance for flight search tool
             session_store: SessionStore for managing conversation history
-            llm_provider: LLM provider for generating responses
+            llm_provider: LangChain BaseChatModel instance (ChatOllama, ChatOpenAI, etc.)
         """
         self.session_store = session_store
 
@@ -271,14 +271,14 @@ class ChatService:
 def create_chat_service(
     flight_service: FlightService,
     session_store: SessionStore,
-    llm_provider: LLMProvider,
+    llm_provider: BaseChatModel,
 ) -> ChatService:
     """Factory function to create ChatService with dependencies.
 
     Args:
         flight_service: FlightService instance for tools
         session_store: SessionStore for conversation history
-        llm_provider: LLM provider for generating responses
+        llm_provider: LangChain BaseChatModel instance
 
     Returns:
         Configured ChatService instance

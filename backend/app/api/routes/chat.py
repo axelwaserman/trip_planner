@@ -6,12 +6,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel
 
 from app.chat import ChatService, create_chat_service
 from app.domain.chat import ChatRequest
 from app.infrastructure.llm.factory import LLMProviderFactory, ProviderType
-from app.infrastructure.llm.provider import LLMProvider
 from app.infrastructure.storage.session import SessionStore
 from app.services.flight import FlightService
 
@@ -67,7 +67,7 @@ def get_chat_service(
         ChatService instance
     """
     # Get provider from app state (initialized in lifespan)
-    llm_provider: LLMProvider = request.app.state.llm_provider
+    llm_provider: BaseChatModel = request.app.state.llm_provider
     return create_chat_service(flight_service, session_store, llm_provider)
 
 

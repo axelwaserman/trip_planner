@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from app.infrastructure.llm.provider import LLMProvider
+from langchain_core.language_models.chat_models import BaseChatModel
+
 from app.infrastructure.storage.session import InMemorySessionStore
 from app.services.flight import FlightService
 
@@ -30,12 +31,12 @@ async def session_store() -> InMemorySessionStore:
 
 @pytest.fixture
 def mock_llm_provider() -> MagicMock:
-    """Create mock LLMProvider for testing.
+    """Create mock BaseChatModel for testing.
 
     Returns:
-        MagicMock LLMProvider with required methods
+        MagicMock BaseChatModel with required methods
     """
-    provider = MagicMock(spec=LLMProvider)
+    provider = MagicMock(spec=BaseChatModel)
     provider.model_name = "test-model"
 
     # Mock bind_tools to return self for method chaining
