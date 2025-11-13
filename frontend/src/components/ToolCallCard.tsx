@@ -1,4 +1,4 @@
-import { Box, Flex, Text, Spinner, Badge, Collapsible, Code } from '@chakra-ui/react'
+import { Box, Flex, Text, Spinner, Collapsible, Code } from '@chakra-ui/react'
 import { useState } from 'react'
 
 interface ToolCallMetadata {
@@ -27,14 +27,10 @@ export function ToolCallCard({ metadata }: ToolCallCardProps) {
     >
       {/* Header */}
       <Flex align="center" gap={2} mb={isOpen ? 2 : 0}>
-        {metadata.status === 'running' && <Spinner size="sm" color="blue.500" />}
-        {metadata.status === 'success' && <Text fontSize="xl">✓</Text>}
+        <Spinner size="sm" color="blue.500" />
         <Text fontWeight="semibold" color="blue.800">
           {metadata.tool_name.replace(/_/g, ' ')}
         </Text>
-        <Badge colorScheme="blue" size="sm">
-          {metadata.status}
-        </Badge>
       </Flex>
 
       {/* Expandable Arguments Section */}

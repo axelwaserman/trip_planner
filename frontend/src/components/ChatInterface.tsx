@@ -41,7 +41,7 @@ export function ChatInterface() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, isLoading])
 
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return
@@ -52,10 +52,6 @@ export function ChatInterface() {
 
     // Add user message
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }])
-
-    // Add empty assistant message that we'll update with chunks
-    const assistantMessageIndex = messages.length + 1
-    setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
     try {
       console.log('Sending message:', userMessage)
@@ -82,7 +78,7 @@ export function ChatInterface() {
       }
 
       let accumulatedContent = ''
-      let assistantIndex = assistantMessageIndex
+      let currentAssistantIndex = -1
 
       while (true) {
         const { done, value } = await reader.read()
@@ -106,15 +102,25 @@ export function ChatInterface() {
             }
 
             if (data.type === 'content' && data.chunk) {
-              accumulatedContent += data.chunk
-              // Update the assistant message with accumulated content
-              setMessages((prev) =>
-                prev.map((msg, idx) =>
-                  idx === assistantIndex
-                    ? { ...msg, content: accumulatedContent }
-                    : msg
+              // If we don't have an assistant message yet, create one
+              if (currentAssistantIndex === -1) {
+                setMessages((prev) => {
+                  const newMessages = [...prev, { role: 'assistant' as MessageType, content: data.chunk }]
+                  currentAssistantIndex = newMessages.length - 1
+                  return newMessages
+                })
+                accumulatedContent = data.chunk
+              } else {
+                // Update existing assistant message
+                accumulatedContent += data.chunk
+                setMessages((prev) =>
+                  prev.map((msg, idx) =>
+                    idx === currentAssistantIndex
+                      ? { ...msg, content: accumulatedContent }
+                      : msg
+                  )
                 )
-              )
+              }
               setSessionId(data.session_id)
             }
 
@@ -133,11 +139,9 @@ export function ChatInterface() {
                 ...prev,
                 { role: 'tool_result', content: '', metadata: data.metadata },
               ])
-              // Reset accumulated content for next assistant response
+              // Reset for next assistant response
               accumulatedContent = ''
-              // Add new empty assistant message for final response
-              setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
-              assistantIndex = messages.length + 3 // user + tool_call + tool_result + new assistant
+              currentAssistantIndex = -1
               setSessionId(data.session_id)
             }
           }
@@ -145,13 +149,13 @@ export function ChatInterface() {
       }
     } catch (error) {
       console.error('Chat error:', error)
-      setMessages((prev) =>
-        prev.map((msg, idx) =>
-          idx === assistantMessageIndex
-            ? { ...msg, content: 'Sorry, I encountered an error. Please try again.' }
-            : msg
-        )
-      )
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: 'Sorry, I encountered an error. Please try again.',
+        },
+      ])
     } finally {
       setIsLoading(false)
     }
@@ -195,6 +199,11 @@ export function ChatInterface() {
             </Box>
           ) : (
             messages.map((msg, idx) => {
+              // Skip empty assistant messages
+              if (msg.role === 'assistant' && !msg.content.trim()) {
+                return null
+              }
+
               // Tool messages render inline without flex wrapper
               if (msg.role === 'tool_call' && msg.metadata) {
                 return <ToolCallCard key={idx} metadata={msg.metadata as ToolCallMetadata} />
