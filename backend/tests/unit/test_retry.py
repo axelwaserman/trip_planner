@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from app.exceptions import APIClientError, APIServerError, APITimeoutError
-from app.utils.retry import retry_on_failure
+from app.tools.retry import retry_on_failure
 
 
 # Test helper functions

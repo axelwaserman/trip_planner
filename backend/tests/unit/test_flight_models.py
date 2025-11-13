@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.domain.models import Flight, FlightQuery
+from app.models import Flight, FlightQuery
 
 
 def test_flight_query_valid() -> None:

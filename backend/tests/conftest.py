@@ -5,28 +5,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from app.infrastructure.storage.session import InMemorySessionStore
-from app.services.flight import FlightService
+from app.tools.flight_client import MockFlightAPIClient
 
 
 @pytest.fixture
-def mock_flight_service() -> AsyncMock:
-    """Create mock FlightService for testing.
+def mock_flight_client() -> MockFlightAPIClient:
+    """Create MockFlightAPIClient for testing.
 
     Returns:
-        AsyncMock FlightService with mock methods
+        MockFlightAPIClient with fixed seed for reproducibility
     """
-    return AsyncMock(spec=FlightService)
-
-
-@pytest.fixture
-async def session_store() -> InMemorySessionStore:
-    """Create InMemorySessionStore for testing.
-
-    Returns:
-        Fresh InMemorySessionStore instance
-    """
-    return InMemorySessionStore(default_ttl_seconds=3600)
+    return MockFlightAPIClient(seed=42)
 
 
 @pytest.fixture

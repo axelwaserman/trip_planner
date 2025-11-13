@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
-from app.domain.models import Flight
+from app.models import Flight
 from app.main import app
 
 # Mark all tests in this module as slow E2E tests

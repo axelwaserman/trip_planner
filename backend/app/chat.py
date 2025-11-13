@@ -1,118 +1,83 @@
-"""Chat service using LangChain with tool calling via bind_tools()."""
+"""Chat service using LangChain with tool calling."""
 
+import time
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import tool
 
-from app.domain.chat import StreamEvent, ToolCallMetadata, ToolResultMetadata
-from app.infrastructure.storage.session import SessionStore
-from app.services.flight import FlightService
-from app.tools.flight_search import create_flight_search_tool
+from app.models import StreamEvent
+from app.tools.flight_client import FlightAPIClient
+from app.tools.flight_search import search_flights
 
 
 class ChatService:
     """Service for managing chat conversations with LangChain and tool calling."""
 
-    def __init__(
-        self,
-        flight_service: FlightService,
-        session_store: SessionStore,
-        llm_provider: BaseChatModel,
-    ) -> None:
-        """Initialize the chat service with tools, session storage, and LLM provider.
+    def __init__(self, flight_client: FlightAPIClient, llm: BaseChatModel) -> None:
+        """Initialize the chat service with flight client and LLM.
 
         Args:
-            flight_service: FlightService instance for flight search tool
-            session_store: SessionStore for managing conversation history
-            llm_provider: LangChain BaseChatModel instance (ChatOllama, ChatOpenAI, etc.)
+            flight_client: Flight API client for tool to use
+            llm: LangChain BaseChatModel instance (ChatOllama, ChatOpenAI, etc.)
         """
-        self.session_store = session_store
+        self._histories: dict[str, InMemoryChatMessageHistory] = {}
+        self._last_activity: dict[str, float] = {}
+        
+        # Inject flight client into the tool
+        setattr(search_flights, "_flight_client", flight_client)
+        
+        # Bind tools to LLM
+        self.llm = llm.bind_tools([search_flights])
 
-        # Create flight search tool function
-        flight_search_func = create_flight_search_tool(flight_service)
+    def create_session(self) -> str:
+        """Create a new chat session.
 
-        # Convert to LangChain tool decorator format
-        self.search_flights_tool = tool(flight_search_func)
+        Returns:
+            New session ID (UUID)
+        """
+        session_id = str(uuid.uuid4())
+        self._histories[session_id] = InMemoryChatMessageHistory()
+        self._last_activity[session_id] = time.time()
+        return session_id
 
-        # Bind tools to the LLM provider
-        self.llm = llm_provider.bind_tools([self.search_flights_tool])
-
-    async def _get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
-        """Get chat history for a session from storage.
+    def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory | None:
+        """Get history for a session.
 
         Args:
             session_id: Session identifier
 
         Returns:
-            Chat message history for the session
+            Chat history if session exists, None otherwise
         """
-        return await self.session_store.get_history(session_id)
+        if session_id in self._histories:
+            self._last_activity[session_id] = time.time()
+            return self._histories[session_id]
+        return None
 
-    async def chat(self, message: str, session_id: str) -> tuple[str, str]:
-        """Send a message and get a response with tool calling support.
+    def cleanup_expired_sessions(self, max_age_seconds: int = 3600) -> int:
+        """Remove expired sessions based on inactivity.
 
         Args:
-            message: User message
-            session_id: Session ID (required - no auto-generation)
+            max_age_seconds: Maximum age since last activity (default: 1 hour)
 
         Returns:
-            Tuple of (response, session_id)
-
-        Note:
-            This method is deprecated. Use chat_stream() for streaming responses.
+            Number of sessions cleaned up
         """
-        # Get chat history from session store
-        history = await self._get_session_history(session_id)
+        now = time.time()
+        expired = [
+            sid
+            for sid, last_active in self._last_activity.items()
+            if now - last_active > max_age_seconds
+        ]
 
-        # Build messages with history
-        from langchain_core.messages import BaseMessage
-        
-        history_messages: list[BaseMessage] = list(history.messages)
-        messages: list[BaseMessage] = [*history_messages, HumanMessage(content=message)]
+        for session_id in expired:
+            self._histories.pop(session_id, None)
+            self._last_activity.pop(session_id, None)
 
-        # Invoke LLM (may return tool calls)
-        result = await self.llm.ainvoke(messages)
-
-        # Check if LLM wants to call tools
-        response_text: str
-        if isinstance(result, AIMessage) and result.tool_calls:
-            # Execute tool calls
-            from langchain_core.messages import ToolMessage
-            
-            tool_messages: list[ToolMessage] = []
-            for tool_call in result.tool_calls:
-                if tool_call["name"] == "search_flights":
-                    # Execute the tool
-                    tool_result = await self.search_flights_tool.ainvoke(tool_call["args"])
-                    tool_messages.append(
-                        ToolMessage(
-                            content=str(tool_result),
-                            tool_call_id=tool_call.get("id", ""),
-                        )
-                    )
-
-            # Get final response after tool execution
-            messages_with_tools: list[BaseMessage] = [
-                *messages,
-                result,  # AI message with tool calls
-                *tool_messages,  # Tool results
-            ]
-            final_result = await self.llm.ainvoke(messages_with_tools)
-            response_text = str(final_result.content) if hasattr(final_result, "content") else str(final_result)
-        else:
-            # No tool calls, use response directly
-            response_text = str(result.content) if hasattr(result, "content") else str(result)
-
-        # Add messages to history
-        history.add_user_message(message)
-        history.add_ai_message(response_text)
-
-        return response_text, session_id
+        return len(expired)
 
     async def chat_stream(
         self, message: str, session_id: str
@@ -121,13 +86,19 @@ class ChatService:
 
         Args:
             message: User message
-            session_id: Session ID (required - no auto-generation)
+            session_id: Session ID for conversation continuity
 
         Yields:
-            StreamEvent objects with chunk, session_id, event_type, and metadata
+            StreamEvent objects with simplified structure
         """
-        # Get chat history from session store
-        history = await self._get_session_history(session_id)
+        history = self.get_session_history(session_id)
+        if not history:
+            yield StreamEvent(
+                chunk="",
+                session_id=session_id,
+                event_type="content",
+            )
+            return
 
         # Build messages with history
         from langchain_core.messages import BaseMessage
@@ -135,101 +106,86 @@ class ChatService:
         history_messages: list[BaseMessage] = list(history.messages)
         messages: list[BaseMessage] = [*history_messages, HumanMessage(content=message)]
 
-        # Track if we've called tools
+        # Track state
         tool_was_called = False
         accumulated_content = ""
-        accumulated_thinking = ""
-        tool_call_message = None  # Store the AI message with tool calls
-        tool_results = []  # Store tool results
+        tool_call_message = None
+        tool_results = []
 
         # Stream LLM response
         async for chunk in self.llm.astream(messages):
-            # Check for reasoning_content in additional_kwargs (comes as individual tokens/words)
+            # Check for reasoning_content (thinking)
             has_thinking = False
             if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
                 reasoning = chunk.additional_kwargs.get("reasoning_content")
                 if reasoning:
                     has_thinking = True
-                    # reasoning_content already contains just the new chunk, yield it directly
                     yield StreamEvent(
                         chunk=reasoning,
                         session_id=session_id,
                         event_type="thinking",
-                        metadata=None
                     )
-                    accumulated_thinking += reasoning
-            
-            # Only process content if this chunk doesn't have thinking
-            # (chunks with thinking have content=thinking summary, not actual response)
+
+            # Process content (only if not thinking)
             if not has_thinking and hasattr(chunk, "content") and chunk.content:
                 content = chunk.content
-                
                 if content.strip():
                     accumulated_content += content
                     yield StreamEvent(
                         chunk=content,
                         session_id=session_id,
                         event_type="content",
-                        metadata=None
                     )
 
-            # Check if this chunk contains tool calls
+            # Check for tool calls
             if isinstance(chunk, AIMessage) and chunk.tool_calls:
-                import time
                 tool_was_called = True
-                tool_call_message = chunk  # Save the tool call message
-                # Execute tool calls
+                tool_call_message = chunk
+                
                 from langchain_core.messages import ToolMessage
 
                 tool_messages: list[ToolMessage] = []
                 for tool_call in chunk.tool_calls:
                     if tool_call["name"] == "search_flights":
-                        # Emit tool_call event with metadata
+                        # Emit tool_call event
                         tool_start_time = time.time()
                         yield StreamEvent(
                             chunk="",
                             session_id=session_id,
                             event_type="tool_call",
-                            metadata=ToolCallMetadata(
-                                tool_name=tool_call["name"],
-                                arguments=tool_call["args"],
-                                started_at=tool_start_time,
-                                status="running"
-                            )
+                            tool_name=tool_call["name"],
+                            tool_args=tool_call["args"],
                         )
-                        
+
                         # Execute the tool
-                        tool_result = await self.search_flights_tool.ainvoke(tool_call["args"])
+                        tool_result = await search_flights.ainvoke(tool_call["args"])
                         tool_end_time = time.time()
                         elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
-                        
-                        # Emit tool_result event with metadata
+
+                        # Emit tool_result event
                         yield StreamEvent(
                             chunk="",
                             session_id=session_id,
                             event_type="tool_result",
-                            metadata=ToolResultMetadata(
-                                summary=f"Found flights from {tool_call['args'].get('origin')} to {tool_call['args'].get('destination')}",
-                                full_result=str(tool_result),
-                                status="success",
-                                elapsed_ms=elapsed_ms
-                            )
+                            tool_name=tool_call["name"],
+                            tool_result=str(tool_result),
+                            elapsed_ms=elapsed_ms,
                         )
-                        
+
                         tool_messages.append(
                             ToolMessage(
                                 content=str(tool_result),
                                 tool_call_id=tool_call.get("id", ""),
                             )
                         )
-                
-                tool_results = tool_messages  # Save tool results
+
+                tool_results = tool_messages
 
                 # Get final response after tool execution
                 messages_with_tools: list[BaseMessage] = [
                     *messages,
-                    chunk,  # AI message with tool calls
-                    *tool_messages,  # Tool results
+                    chunk,
+                    *tool_messages,
                 ]
 
                 # Stream the final response
@@ -241,50 +197,25 @@ class ChatService:
                             chunk=final_chunk.content,
                             session_id=session_id,
                             event_type="content",
-                            metadata=None
                         )
 
                 accumulated_content = accumulated_final
-                break  # Exit the outer loop since we've handled the tool call
+                break
 
-        # Add messages to history - include tool calls and results for proper context
+        # Add messages to history
         history.add_user_message(message)
-        
+
         if tool_was_called and tool_call_message and tool_results:
-            # Add the full conversation flow: user -> AI with tool calls -> tool results -> final AI response
             history.add_message(tool_call_message)
             for tool_msg in tool_results:
                 history.add_message(tool_msg)
-        
+
         history.add_ai_message(accumulated_content)
 
-        # If no content was accumulated, yield empty string to maintain stream
+        # Ensure at least one content event
         if not accumulated_content:
             yield StreamEvent(
                 chunk="",
                 session_id=session_id,
                 event_type="content",
-                metadata=None
             )
-
-
-def create_chat_service(
-    flight_service: FlightService,
-    session_store: SessionStore,
-    llm_provider: BaseChatModel,
-) -> ChatService:
-    """Factory function to create ChatService with dependencies.
-
-    Args:
-        flight_service: FlightService instance for tools
-        session_store: SessionStore for conversation history
-        llm_provider: LangChain BaseChatModel instance
-
-    Returns:
-        Configured ChatService instance
-    """
-    return ChatService(
-        flight_service=flight_service,
-        session_store=session_store,
-        llm_provider=llm_provider,
-    )

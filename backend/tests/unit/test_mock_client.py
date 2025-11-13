@@ -5,9 +5,9 @@ from decimal import Decimal
 
 import pytest
 
-from app.domain.models import FlightQuery
+from app.models import FlightQuery
 from app.exceptions import FlightSearchError
-from app.infrastructure.clients.mock import MockFlightAPIClient
+from app.tools.flight_client import MockFlightAPIClient
 
 
 @pytest.fixture
