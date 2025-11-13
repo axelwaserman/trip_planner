@@ -10,6 +10,7 @@ from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 
 from app.config import settings
+from app.domain.chat import StreamEvent
 from app.services.flight import FlightService
 from app.tools.flight_search import create_flight_search_tool
 
@@ -118,7 +119,7 @@ class ChatService:
 
     async def chat_stream(
         self, message: str, session_id: str | None = None
-    ) -> AsyncGenerator[tuple[str, str, str, dict[str, Any] | None], None]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a chat response chunk by chunk with tool calling support.
 
         Args:
@@ -126,11 +127,7 @@ class ChatService:
             session_id: Optional session ID for conversation continuity
 
         Yields:
-            Tuples of (chunk, session_id, event_type, metadata) where:
-            - chunk: Content text or empty string
-            - session_id: Session identifier
-            - event_type: "content" | "tool_call" | "tool_result"
-            - metadata: Event-specific data or None
+            StreamEvent objects with chunk, session_id, event_type, and metadata
         """
         if session_id is None:
             session_id = str(uuid.uuid4())
@@ -155,7 +152,12 @@ class ChatService:
             if hasattr(chunk, "content") and chunk.content:
                 # Stream content chunks
                 accumulated_content += chunk.content
-                yield chunk.content, session_id, "content", None
+                yield StreamEvent(
+                    chunk=chunk.content,
+                    session_id=session_id,
+                    event_type="content",
+                    metadata=None
+                )
 
             # Check if this chunk contains tool calls
             if isinstance(chunk, AIMessage) and chunk.tool_calls:
@@ -170,12 +172,17 @@ class ChatService:
                     if tool_call["name"] == "search_flights":
                         # Emit tool_call event with metadata
                         tool_start_time = time.time()
-                        yield "", session_id, "tool_call", {
-                            "tool_name": tool_call["name"],
-                            "arguments": tool_call["args"],
-                            "started_at": tool_start_time,
-                            "status": "running"
-                        }
+                        yield StreamEvent(
+                            chunk="",
+                            session_id=session_id,
+                            event_type="tool_call",
+                            metadata={
+                                "tool_name": tool_call["name"],
+                                "arguments": tool_call["args"],
+                                "started_at": tool_start_time,
+                                "status": "running"
+                            }
+                        )
                         
                         # Execute the tool
                         tool_result = await self.search_flights_tool.ainvoke(tool_call["args"])
@@ -183,12 +190,17 @@ class ChatService:
                         elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
                         
                         # Emit tool_result event with metadata
-                        yield "", session_id, "tool_result", {
-                            "summary": f"Found flights from {tool_call['args'].get('origin')} to {tool_call['args'].get('destination')}",
-                            "full_result": str(tool_result),
-                            "status": "success",
-                            "elapsed_ms": elapsed_ms
-                        }
+                        yield StreamEvent(
+                            chunk="",
+                            session_id=session_id,
+                            event_type="tool_result",
+                            metadata={
+                                "summary": f"Found flights from {tool_call['args'].get('origin')} to {tool_call['args'].get('destination')}",
+                                "full_result": str(tool_result),
+                                "status": "success",
+                                "elapsed_ms": elapsed_ms
+                            }
+                        )
                         
                         tool_messages.append(
                             ToolMessage(
@@ -211,7 +223,12 @@ class ChatService:
                 async for final_chunk in self.llm.astream(messages_with_tools):
                     if hasattr(final_chunk, "content") and final_chunk.content:
                         accumulated_final += final_chunk.content
-                        yield final_chunk.content, session_id, "content", None
+                        yield StreamEvent(
+                            chunk=final_chunk.content,
+                            session_id=session_id,
+                            event_type="content",
+                            metadata=None
+                        )
 
                 accumulated_content = accumulated_final
                 break  # Exit the outer loop since we've handled the tool call
@@ -229,7 +246,12 @@ class ChatService:
 
         # If no content was accumulated, yield empty string to maintain stream
         if not accumulated_content:
-            yield "", session_id, "content", None
+            yield StreamEvent(
+                chunk="",
+                session_id=session_id,
+                event_type="content",
+                metadata=None
+            )
 
 
 def create_chat_service(flight_service: FlightService) -> ChatService:

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -50,4 +50,20 @@ class ChatResponse(BaseModel):
 
     response: str = Field(..., description="Agent's response message")
     session_id: str = Field(..., description="Session ID for this conversation")
+
+
+class StreamEvent(BaseModel):
+    """Event emitted during chat streaming.
+    
+    Used for Server-Sent Events (SSE) to stream chat responses with tool visibility.
+    """
+
+    chunk: str = Field(default="", description="Content chunk or empty string for tool events")
+    session_id: str = Field(..., description="Session ID for this conversation")
+    event_type: Literal["content", "tool_call", "tool_result"] = Field(
+        ..., description="Type of event being streamed"
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None, description="Event-specific metadata (ToolCallMetadata or ToolResultMetadata as dict)"
+    )
 

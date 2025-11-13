@@ -47,28 +47,28 @@ async def chat(
         """Generate Server-Sent Events for streaming response."""
         try:
             session_id = None
-            async for chunk, sid, event_type, metadata in chat_service.chat_stream(request.message, request.session_id):
-                session_id = sid
+            async for event in chat_service.chat_stream(request.message, request.session_id):
+                session_id = event.session_id
                 
                 # Send different SSE events based on event_type
-                if event_type == "tool_call":
+                if event.event_type == "tool_call":
                     data = json.dumps({
                         "type": "tool_call",
                         "session_id": session_id,
-                        "metadata": metadata
+                        "metadata": event.metadata
                     })
                     yield f"data: {data}\n\n"
-                elif event_type == "tool_result":
+                elif event.event_type == "tool_result":
                     data = json.dumps({
                         "type": "tool_result",
                         "session_id": session_id,
-                        "metadata": metadata
+                        "metadata": event.metadata
                     })
                     yield f"data: {data}\n\n"
-                elif event_type == "content":
+                elif event.event_type == "content":
                     data = json.dumps({
                         "type": "content",
-                        "chunk": chunk,
+                        "chunk": event.chunk,
                         "session_id": session_id
                     })
                     yield f"data: {data}\n\n"

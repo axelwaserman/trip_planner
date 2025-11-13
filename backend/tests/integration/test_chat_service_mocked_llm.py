@@ -46,10 +46,8 @@ async def test_chat_stream_emits_tool_call_event(mock_flight_service: FlightServ
 
         # Stream chat and collect events
         events = []
-        async for chunk, session_id, event_type, metadata in chat_service.chat_stream(
-            "Find flights from LAX to JFK"
-        ):
-            events.append((event_type, metadata))
+        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+            events.append((event.event_type, event.metadata))
 
         # Verify tool_call event was emitted
         tool_call_events = [e for e in events if e[0] == "tool_call"]
@@ -78,10 +76,8 @@ async def test_chat_stream_emits_tool_result_event(mock_flight_service: FlightSe
 
         # Stream chat and collect events
         events = []
-        async for chunk, session_id, event_type, metadata in chat_service.chat_stream(
-            "Find flights from LAX to JFK"
-        ):
-            events.append((event_type, metadata))
+        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+            events.append((event.event_type, event.metadata))
 
         # Verify tool_result event was emitted
         tool_result_events = [e for e in events if e[0] == "tool_result"]
@@ -112,11 +108,9 @@ async def test_chat_stream_executes_tool_with_correct_arguments(
 
         # Collect tool call arguments
         tool_args = None
-        async for chunk, session_id, event_type, metadata in chat_service.chat_stream(
-            "Find flights from LAX to JFK"
-        ):
-            if event_type == "tool_call" and metadata:
-                tool_args = metadata["arguments"]
+        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+            if event.event_type == "tool_call" and event.metadata:
+                tool_args = event.metadata["arguments"]
 
         # Verify tool was called with correct arguments
         assert tool_args is not None
@@ -142,10 +136,8 @@ async def test_chat_stream_no_tool_events_for_general_conversation(
 
         # Stream chat and collect events
         events = []
-        async for chunk, session_id, event_type, metadata in chat_service.chat_stream(
-            "Hello, how are you?"
-        ):
-            events.append((event_type, metadata))
+        async for event in chat_service.chat_stream("Hello, how are you?"):
+            events.append((event.event_type, event.metadata))
 
         # Verify no tool events
         tool_call_events = [e for e in events if e[0] == "tool_call"]
@@ -174,11 +166,9 @@ async def test_chat_stream_includes_summary_in_tool_result(
 
         # Get tool result
         result_metadata = None
-        async for chunk, session_id, event_type, metadata in chat_service.chat_stream(
-            "Find flights from LAX to JFK"
-        ):
-            if event_type == "tool_result" and metadata:
-                result_metadata = metadata
+        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+            if event.event_type == "tool_result" and event.metadata:
+                result_metadata = event.metadata
                 break
 
         assert result_metadata is not None
@@ -209,11 +199,9 @@ async def test_chat_stream_measures_tool_execution_time(
 
         # Get tool result
         result_metadata = None
-        async for chunk, session_id, event_type, metadata in chat_service.chat_stream(
-            "Find flights from LAX to JFK"
-        ):
-            if event_type == "tool_result" and metadata:
-                result_metadata = metadata
+        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+            if event.event_type == "tool_result" and event.metadata:
+                result_metadata = event.metadata
                 break
 
         assert result_metadata is not None
@@ -240,10 +228,10 @@ async def test_chat_stream_preserves_session_across_tool_calls(
 
         # Collect session IDs
         session_ids = set()
-        async for chunk, session_id, event_type, metadata in chat_service.chat_stream(
+        async for event in chat_service.chat_stream(
             "Find flights from LAX to JFK", session_id="test-session-123"
         ):
-            session_ids.add(session_id)
+            session_ids.add(event.session_id)
 
         # All events should have the same session ID
         assert len(session_ids) == 1
@@ -266,10 +254,8 @@ async def test_chat_stream_adds_tool_messages_to_history(
 
         # First message with tool call
         session_id = None
-        async for chunk, sid, event_type, metadata in chat_service.chat_stream(
-            "Find flights from LAX to JFK"
-        ):
-            session_id = sid
+        async for event in chat_service.chat_stream("Find flights from LAX to JFK"):
+            session_id = event.session_id
 
         # Check conversation history
         history = chat_service._get_session_history(session_id)
