@@ -3,7 +3,7 @@
 ## Project Overview
 AI-powered trip planner: FastAPI + async + LangChain 1.0 for backend, React + TypeScript + Chakra UI for frontend.
 
-**Docs**: [backend/README.md](backend/README.md) | [PLAN.md](PLAN.md)
+**Docs**: [NOW.md](NOW.md) | [ROADMAP.md](ROADMAP.md) | [ARCHITECTURE.md](ARCHITECTURE.md) | [backend/README.md](backend/README.md)
 
 ---
 
@@ -138,6 +138,38 @@ async def endpoint(
     service = FlightService(client=client)
     return await service.search_flights(query)
 ```
+
+---
+
+## Project Documentation Structure
+
+**Follow this structure when reading/updating project docs:**
+
+- **`NOW.md`** - Ultra-focused current task (update this frequently)
+  - Current task with 3-5 subtask checkboxes
+  - Links to relevant ARCHITECTURE sections
+  - Blockers and next task
+  
+- **`ROADMAP.md`** - High-level phase overview (collapsed completed work)
+  - Phase status with emoji indicators (✅ 🔄 📋)
+  - Brief phase descriptions only
+  - Expand active phase, collapse completed phases
+  
+- **`ARCHITECTURE.md`** - Code patterns and technical decisions
+  - Design principles and named patterns
+  - Integration guides (LangChain, FastAPI, etc.)
+  - ADRs inline with context on why decisions were made
+  
+- **`phases/*.md`** - Detailed task breakdowns (active + next phase only)
+  - Checkpoint structure with tasks
+  - Success criteria
+  - Delete after phase completion
+
+**When starting work:** Read `NOW.md` first, reference `ARCHITECTURE.md` as needed
+
+**When completing work:** Update `NOW.md` with next task, mark checkboxes in phase file
+
+**When making architecture decisions:** Add to `ARCHITECTURE.md` with rationale
 
 ---
 

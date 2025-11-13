@@ -204,10 +204,11 @@ FlightSearchError (business logic errors)
 - **uvicorn** - ASGI server
 
 ## Future Roadmap
-See [PLAN.md](../PLAN.md) for detailed implementation phases:
+See [ROADMAP.md](../ROADMAP.md) for detailed implementation phases and [ARCHITECTURE.md](../ARCHITECTURE.md) for code patterns:
 - ✅ Phase 1: Foundation & FastAPI Setup
 - ✅ Phase 2: LangChain Integration & Chat Agent
-- 🚧 Phase 3: Mock Flight Search Tool (in progress)
+- ✅ Phase 3: Mock Flight Search Tool
+- 🚧 Pre-Phase 4: Technical Debt Refactor (in progress)
 - 📋 Phase 4: Enhanced Frontend & LLM Provider Flexibility
 - 📋 Phase 5: Real API Integration (Amadeus)
 - 📋 Phase 6: Production Readiness
