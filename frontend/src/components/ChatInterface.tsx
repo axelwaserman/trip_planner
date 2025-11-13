@@ -3,10 +3,29 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { ToolCallCard } from './ToolCallCard'
+import { ToolResultCard } from './ToolResultCard'
+
+type MessageType = 'user' | 'assistant' | 'tool_call' | 'tool_result'
+
+interface ToolCallMetadata {
+  tool_name: string
+  arguments: Record<string, unknown>
+  started_at: number
+  status: string
+}
+
+interface ToolResultMetadata {
+  summary: string
+  full_result: string
+  status: string
+  elapsed_ms: number
+}
 
 interface Message {
-  role: 'user' | 'assistant'
+  role: MessageType
   content: string
+  metadata?: ToolCallMetadata | ToolResultMetadata
 }
 
 export function ChatInterface() {
@@ -63,6 +82,7 @@ export function ChatInterface() {
       }
 
       let accumulatedContent = ''
+      let assistantIndex = assistantMessageIndex
 
       while (true) {
         const { done, value } = await reader.read()
@@ -75,26 +95,49 @@ export function ChatInterface() {
           if (line.startsWith('data: ')) {
             const data = JSON.parse(line.slice(6))
 
-            if (data.error) {
+            if (data.type === 'error') {
               throw new Error(data.error)
             }
 
-            if (data.done) {
+            if (data.type === 'done') {
               // Stream complete
               setSessionId(data.session_id)
               break
             }
 
-            if (data.chunk) {
+            if (data.type === 'content' && data.chunk) {
               accumulatedContent += data.chunk
               // Update the assistant message with accumulated content
               setMessages((prev) =>
                 prev.map((msg, idx) =>
-                  idx === assistantMessageIndex
+                  idx === assistantIndex
                     ? { ...msg, content: accumulatedContent }
                     : msg
                 )
               )
+              setSessionId(data.session_id)
+            }
+
+            if (data.type === 'tool_call' && data.metadata) {
+              // Add tool_call message
+              setMessages((prev) => [
+                ...prev,
+                { role: 'tool_call', content: '', metadata: data.metadata },
+              ])
+              setSessionId(data.session_id)
+            }
+
+            if (data.type === 'tool_result' && data.metadata) {
+              // Add tool_result message
+              setMessages((prev) => [
+                ...prev,
+                { role: 'tool_result', content: '', metadata: data.metadata },
+              ])
+              // Reset accumulated content for next assistant response
+              accumulatedContent = ''
+              // Add new empty assistant message for final response
+              setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+              assistantIndex = messages.length + 3 // user + tool_call + tool_result + new assistant
               setSessionId(data.session_id)
             }
           }
@@ -151,23 +194,33 @@ export function ChatInterface() {
               </Text>
             </Box>
           ) : (
-            messages.map((msg, idx) => (
-              <Flex
-                key={idx}
-                justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}
-              >
-                <Box
-                  bg={msg.role === 'user' ? 'blue.500' : 'white'}
-                  color={msg.role === 'user' ? 'white' : 'gray.800'}
-                  px={4}
-                  py={3}
-                  rounded="lg"
-                  maxW="80%"
-                  boxShadow="sm"
-                  borderWidth={msg.role === 'assistant' ? '1px' : '0'}
-                  borderColor="gray.200"
+            messages.map((msg, idx) => {
+              // Tool messages render inline without flex wrapper
+              if (msg.role === 'tool_call' && msg.metadata) {
+                return <ToolCallCard key={idx} metadata={msg.metadata as ToolCallMetadata} />
+              }
+              if (msg.role === 'tool_result' && msg.metadata) {
+                return <ToolResultCard key={idx} metadata={msg.metadata as ToolResultMetadata} />
+              }
+
+              // User and assistant messages
+              return (
+                <Flex
+                  key={idx}
+                  justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}
                 >
-                  {msg.role === 'assistant' ? (
+                  <Box
+                    bg={msg.role === 'user' ? 'blue.500' : 'white'}
+                    color={msg.role === 'user' ? 'white' : 'gray.800'}
+                    px={4}
+                    py={3}
+                    rounded="lg"
+                    maxW="80%"
+                    boxShadow="sm"
+                    borderWidth={msg.role === 'assistant' ? '1px' : '0'}
+                    borderColor="gray.200"
+                  >
+                    {msg.role === 'assistant' ? (
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
@@ -209,7 +262,8 @@ export function ChatInterface() {
                   )}
                 </Box>
               </Flex>
-            ))
+            )
+          })
           )}
           {isLoading && (
             <Flex justify="flex-start">
