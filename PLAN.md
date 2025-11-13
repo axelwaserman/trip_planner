@@ -165,69 +165,58 @@ This phase uses **LangChain 1.0** (installed: `langchain==1.0.3`):
 - Mobile-first responsive design
 
 #### Backend Tasks
-- [ ] **Update domain models** (`app/domain/chat.py`):
-  - [ ] Add `MessageType` enum: `user`, `assistant`, `tool_call`, `tool_result`
-  - [ ] Extend `ChatRequest` to support typed messages
-  - [ ] Create `ToolCallMetadata` model (tool name, arguments, started_at, completed_at)
-  - [ ] Create `ToolResultMetadata` model (tool name, summary, full result, status)
+- [x] **Update domain models** (`app/domain/chat.py`):
+  - [x] Add `MessageType` enum: `user`, `assistant`, `tool_call`, `tool_result`, `thinking`
+  - [x] Extend `ChatRequest` to support typed messages
+  - [x] Create `ToolCallMetadata` model (tool name, arguments, started_at, status)
+  - [x] Create `ToolResultMetadata` model (summary, full result, status, elapsed_ms)
   
-- [ ] **Update SSE streaming** (`app/api/routes/chat.py`):
-  - [ ] Emit separate events for tool call start: `{"type": "tool_call", "tool_name": "search_flights", "arguments": {...}}`
-  - [ ] Emit tool execution status updates: `{"type": "tool_status", "status": "executing"}`
-  - [ ] Emit tool result as separate message: `{"type": "tool_result", "summary": "...", "full_result": "..."}`
-  - [ ] Continue streaming assistant response after tool execution
+- [x] **Update SSE streaming** (`app/api/routes/chat.py`):
+  - [x] Emit separate events for tool call start: `{"type": "tool_call", "metadata": {...}}`
+  - [x] Emit tool result as separate message: `{"type": "tool_result", "metadata": {...}}`
+  - [x] Emit thinking events: `{"type": "thinking", "chunk": "..."}`
+  - [x] Continue streaming assistant response after tool execution
   
-- [ ] **Update ChatService** (`app/chat.py`):
-  - [ ] Track tool execution timing (start/end timestamps)
-  - [ ] Generate summary for tool results (first 2-3 lines of formatted output)
-  - [ ] Store tool call and result messages in conversation history
-  - [ ] Ensure message history includes all message types for context
+- [x] **Update ChatService** (`app/chat.py`):
+  - [x] Track tool execution timing (start/end timestamps with elapsed_ms)
+  - [x] Generate summary for tool results (origin → destination format)
+  - [x] Store tool call and result messages in conversation history
+  - [x] Added `reasoning=True` for qwen3:4b thinking tokens
+  - [x] Fetch thinking content via direct ollama API call (httpx)
 
 #### Frontend Tasks
-- [ ] **Update Message interface** (`ChatInterface.tsx`):
-  ```tsx
-  interface Message {
-    role: 'user' | 'assistant' | 'tool_call' | 'tool_result'
-    content: string
-    metadata?: {
-      toolName?: string
-      arguments?: Record<string, any>
-      summary?: string
-      fullResult?: string
-      status?: 'executing' | 'complete' | 'error'
-      elapsedMs?: number
-      startedAt?: string
-      completedAt?: string
-    }
-  }
-  ```
+- [x] **Update Message interface** (`ChatInterface.tsx`):
+  - [x] Extended MessageType: `'user' | 'assistant' | 'tool_execution' | 'thinking'`
+  - [x] Added `toolExecution` property with `callMetadata` and optional `resultMetadata`
+  - [x] Metadata includes tool name, arguments, status, elapsed_ms, summary, full_result
 
-- [ ] **Create `ToolCallCard` component**:
-  - [ ] Show tool icon (✈️ for flights) + tool name
-  - [ ] Display status indicator (spinner when executing, checkmark when complete)
-  - [ ] Show elapsed time
-  - [ ] Expandable section showing tool arguments (e.g., "JFK → LAX, 2025-12-15")
-  - [ ] Mobile-optimized (collapsible by default on small screens)
+- [x] **Create unified `ToolExecutionCard` component**:
+  - [x] Show tool icon (✈️ for flights) + tool name
+  - [x] Display status indicator (spinner when executing, checkmark when complete)
+  - [x] Show elapsed time (only when complete)
+  - [x] Expandable section showing tool arguments (collapsible)
+  - [x] Expandable section showing results (collapsible)
+  - [x] Blue theme when loading, green theme when complete
+  - [x] Single card transitions from loading to complete state
 
-- [ ] **Create `ToolResultCard` component**:
-  - [ ] Collapsed by default, showing only summary
-  - [ ] Dropdown/chevron icon to expand full results
-  - [ ] Full results shown in scrollable container with markdown rendering
-  - [ ] "View on site" button/link support (for future external links)
-  - [ ] Copy button to copy full results to clipboard
-  - [ ] Mobile-friendly accordion pattern
+- [x] **Create `ThinkingCard` component**:
+  - [x] Purple theme (purple.50 background, purple.200 border)
+  - [x] Shows "💭 Thinking..." header
+  - [x] Collapsed by default with 2-line preview
+  - [x] Expandable to show full thinking content
+  - [x] Mobile-friendly accordion pattern
 
-- [ ] **Enhanced loading states**:
-  - [ ] Replace "Thinking..." with animated typing indicator (three dots)
-  - [ ] Show context-aware status: "Analyzing your request..." → "Searching flights..." → "Processing results..."
-  - [ ] Smooth transitions between states
+- [x] **Enhanced loading states**:
+  - [x] Loading spinner during message sending
+  - [x] Dynamic content accumulation during streaming
+  - [x] Tool execution status clearly visible
 
-- [ ] **Message rendering logic**:
-  - [ ] Separate rendering functions per message type
-  - [ ] User messages: Right-aligned, blue background
-  - [ ] Assistant messages: Left-aligned, white background, markdown support
-  - [ ] Tool call messages: `<ToolCallCard>` component
-  - [ ] Tool result messages: `<ToolResultCard>` component
+- [x] **Message rendering logic**:
+  - [x] Separate rendering per message type
+  - [x] User messages: Right-aligned, blue background
+  - [x] Assistant messages: Left-aligned, gray background, markdown support
+  - [x] Tool execution messages: `<ToolExecutionCard>` component
+  - [x] Thinking messages: `<ThinkingCard>` component
 
 - [ ] **Mobile responsiveness**:
   - [ ] Test on 320px, 375px, 768px viewports
@@ -251,12 +240,13 @@ This phase uses **LangChain 1.0** (installed: `langchain==1.0.3`):
   - [ ] Verify message history maintains all tool calls/results after refresh
 
 **Success Criteria**: 
-- ✅ Tool execution is clearly visible with dedicated message cards
+- ✅ Tool execution is clearly visible with dedicated unified card (blue→green transition)
 - ✅ Tool arguments are visible in expandable dropdown
-- ✅ Tool results are collapsible with summary preview
-- ✅ Loading states provide context-aware feedback
-- ✅ UI works smoothly on mobile devices (320px+)
-- ✅ All message types persist in conversation history
+- ✅ Tool results are collapsible with expandable full results
+- ✅ Thinking tokens stream and display in purple ThinkingCard
+- ✅ Loading states provide clear visual feedback (spinner, checkmark)
+- [ ] UI works smoothly on mobile devices (320px+) - Testing pending
+- ✅ All message types (user, assistant, tool_execution, thinking) render correctly
 
 ---
 

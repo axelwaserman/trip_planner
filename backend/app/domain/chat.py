@@ -58,7 +58,7 @@ class StreamEvent(BaseModel):
 
     chunk: str = Field(default="", description="Content chunk or empty string for tool events")
     session_id: str = Field(..., description="Session ID for this conversation")
-    event_type: Literal["content", "tool_call", "tool_result"] = Field(
+    event_type: Literal["content", "tool_call", "tool_result", "thinking"] = Field(
         ..., description="Type of event being streamed"
     )
     metadata: ToolCallMetadata | ToolResultMetadata | None = Field(

@@ -41,6 +41,7 @@ class ChatService:
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
             temperature=0.7,
+            reasoning=True,  # Enable thinking tokens for qwen3:4b
         ).bind_tools([self.search_flights_tool])
 
     def _get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
@@ -129,6 +130,8 @@ class ChatService:
         Yields:
             StreamEvent objects with chunk, session_id, event_type, and metadata
         """
+        import httpx
+        
         if session_id is None:
             session_id = str(uuid.uuid4())
 
@@ -144,16 +147,53 @@ class ChatService:
         # Track if we've called tools
         tool_was_called = False
         accumulated_content = ""
+        accumulated_thinking = ""
         tool_call_message = None  # Store the AI message with tool calls
         tool_results = []  # Store tool results
 
+        # First, get the thinking content via non-streaming API
+        # Convert LangChain messages to ollama format
+        ollama_messages = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                ollama_messages.append({"role": "user", "content": str(msg.content)})
+            elif isinstance(msg, AIMessage):
+                ollama_messages.append({"role": "assistant", "content": str(msg.content)})
+        
+        # Make non-streaming call to get thinking
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{settings.ollama_base_url}/api/chat",
+                json={
+                    "model": settings.ollama_model,
+                    "messages": ollama_messages,
+                    "stream": False,
+                    "options": {"reasoning": True}
+                },
+                timeout=120.0
+            )
+            response_data = response.json()
+            
+            # If there's thinking content, yield it first
+            if "thinking" in response_data and response_data["thinking"]:
+                thinking = response_data["thinking"]
+                accumulated_thinking = thinking
+                yield StreamEvent(
+                    chunk=thinking,
+                    session_id=session_id,
+                    event_type="thinking",
+                    metadata=None
+                )
+
         # Stream LLM response
         async for chunk in self.llm.astream(messages):
+            
             if hasattr(chunk, "content") and chunk.content:
-                # Stream content chunks
-                accumulated_content += chunk.content
+                # Normal content streaming
+                content = chunk.content
+                accumulated_content += content
                 yield StreamEvent(
-                    chunk=chunk.content,
+                    chunk=content,
                     session_id=session_id,
                     event_type="content",
                     metadata=None

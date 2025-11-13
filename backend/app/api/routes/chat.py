@@ -65,6 +65,13 @@ async def chat(
                         "metadata": event.metadata.model_dump() if event.metadata else None
                     })
                     yield f"data: {data}\n\n"
+                elif event.event_type == "thinking":
+                    data = json.dumps({
+                        "type": "thinking",
+                        "chunk": event.chunk,
+                        "session_id": session_id
+                    })
+                    yield f"data: {data}\n\n"
                 elif event.event_type == "content":
                     data = json.dumps({
                         "type": "content",

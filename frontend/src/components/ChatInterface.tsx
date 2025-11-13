@@ -4,8 +4,9 @@ import type { FormEvent, KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
+import { ThinkingCard } from './ThinkingCard'
 
-type MessageType = 'user' | 'assistant' | 'tool_execution'
+type MessageType = 'user' | 'assistant' | 'tool_execution' | 'thinking'
 
 interface ToolCallMetadata {
   tool_name: string
@@ -83,6 +84,8 @@ export function ChatInterface() {
 
       let accumulatedContent = ''
       let currentAssistantIndex = -1
+      let accumulatedThinking = ''
+      let currentThinkingIndex = -1
 
       while (true) {
         const { done, value } = await reader.read()
@@ -94,6 +97,7 @@ export function ChatInterface() {
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = JSON.parse(line.slice(6))
+            console.log('SSE event:', data.type, data)
 
             if (data.type === 'error') {
               throw new Error(data.error)
@@ -103,6 +107,29 @@ export function ChatInterface() {
               // Stream complete
               setSessionId(data.session_id)
               break
+            }
+
+            if (data.type === 'thinking' && data.chunk) {
+              // If we don't have a thinking message yet, create one
+              if (currentThinkingIndex === -1) {
+                setMessages((prev) => {
+                  const newMessages = [...prev, { role: 'thinking' as MessageType, content: data.chunk }]
+                  currentThinkingIndex = newMessages.length - 1
+                  return newMessages
+                })
+                accumulatedThinking = data.chunk
+              } else {
+                // Update existing thinking message
+                accumulatedThinking += data.chunk
+                setMessages((prev) =>
+                  prev.map((msg, idx) =>
+                    idx === currentThinkingIndex
+                      ? { ...msg, content: accumulatedThinking }
+                      : msg
+                  )
+                )
+              }
+              setSessionId(data.session_id)
             }
 
             if (data.type === 'content' && data.chunk) {
@@ -244,6 +271,11 @@ export function ChatInterface() {
                     resultMetadata={msg.toolExecution.resultMetadata}
                   />
                 )
+              }
+
+              // Thinking message
+              if (msg.role === 'thinking' && msg.content) {
+                return <ThinkingCard key={idx} content={msg.content} />
               }
 
               // User and assistant messages
