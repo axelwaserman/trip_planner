@@ -130,8 +130,6 @@ class ChatService:
         Yields:
             StreamEvent objects with chunk, session_id, event_type, and metadata
         """
-        import httpx
-        
         if session_id is None:
             session_id = str(uuid.uuid4())
 
@@ -151,53 +149,36 @@ class ChatService:
         tool_call_message = None  # Store the AI message with tool calls
         tool_results = []  # Store tool results
 
-        # First, get the thinking content via non-streaming API
-        # Convert LangChain messages to ollama format
-        ollama_messages = []
-        for msg in messages:
-            if isinstance(msg, HumanMessage):
-                ollama_messages.append({"role": "user", "content": str(msg.content)})
-            elif isinstance(msg, AIMessage):
-                ollama_messages.append({"role": "assistant", "content": str(msg.content)})
-        
-        # Make non-streaming call to get thinking
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{settings.ollama_base_url}/api/chat",
-                json={
-                    "model": settings.ollama_model,
-                    "messages": ollama_messages,
-                    "stream": False,
-                    "options": {"reasoning": True}
-                },
-                timeout=120.0
-            )
-            response_data = response.json()
-            
-            # If there's thinking content, yield it first
-            if "thinking" in response_data and response_data["thinking"]:
-                thinking = response_data["thinking"]
-                accumulated_thinking = thinking
-                yield StreamEvent(
-                    chunk=thinking,
-                    session_id=session_id,
-                    event_type="thinking",
-                    metadata=None
-                )
-
         # Stream LLM response
         async for chunk in self.llm.astream(messages):
+            # Check for reasoning_content in additional_kwargs (comes as individual tokens/words)
+            has_thinking = False
+            if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
+                reasoning = chunk.additional_kwargs.get("reasoning_content")
+                if reasoning:
+                    has_thinking = True
+                    # reasoning_content already contains just the new chunk, yield it directly
+                    yield StreamEvent(
+                        chunk=reasoning,
+                        session_id=session_id,
+                        event_type="thinking",
+                        metadata=None
+                    )
+                    accumulated_thinking += reasoning
             
-            if hasattr(chunk, "content") and chunk.content:
-                # Normal content streaming
+            # Only process content if this chunk doesn't have thinking
+            # (chunks with thinking have content=thinking summary, not actual response)
+            if not has_thinking and hasattr(chunk, "content") and chunk.content:
                 content = chunk.content
-                accumulated_content += content
-                yield StreamEvent(
-                    chunk=content,
-                    session_id=session_id,
-                    event_type="content",
-                    metadata=None
-                )
+                
+                if content.strip():
+                    accumulated_content += content
+                    yield StreamEvent(
+                        chunk=content,
+                        session_id=session_id,
+                        event_type="content",
+                        metadata=None
+                    )
 
             # Check if this chunk contains tool calls
             if isinstance(chunk, AIMessage) and chunk.tool_calls:
