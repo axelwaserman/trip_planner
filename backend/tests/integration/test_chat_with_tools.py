@@ -8,7 +8,7 @@ deepseek-r1:8b does not support tool calling, so agent integration tests
 that require actual LLM tool invocation are documented but not executed.
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -21,25 +21,33 @@ from app.services.flight import FlightService
 async def test_chat_service_creates_agent_with_tools(
     mock_flight_service: AsyncMock,
     session_store: InMemorySessionStore,
+    mock_llm_provider: MagicMock,
 ) -> None:
     """Test ChatService initializes LLM with flight search tool."""
     chat_service = ChatService(
-        flight_service=mock_flight_service, session_store=session_store
+        flight_service=mock_flight_service,
+        session_store=session_store,
+        llm_provider=mock_llm_provider,
     )
 
     # LLM with tools should be created
     assert chat_service.llm is not None
     assert chat_service.search_flights_tool is not None
+    # Verify bind_tools was called
+    mock_llm_provider.bind_tools.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_chat_service_creates_unique_sessions(
     mock_flight_service: AsyncMock,
     session_store: InMemorySessionStore,
+    mock_llm_provider: MagicMock,
 ) -> None:
     """Test chat service can create new sessions and retrieve histories."""
     chat_service = ChatService(
-        flight_service=mock_flight_service, session_store=session_store
+        flight_service=mock_flight_service,
+        session_store=session_store,
+        llm_provider=mock_llm_provider,
     )
 
     # Create two sessions
@@ -58,10 +66,13 @@ async def test_chat_service_creates_unique_sessions(
 async def test_chat_service_session_history_persists(
     mock_flight_service: AsyncMock,
     session_store: InMemorySessionStore,
+    mock_llm_provider: MagicMock,
 ) -> None:
     """Test session history is preserved across multiple retrievals."""
     chat_service = ChatService(
-        flight_service=mock_flight_service, session_store=session_store
+        flight_service=mock_flight_service,
+        session_store=session_store,
+        llm_provider=mock_llm_provider,
     )
 
     session = await session_store.create_session()
@@ -84,10 +95,13 @@ async def test_chat_service_session_history_persists(
 async def test_flight_search_tool_is_available(
     mock_flight_service: AsyncMock,
     session_store: InMemorySessionStore,
+    mock_llm_provider: MagicMock,
 ) -> None:
     """Test that flight search tool is properly registered."""
     chat_service = ChatService(
-        flight_service=mock_flight_service, session_store=session_store
+        flight_service=mock_flight_service,
+        session_store=session_store,
+        llm_provider=mock_llm_provider,
     )
 
     # Tool should be available

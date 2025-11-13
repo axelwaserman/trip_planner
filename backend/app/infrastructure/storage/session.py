@@ -2,6 +2,7 @@
 
 import uuid
 from abc import ABC, abstractmethod
+from typing import Any
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
 
@@ -16,8 +17,11 @@ class SessionStore(ABC):
     """
 
     @abstractmethod
-    async def create_session(self) -> ChatSession:
+    async def create_session(self, metadata: dict[str, Any] | None = None) -> ChatSession:
         """Create a new chat session with unique ID.
+
+        Args:
+            metadata: Optional metadata dict for the session (e.g., provider info)
 
         Returns:
             Newly created ChatSession with generated session_id
@@ -99,9 +103,19 @@ class InMemorySessionStore(SessionStore):
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
         self._default_ttl = default_ttl_seconds
 
-    async def create_session(self) -> ChatSession:
-        """Create a new session with generated UUID."""
-        session = ChatSession(session_id=str(uuid.uuid4()))
+    async def create_session(self, metadata: dict[str, Any] | None = None) -> ChatSession:
+        """Create a new session with generated UUID.
+
+        Args:
+            metadata: Optional metadata dict for the session
+
+        Returns:
+            Newly created ChatSession
+        """
+        session = ChatSession(
+            session_id=str(uuid.uuid4()),
+            metadata=metadata or {},
+        )
         self._sessions[session.session_id] = session
         self._histories[session.session_id] = InMemoryChatMessageHistory()
         return session

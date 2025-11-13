@@ -1,8 +1,9 @@
 """Shared pytest fixtures for tests."""
 
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+from app.infrastructure.llm.provider import LLMProvider
 from app.infrastructure.storage.session import InMemorySessionStore
 from app.services.flight import FlightService
 
@@ -25,3 +26,19 @@ async def session_store() -> InMemorySessionStore:
         Fresh InMemorySessionStore instance
     """
     return InMemorySessionStore(default_ttl_seconds=3600)
+
+
+@pytest.fixture
+def mock_llm_provider() -> MagicMock:
+    """Create mock LLMProvider for testing.
+
+    Returns:
+        MagicMock LLMProvider with required methods
+    """
+    provider = MagicMock(spec=LLMProvider)
+    provider.model_name = "test-model"
+
+    # Mock bind_tools to return self for method chaining
+    provider.bind_tools.return_value = provider
+
+    return provider

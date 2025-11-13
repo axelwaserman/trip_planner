@@ -7,10 +7,9 @@ from typing import Any
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
-from langchain_ollama import ChatOllama
 
-from app.config import settings
 from app.domain.chat import StreamEvent, ToolCallMetadata, ToolResultMetadata
+from app.infrastructure.llm.provider import LLMProvider
 from app.infrastructure.storage.session import SessionStore
 from app.services.flight import FlightService
 from app.tools.flight_search import create_flight_search_tool
@@ -19,12 +18,18 @@ from app.tools.flight_search import create_flight_search_tool
 class ChatService:
     """Service for managing chat conversations with LangChain and tool calling."""
 
-    def __init__(self, flight_service: FlightService, session_store: SessionStore) -> None:
-        """Initialize the chat service with tools and session storage.
+    def __init__(
+        self,
+        flight_service: FlightService,
+        session_store: SessionStore,
+        llm_provider: LLMProvider,
+    ) -> None:
+        """Initialize the chat service with tools, session storage, and LLM provider.
 
         Args:
             flight_service: FlightService instance for flight search tool
             session_store: SessionStore for managing conversation history
+            llm_provider: LLM provider for generating responses
         """
         self.session_store = session_store
 
@@ -34,13 +39,8 @@ class ChatService:
         # Convert to LangChain tool decorator format
         self.search_flights_tool = tool(flight_search_func)
 
-        # Create LLM with tools bound (correct API per LangChain docs)
-        self.llm = ChatOllama(
-            base_url=settings.ollama_base_url,
-            model=settings.ollama_model,
-            temperature=0.7,
-            reasoning=True,  # Enable thinking tokens for qwen3:4b
-        ).bind_tools([self.search_flights_tool])
+        # Bind tools to the LLM provider
+        self.llm = llm_provider.bind_tools([self.search_flights_tool])
 
     async def _get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         """Get chat history for a session from storage.
@@ -268,14 +268,23 @@ class ChatService:
             )
 
 
-def create_chat_service(flight_service: FlightService, session_store: SessionStore) -> ChatService:
+def create_chat_service(
+    flight_service: FlightService,
+    session_store: SessionStore,
+    llm_provider: LLMProvider,
+) -> ChatService:
     """Factory function to create ChatService with dependencies.
 
     Args:
         flight_service: FlightService instance for tools
         session_store: SessionStore for conversation history
+        llm_provider: LLM provider for generating responses
 
     Returns:
         Configured ChatService instance
     """
-    return ChatService(flight_service=flight_service, session_store=session_store)
+    return ChatService(
+        flight_service=flight_service,
+        session_store=session_store,
+        llm_provider=llm_provider,
+    )

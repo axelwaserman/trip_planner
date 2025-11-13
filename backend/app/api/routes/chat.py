@@ -6,13 +6,23 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.chat import ChatService, create_chat_service
 from app.domain.chat import ChatRequest
+from app.infrastructure.llm.factory import LLMProviderFactory, ProviderType
+from app.infrastructure.llm.provider import LLMProvider
 from app.infrastructure.storage.session import SessionStore
 from app.services.flight import FlightService
 
 router = APIRouter()
+
+
+class SessionCreateRequest(BaseModel):
+    """Request model for session creation."""
+
+    provider: ProviderType = "ollama"
+    model: str | None = None
 
 
 def get_session_store(request: Request) -> SessionStore:
@@ -42,35 +52,56 @@ def get_flight_service(request: Request) -> FlightService:
 
 
 def get_chat_service(
+    request: Request,
     flight_service: Annotated[FlightService, Depends(get_flight_service)],
     session_store: Annotated[SessionStore, Depends(get_session_store)],
 ) -> ChatService:
     """Dependency factory for chat service.
 
     Args:
+        request: FastAPI request object (to get LLM provider from state)
         flight_service: Injected FlightService
         session_store: Injected SessionStore
 
     Returns:
         ChatService instance
     """
-    return create_chat_service(flight_service, session_store)
+    # Get provider from app state (initialized in lifespan)
+    llm_provider: LLMProvider = request.app.state.llm_provider
+    return create_chat_service(flight_service, session_store, llm_provider)
 
 
 @router.post("/api/chat/session")
 async def create_session(
     session_store: Annotated[SessionStore, Depends(get_session_store)],
+    request: SessionCreateRequest | None = None,
 ) -> dict[str, str]:
-    """Create a new chat session for a browser tab.
+    """Create a new chat session for a browser tab with optional provider selection.
+
+    Args:
+        session_store: Injected SessionStore
+        request: Optional session creation request with provider and model
 
     Returns:
         Dictionary with session_id
 
     Example:
         >>> POST /api/chat/session
+        {}
+        {"session_id": "550e8400-e29b-41d4-a716-446655440000"}
+
+        >>> POST /api/chat/session
+        {"provider": "ollama", "model": "qwen3:8b"}
         {"session_id": "550e8400-e29b-41d4-a716-446655440000"}
     """
-    session = await session_store.create_session()
+    metadata = {}
+    if request:
+        metadata = {
+            "provider": request.provider,
+            "model": request.model,
+        }
+
+    session = await session_store.create_session(metadata=metadata)
     return {"session_id": session.session_id}
 
 
