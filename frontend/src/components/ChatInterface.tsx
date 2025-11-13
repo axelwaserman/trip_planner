@@ -178,7 +178,7 @@ export function ChatInterface() {
               setSessionId(data.session_id)
             }
 
-            if (data.type === 'tool_call' && data.metadata) {
+            if (data.type === 'tool_call' && data.tool_name) {
               // Add tool_execution message with call metadata
               setMessages((prev) => [
                 ...prev,
@@ -186,14 +186,19 @@ export function ChatInterface() {
                   role: 'tool_execution',
                   content: '',
                   toolExecution: {
-                    callMetadata: data.metadata,
+                    callMetadata: {
+                      tool_name: data.tool_name,
+                      arguments: data.tool_args || {},
+                      started_at: Date.now(),
+                      status: 'executing',
+                    },
                   },
                 },
               ])
               setSessionId(data.session_id)
             }
 
-            if (data.type === 'tool_result' && data.metadata) {
+            if (data.type === 'tool_result' && data.tool_name) {
               // Update the last tool_execution message with result metadata
               setMessages((prev) => {
                 // Find last tool_execution message
@@ -212,7 +217,12 @@ export function ChatInterface() {
                           ...msg,
                           toolExecution: {
                             ...msg.toolExecution,
-                            resultMetadata: data.metadata,
+                            resultMetadata: {
+                              summary: data.tool_result || '',
+                              full_result: data.tool_result || '',
+                              status: 'completed',
+                              elapsed_ms: data.elapsed_ms || 0,
+                            },
                           },
                         }
                       : msg

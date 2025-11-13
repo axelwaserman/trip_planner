@@ -96,7 +96,7 @@ class ChatService:
             yield StreamEvent(
                 chunk="",
                 session_id=session_id,
-                event_type="content",
+                type="content",
             )
             return
 
@@ -123,7 +123,7 @@ class ChatService:
                     yield StreamEvent(
                         chunk=reasoning,
                         session_id=session_id,
-                        event_type="thinking",
+                        type="thinking",
                     )
 
             # Process content (only if not thinking)
@@ -134,7 +134,7 @@ class ChatService:
                     yield StreamEvent(
                         chunk=content,
                         session_id=session_id,
-                        event_type="content",
+                        type="content",
                     )
 
             # Check for tool calls
@@ -152,7 +152,7 @@ class ChatService:
                         yield StreamEvent(
                             chunk="",
                             session_id=session_id,
-                            event_type="tool_call",
+                            type="tool_call",
                             tool_name=tool_call["name"],
                             tool_args=tool_call["args"],
                         )
@@ -166,7 +166,7 @@ class ChatService:
                         yield StreamEvent(
                             chunk="",
                             session_id=session_id,
-                            event_type="tool_result",
+                            type="tool_result",
                             tool_name=tool_call["name"],
                             tool_result=str(tool_result),
                             elapsed_ms=elapsed_ms,
@@ -196,7 +196,7 @@ class ChatService:
                         yield StreamEvent(
                             chunk=final_chunk.content,
                             session_id=session_id,
-                            event_type="content",
+                            type="content",
                         )
 
                 accumulated_content = accumulated_final
@@ -217,5 +217,5 @@ class ChatService:
             yield StreamEvent(
                 chunk="",
                 session_id=session_id,
-                event_type="content",
+                type="content",
             )

@@ -159,10 +159,10 @@ class StreamEvent(BaseModel):
 
     chunk: str = Field(default="", description="Content chunk or empty string for tool events")
     session_id: str = Field(..., description="Session ID for this conversation")
-    event_type: Literal["content", "tool_call", "tool_result", "thinking"] = Field(
+    type: Literal["content", "tool_call", "tool_result", "thinking"] = Field(
         ..., description="Type of event being streamed"
     )
-    # Tool-specific fields (populated based on event_type)
+    # Tool-specific fields (populated based on type)
     tool_name: str | None = Field(default=None, description="Tool name (for tool_call/result)")
     tool_args: dict[str, Any] | None = Field(default=None, description="Tool arguments (for tool_call)")
     tool_result: str | None = Field(default=None, description="Tool result text (for tool_result)")

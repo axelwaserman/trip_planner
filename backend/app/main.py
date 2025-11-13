@@ -33,11 +33,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize flight client
     flight_client = MockFlightAPIClient(seed=42)
     
-    # Initialize LLM using LangChain's init_chat_model
+    # Initialize LLM using init_chat_model with reasoning enabled
     llm = init_chat_model(
         model=settings.ollama_model,
         model_provider="ollama",
         base_url=settings.ollama_base_url,
+        reasoning=True,  # Enable reasoning/thinking tokens for supported models
     )
     
     # Inject flight_client into search_flights tool

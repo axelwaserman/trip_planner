@@ -59,7 +59,7 @@ async def chat(
             error_event = StreamEvent(
                 chunk="",
                 session_id=request.session_id,
-                event_type="content",  # Use content for error messages
+                type="content",  # Use content for error messages
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
             
@@ -68,7 +68,7 @@ async def chat(
             error_event = StreamEvent(
                 chunk=f"An error occurred: {str(e)}",
                 session_id=request.session_id,
-                event_type="content",
+                type="content",
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
     
