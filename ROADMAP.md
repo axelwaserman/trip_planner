@@ -1,10 +1,11 @@
 # Trip Planner - Development Roadmap
 
-**Last Updated**: 2025-11-13
+**Last Updated**: 2025-11-14
 
 ## Current Status
-- **Active Phase**: Pre-Phase 4 Refactor (Technical Debt Resolution)
-- **Current Task**: Session Management & Multi-Tab Support → See [NOW.md](NOW.md)
+- **Active Phase**: Phase 3 ✅ COMPLETE
+- **Next Phase**: Phase 4 - LLM Provider Flexibility & UI Polish
+- **Current Focus**: See [NOW.md](NOW.md) for detailed priorities
 - **Blockers**: None
 
 ---
@@ -52,7 +53,7 @@
 ### ✅ Phase 3: Mock Flight Search Tool
 **Goal**: Agent can call flight search tool and incorporate results
 
-**Completed**: 2025-11-10 → 2025-11-13
+**Completed**: 2025-11-10 → 2025-11-14
 
 <details>
 <summary>Key Deliverables</summary>
@@ -64,57 +65,67 @@
 - LangChain tool with `@tool` decorator + `bind_tools()`
 - Streaming agent responses with tool calls
 - Frontend: `ToolExecutionCard` + `ThinkingCard` components
-- 122/122 tests passing (13 E2E tests)
-- Model: qwen3:8b with reasoning mode
+- SSE event structure: flat tool metadata (tool_name, tool_args, tool_result)
+- Thinking/reasoning display with `reasoning=True` in init_chat_model
+- Session management with multi-tab support
+- 56/76 tests passing (20 E2E tests skipped by default)
+- Model: qwen3:4b with reasoning mode
 
 </details>
 
 ---
 
-### 🔄 Phase 4 (Pre-Phase): Technical Debt Refactor
-**Goal**: Address critical architectural issues before Phase 4 implementation
+### � Phase 4: LLM Provider Flexibility & UI Polish
+**Goal**: Support multiple LLM providers + enhanced user experience
 
-**Status**: IN PROGRESS (Started 2025-11-13)  
-**Estimated**: 17-23 hours over 2-3 days
+**Status**: READY TO START (Phase 3 complete)
 
-**Active Tasks** (see [NOW.md](NOW.md) for current focus):
-1. 🔄 Session Management & Multi-Tab Support (3-4h)
-2. ⏳ LLM Provider Abstraction Layer (4-5h)
-3. ⏳ StreamEvent Inheritance (2-3h)
-4. ⏳ JSON Tool Output (1-2h)
-5. ⏳ Frontend State Management with useReducer (3-4h)
-6. ⏳ Structured Logging (2h)
-7. ⏳ Pydantic Model Validators (30min)
-8. ⏳ Deduplicate Test Logic (1-2h)
-9. ⏳ Fix Dependency Injection Pattern (30min)
-10. ⏳ XSS Protection for Markdown (5min)
+**Estimated**: 12-18 hours
 
-**Success Criteria**:
-- ✅ All 122 tests passing
-- ✅ Multi-tab support with independent sessions
-- ✅ No global mutable state
-- ✅ Structured logs with request_id
-
-**Detailed Tasks**: See [phases/pre-phase-4-refactor.md](phases/pre-phase-4-refactor.md)
-
----
-
-### 📋 Phase 4: Enhanced Frontend & LLM Provider Flexibility
-**Goal**: Improve UI + support multiple LLM providers (Ollama, OpenAI, Anthropic, Google)
-
-**Status**: PLANNED (Waiting for Pre-Phase 4 completion)
-
-**Estimated**: 17-23 hours
+**Key Deliverables**:
 
 <details>
-<summary>Checkpoints</summary>
+<summary>High Priority Tasks</summary>
 
-1. Enhanced Message Rendering & Tool Visibility ✅ COMPLETE
-2. LLM Provider Abstraction Layer (merge with Pre-Phase 4)
-3. Provider Configuration API & Frontend UI
-4. Testing, Documentation & Polish
+1. **LLM Provider UI & Configuration** (4-6h)
+   - Frontend dropdown to select provider (Ollama/OpenAI/Anthropic)
+   - Config API endpoint to list available models per provider
+   - Session-level provider selection (stored in metadata)
+   - Support for API keys in config
+
+2. **Structured Tool Output** (2-3h)
+   - Return JSON objects from tools instead of strings
+   - Enhanced ToolResultCard with table/list rendering
+   - Pretty-print structured data
+
+3. **Error Handling & Feedback** (2-3h)
+   - Better error messages in UI
+   - Loading states for tool execution
+   - Retry mechanism for failed calls
+   - Toast notifications
 
 </details>
+
+<details>
+<summary>Medium Priority Tasks</summary>
+
+4. **Frontend State Management** (3-4h)
+   - Replace useState with useReducer
+   - Centralized message event handling
+   - Better TypeScript types
+
+5. **Testing & Polish** (2-3h)
+   - Tests for SSE event handling
+   - E2E tests for tool visibility
+   - Frontend component tests
+
+</details>
+
+**What Was Dropped from Original "Pre-Phase 4"**:
+- ❌ Session management refactor (already working well)
+- ❌ Dependency injection fixes (no issues found)
+- ❌ Global store removal (never existed)
+- ✅ Kept: LLM provider abstraction, structured tool output, state management
 
 ---
 

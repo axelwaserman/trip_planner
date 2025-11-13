@@ -1,45 +1,108 @@
-# Current Task: Session Management & Multi-Tab Support
+# Current Focus: Phase 3 Complete, Planning Next Steps
 
-**Status**: 🔄 IN PROGRESS  
-**Priority**: P0 (Must Fix)  
-**Estimated**: 3-4 hours  
-**Phase**: Pre-Phase 4 Refactor
+**Status**: ✅ Phase 3 COMPLETE  
+**Date**: 2025-11-14  
+**Next Phase**: Phase 4 - LLM Provider Flexibility & UI Polish
 
-## Goal
-Remove global `_global_chat_store` anti-pattern and enable independent sessions per browser tab.
+---
 
-## Subtasks
-- [ ] Create `ChatSession` domain model with metadata in `app/domain/session.py`
-  - Fields: session_id, created_at, last_active, metadata (dict for provider choice)
-  - Methods: add_message(), get_messages(), update_metadata()
-- [ ] Implement `SessionStore` ABC with `InMemorySessionStore` in `app/infrastructure/storage/session.py`
-  - Methods: create_session(), get_session(), delete_session(), cleanup_expired()
-- [ ] Add session lifecycle API in `app/api/routes/chat.py`
-  - `POST /api/chat/session` - Create new session, return session_id
-  - `GET /api/chat/session/{session_id}` - Get session info
-- [ ] Refactor `ChatService` to accept session_id instead of using global store
-  - Remove `_global_chat_store` from `app/chat.py`
-  - Inject `SessionStore` via constructor
-- [ ] Update frontend `ChatInterface.tsx` to initialize session on mount
-  - Call `POST /api/chat/session` when component loads
-  - Store session_id in component state
-  - Send session_id with all chat requests
+## Recent Completions (2025-11-13 → 2025-11-14)
 
-## Context
-- **Pattern**: [Data Model Pattern](ARCHITECTURE.md#data-model-pattern) for ChatSession
-- **Pattern**: [Abstract Client Pattern](ARCHITECTURE.md#abstract-client-pattern) for SessionStore ABC
-- **Pattern**: [Dependency Injection Pattern](ARCHITECTURE.md#dependency-injection-pattern) for SessionStore
+### ✅ Tool Visibility & Streaming
+- Frontend tool call/result cards with expandable details
+- Thinking/reasoning display with ThinkingCard component
+- Fixed SSE event structure (type field, flat tool metadata)
+- All event types working: content, thinking, tool_call, tool_result
 
-## Success Criteria
-- ✅ Each browser tab creates independent session
-- ✅ Global `_global_chat_store` removed from codebase
-- ✅ All 122 tests still passing
-- ✅ `just typecheck` passes
+### ✅ Session Management
+- Session lifecycle API: POST/DELETE `/api/chat/session`
+- Multi-tab support with independent sessions
+- Frontend initializes session on mount
+- Session cleanup with expiration tracking
+- **Note**: Already implemented properly with ChatService managing `_histories` dict, no global store anti-pattern
 
-## Blockers
-None
+### ✅ Configuration Cleanup
+- Removed .env files
+- Model config consolidated in config.py
+- Using `init_chat_model()` with `reasoning=True` for qwen3:4b
+- Future-ready for Anthropic/OpenAI integration
 
-## Next Task
-**Task 2: LLM Provider Abstraction Layer** (4-5h)
-- Create `LLMProvider` Protocol with provider selection
-- Refactor `ChatService` to accept injected provider
+---
+
+## Current Architecture Status
+
+**Working Well**:
+- ✅ Streaming SSE with tool visibility
+- ✅ Session management (per-instance, not global)
+- ✅ LangChain 1.0 with `bind_tools()` pattern
+- ✅ Abstract Client Pattern for FlightAPIClient
+- ✅ Pydantic models for all data structures
+- ✅ 56/76 tests passing (20 E2E tests skipped by default)
+
+**What Changed from Original Pre-Phase 4 Plan**:
+- Session management already exists (ChatService stores sessions in `_histories`)
+- No global `_global_chat_store` exists - was a misunderstanding
+- Frontend already handles session creation/management
+- `init_chat_model()` already being used (not ChatOllama directly)
+
+---
+
+## Phase 4 Priorities (Reassessed)
+
+Based on current codebase state, here's what's actually needed:
+
+### High Priority (Next Sprint)
+1. **LLM Provider UI & Configuration** (4-6h)
+   - Frontend dropdown to select provider (Ollama/OpenAI/Anthropic)
+   - Config API endpoint to list available models per provider
+   - Pass provider choice via session metadata
+   - Update config.py to support multiple providers with API keys
+
+2. **Structured Tool Output** (2-3h)
+   - Return JSON objects instead of formatted strings from tools
+   - Update tool result display to render structured data nicely
+   - Support tables, lists, and nested objects in ToolResultCard
+
+3. **Error Handling & User Feedback** (2-3h)
+   - Better error messages in UI (API errors, session errors, tool errors)
+   - Loading states for tool execution
+   - Retry mechanism for failed tool calls
+   - Toast notifications for errors
+
+### Medium Priority
+4. **Frontend State Management** (3-4h)
+   - Replace useState with useReducer for complex message state
+   - Centralize event handling logic
+   - Better TypeScript types for message variants
+
+5. **Testing & Polish** (2-3h)
+   - Add tests for new SSE event handling
+   - E2E tests for tool visibility
+   - Frontend component tests with React Testing Library
+
+### Low Priority (Can Wait)
+6. **Structured Logging** (1-2h)
+   - Add request_id to all log entries
+   - Structured JSON logging with correlation IDs
+
+7. **Performance Optimization**
+   - Debounce message sending
+   - Virtual scrolling for large message lists
+   - Message caching
+
+---
+
+## Next Immediate Steps
+
+1. Review and update ROADMAP.md to reflect current state
+2. Choose first task from Phase 4 priorities
+3. Create focused task document for chosen work
+
+---
+
+## Notes
+
+- E2E tests are skipped by default due to LLM dependency (run with `just test-e2e`)
+- Session management is already solid - no refactor needed
+- Focus shifted from "fixing technical debt" to "adding features"
+- Core architecture is sound, ready for Phase 4 enhancements
