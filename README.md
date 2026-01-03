@@ -57,7 +57,7 @@ uv sync --dev
 cp .env.example .env
 
 # Run server
-uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn app.api.main:app --reload --host 127.0.0.1 --port 8000
 
 # Run tests
 uv run pytest
@@ -94,7 +94,7 @@ API calls to `/api/*` are automatically proxied to the backend.
 
 2. **Run backend** (Terminal 1):
    ```bash
-   cd backend && uv run uvicorn app.main:app --reload
+   cd backend && uv run uvicorn app.api.main:app --reload
    ```
 
 3. **Run frontend** (Terminal 2):

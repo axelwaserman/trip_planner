@@ -57,7 +57,7 @@ just coverage
 **Manual commands:**
 ```bash
 # Run server
-uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn app.api.main:app --reload --host 127.0.0.1 --port 8000
 
 # Run tests
 uv run pytest

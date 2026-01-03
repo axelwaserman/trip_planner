@@ -9,7 +9,7 @@ from langchain.chat_models import init_chat_model
 
 from app.chat import ChatService
 from app.config import Settings
-from app.routes import get_chat_service, router
+from app.api.routes import auth, routes 
 from app.tools.flight_client import MockFlightAPIClient
 from app.tools.flight_search import search_flights
 
@@ -83,7 +83,8 @@ async def get_chat_service_override(request: Request) -> ChatService:
     return request.app.state.chat_service
 
 
-app.dependency_overrides[get_chat_service] = get_chat_service_override
+app.dependency_overrides[routes.get_chat_service] = get_chat_service_override
 
 # Include router
-app.include_router(router)
+app.include_router(routes.router)
+app.include_router(auth.router)

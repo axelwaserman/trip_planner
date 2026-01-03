@@ -7,7 +7,7 @@ install:
 
 # Run backend server
 backend:
-    cd backend && uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+    cd backend && uv run uvicorn app.api.main:app --reload --host 127.0.0.1 --port 8000
 
 # Run frontend dev server
 frontend:
