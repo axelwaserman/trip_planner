@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.api.main import app
+from app.api.main import app
 from app.models import Flight
 
 # Mark all tests in this module as slow E2E tests
@@ -93,7 +93,7 @@ def test_chat_endpoint_exists(client: TestClient) -> None:
     """Test that chat endpoint is accessible."""
     # Create session first
     session_response = client.post("/api/chat/session")
-    assert session_response.status_code == 200
+    assert session_response.status_code == 201
     session_id = session_response.json()["session_id"]
 
     response = client.post(
@@ -143,7 +143,7 @@ def test_chat_maintains_session_across_requests(client: TestClient) -> None:
     """Test that session_id is returned and maintained across requests."""
     # Create session explicitly
     session_response = client.post("/api/chat/session")
-    assert session_response.status_code == 200
+    assert session_response.status_code == 201
     session_id = session_response.json()["session_id"]
 
     # First message
@@ -246,7 +246,7 @@ async def test_e2e_multi_turn_conversation_with_tools(client: TestClient) -> Non
     """Test multi-turn conversation with tool calls."""
     # Create session explicitly
     session_response = client.post("/api/chat/session")
-    assert session_response.status_code == 200
+    assert session_response.status_code == 201
     session_id = session_response.json()["session_id"]
 
     # First turn: Search flights
@@ -299,9 +299,9 @@ async def test_e2e_invalid_iata_code_error(client: TestClient) -> None:
     full_response = "".join(chunks)
 
     # Should mention error or invalid code
-    assert any(
-        keyword in full_response.lower() for keyword in ["error", "invalid", "code"]
-    ), f"Expected error message in response: {full_response}"
+    assert any(keyword in full_response.lower() for keyword in ["error", "invalid", "code"]), (
+        f"Expected error message in response: {full_response}"
+    )
 
 
 @pytest.mark.asyncio

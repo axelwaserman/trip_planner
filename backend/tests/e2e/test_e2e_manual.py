@@ -11,7 +11,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.api.main import app
+from app.api.main import app
 
 # Mark all tests in this module as slow E2E tests
 pytestmark = [pytest.mark.slow, pytest.mark.e2e]
@@ -63,7 +63,9 @@ def test_simple_flight_search(client: TestClient) -> None:
     # Should mention flights and show results
     assert "flight" in full_response, "Expected flight information"
     assert any(word in full_response for word in ["lax", "jfk"]), "Expected airport codes"
-    assert any(word in full_response for word in ["$", "price", "airline"]), "Expected flight details"
+    assert any(word in full_response for word in ["$", "price", "airline"]), (
+        "Expected flight details"
+    )
 
 
 def test_conversation_memory_simple(client: TestClient) -> None:
@@ -149,7 +151,9 @@ def test_city_name_inference(client: TestClient) -> None:
     # Should call tool and show flights (LLM should infer LAX and JFK)
     assert "flight" in full_response, "Expected flight results"
     # Should mention Los Angeles/LA or LAX, and New York/NY or JFK
-    assert any(word in full_response for word in ["los angeles", "lax", "la"]), "Expected LA reference"
+    assert any(word in full_response for word in ["los angeles", "lax", "la"]), (
+        "Expected LA reference"
+    )
     assert any(word in full_response for word in ["new york", "jfk", "ny"]), "Expected NY reference"
 
 
@@ -175,7 +179,9 @@ def test_multiple_dates(client: TestClient) -> None:
 
         # Should find flights for any date
         assert "flight" in full_response, f"Expected flights for {test_date}"
-        assert any(word in full_response for word in ["sfo", "sea"]), f"Expected airport codes for {test_date}"
+        assert any(word in full_response for word in ["sfo", "sea"]), (
+            f"Expected airport codes for {test_date}"
+        )
 
 
 def test_no_tool_for_general_chat(client: TestClient) -> None:

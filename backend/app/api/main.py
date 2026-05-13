@@ -7,9 +7,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
 
+from app.api.routes import auth, routes
 from app.chat import ChatService
 from app.config import Settings
-from app.api.routes import auth, routes 
 from app.tools.flight_client import MockFlightAPIClient
 from app.tools.flight_search import search_flights
 
@@ -45,10 +45,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     search_flights._flight_client = flight_client
 
     # Initialize chat service
-    chat_service = ChatService(
-        flight_client=flight_client,
-        llm=llm,
-    )
+    chat_service = ChatService(llm=llm)
 
     # Store in app state
     app.state.chat_service = chat_service

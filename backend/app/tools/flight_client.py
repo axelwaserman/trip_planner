@@ -219,10 +219,10 @@ class MockFlightAPIClient(FlightAPIClient):
             distance_map = {
                 ("LAX", "SFO"): 337,  # Short
                 ("LAX", "JFK"): 2475,  # Long
-                ("ORD", "DFW"): 802,   # Medium
-                ("ORD", "ATL"): 606,   # Medium
-                ("SFO", "SEA"): 680,   # Medium
-                ("SFO", "LAX"): 337,   # Short
+                ("ORD", "DFW"): 802,  # Medium
+                ("ORD", "ATL"): 606,  # Medium
+                ("SFO", "SEA"): 680,  # Medium
+                ("SFO", "LAX"): 337,  # Short
                 ("JFK", "LAX"): 2475,  # Long
             }
 
