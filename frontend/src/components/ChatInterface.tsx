@@ -1,290 +1,39 @@
 import { Box, Button, Flex, Input, Stack, Text } from '@chakra-ui/react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
 import { ThinkingCard } from './ThinkingCard'
 import { ProviderSelector } from './ProviderSelector'
-
-type MessageType = 'user' | 'assistant' | 'tool_execution' | 'thinking'
-
-interface ToolCallMetadata {
-  tool_name: string
-  arguments: Record<string, unknown>
-  started_at: number
-  status: string
-}
-
-interface ToolResultMetadata {
-  summary: string
-  full_result: string
-  status: string
-  elapsed_ms: number
-}
-
-interface ToolExecutionData {
-  callMetadata: ToolCallMetadata
-  resultMetadata?: ToolResultMetadata
-}
-
-interface Message {
-  role: MessageType
-  content: string
-  toolExecution?: ToolExecutionData
-}
+import { useChat } from '../hooks/useChat'
 
 export function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState('')
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [currentProvider, setCurrentProvider] = useState('ollama')
-  const [currentModel, setCurrentModel] = useState('qwen3:4b')
-  const [isLoading, setIsLoading] = useState(false)
+  const { messages, isLoading, currentProvider, currentModel, sendMessage, handleProviderChange } =
+    useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
-
   useEffect(() => {
-    scrollToBottom()
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
 
-  // Create a new session with the selected provider/model
-  const createSession = async (provider: string, model: string) => {
-    try {
-      const response = await fetch('/api/chat/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, model }),
-      })
-      if (!response.ok) {
-        throw new Error('Failed to create session')
-      }
-      const data = await response.json()
-      setSessionId(data.session_id)
-      setCurrentProvider(data.provider)
-      setCurrentModel(data.model)
-      console.log('Session created:', data)
-    } catch (error) {
-      console.error('Failed to create session:', error)
-      setMessages([{
-        role: 'assistant',
-        content: '❌ Failed to initialize chat session. Please refresh the page.',
-      }])
-    }
-  }
-
-  // Initialize session on component mount
-  useEffect(() => {
-    // Try to load saved provider config
-    const saved = localStorage.getItem('llm_provider_config')
-    if (saved) {
-      const { provider, model } = JSON.parse(saved)
-      createSession(provider, model)
-    } else {
-      createSession('ollama', 'qwen3:4b')
-    }
-  }, [])  // Empty deps - only run on mount
-
-  // Handle provider/model change
-  const handleProviderChange = (provider: string, model: string) => {
-    // Clear messages and create new session with new provider/model
-    setMessages([])
-    createSession(provider, model)
-  }
-
-  const sendMessage = async () => {
-    if (!input.trim() || isLoading || !sessionId) return
-
-    const userMessage = input.trim()
-    setInput('')
-    setIsLoading(true)
-
-    // Add user message
-    setMessages((prev) => [...prev, { role: 'user', content: userMessage }])
-
-    try {
-      console.log('Sending message:', userMessage)
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMessage,
-          session_id: sessionId,
-        }),
-      })
-
-      console.log('Response status:', response.status)
-
-      if (!response.ok) {
-        throw new Error('Failed to get response')
-      }
-
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-
-      if (!reader) {
-        throw new Error('No response body')
-      }
-
-      let accumulatedContent = ''
-      let currentAssistantIndex = -1
-      let accumulatedThinking = ''
-      let currentThinkingIndex = -1
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6))
-            console.log('SSE event:', data.type, data)
-
-            if (data.type === 'error') {
-              throw new Error(data.error)
-            }
-
-            if (data.type === 'done') {
-              // Stream complete
-              setSessionId(data.session_id)
-              break
-            }
-
-            if (data.type === 'thinking' && data.chunk) {
-              // If we don't have a thinking message yet, create one
-              if (currentThinkingIndex === -1) {
-                setMessages((prev) => {
-                  const newMessages = [...prev, { role: 'thinking' as MessageType, content: data.chunk }]
-                  currentThinkingIndex = newMessages.length - 1
-                  return newMessages
-                })
-                accumulatedThinking = data.chunk
-              } else {
-                // Update existing thinking message
-                accumulatedThinking += data.chunk
-                setMessages((prev) =>
-                  prev.map((msg, idx) =>
-                    idx === currentThinkingIndex
-                      ? { ...msg, content: accumulatedThinking }
-                      : msg
-                  )
-                )
-              }
-              setSessionId(data.session_id)
-            }
-
-            if (data.type === 'content' && data.chunk) {
-              // If we don't have an assistant message yet, create one
-              if (currentAssistantIndex === -1) {
-                setMessages((prev) => {
-                  const newMessages = [...prev, { role: 'assistant' as MessageType, content: data.chunk }]
-                  currentAssistantIndex = newMessages.length - 1
-                  return newMessages
-                })
-                accumulatedContent = data.chunk
-              } else {
-                // Update existing assistant message
-                accumulatedContent += data.chunk
-                setMessages((prev) =>
-                  prev.map((msg, idx) =>
-                    idx === currentAssistantIndex
-                      ? { ...msg, content: accumulatedContent }
-                      : msg
-                  )
-                )
-              }
-              setSessionId(data.session_id)
-            }
-
-            if (data.type === 'tool_call' && data.tool_name) {
-              // Add tool_execution message with call metadata
-              setMessages((prev) => [
-                ...prev,
-                {
-                  role: 'tool_execution',
-                  content: '',
-                  toolExecution: {
-                    callMetadata: {
-                      tool_name: data.tool_name,
-                      arguments: data.tool_args || {},
-                      started_at: Date.now(),
-                      status: 'executing',
-                    },
-                  },
-                },
-              ])
-              setSessionId(data.session_id)
-            }
-
-            if (data.type === 'tool_result' && data.tool_name) {
-              // Update the last tool_execution message with result metadata
-              setMessages((prev) => {
-                // Find last tool_execution message
-                let lastToolIndex = -1
-                for (let i = prev.length - 1; i >= 0; i--) {
-                  if (prev[i].role === 'tool_execution') {
-                    lastToolIndex = i
-                    break
-                  }
-                }
-                
-                if (lastToolIndex !== -1) {
-                  return prev.map((msg, idx) =>
-                    idx === lastToolIndex && msg.toolExecution
-                      ? {
-                          ...msg,
-                          toolExecution: {
-                            ...msg.toolExecution,
-                            resultMetadata: {
-                              summary: data.tool_result || '',
-                              full_result: data.tool_result || '',
-                              status: 'completed',
-                              elapsed_ms: data.elapsed_ms || 0,
-                            },
-                          },
-                        }
-                      : msg
-                  )
-                }
-                return prev
-              })
-              // Reset for next assistant response
-              accumulatedContent = ''
-              currentAssistantIndex = -1
-              setSessionId(data.session_id)
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Chat error:', error)
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: 'Sorry, I encountered an error. Please try again.',
-        },
-      ])
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    sendMessage()
+    const form = e.currentTarget
+    const inputEl = form.elements.namedItem('message') as HTMLInputElement
+    const text = inputEl.value.trim()
+    if (!text) return
+    inputEl.value = ''
+    void sendMessage(text)
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      sendMessage()
+      const text = e.currentTarget.value.trim()
+      if (!text) return
+      e.currentTarget.value = ''
+      void sendMessage(text)
     }
   }
 
@@ -320,7 +69,7 @@ export function ChatInterface() {
           {messages.length === 0 ? (
             <Box textAlign="center" py={20}>
               <Text fontSize="lg" color="gray.500" mb={2}>
-                👋 Welcome! How can I help you plan your trip today?
+                Welcome! How can I help you plan your trip today?
               </Text>
               <Text fontSize="sm" color="gray.400">
                 Try asking about destinations, activities, or travel tips!
@@ -328,12 +77,8 @@ export function ChatInterface() {
             </Box>
           ) : (
             messages.map((msg, idx) => {
-              // Skip empty assistant messages
-              if (msg.role === 'assistant' && !msg.content.trim()) {
-                return null
-              }
+              if (msg.role === 'assistant' && !msg.content.trim()) return null
 
-              // Tool execution message
               if (msg.role === 'tool_execution' && msg.toolExecution) {
                 return (
                   <ToolExecutionCard
@@ -344,17 +89,12 @@ export function ChatInterface() {
                 )
               }
 
-              // Thinking message
               if (msg.role === 'thinking' && msg.content) {
                 return <ThinkingCard key={idx} content={msg.content} />
               }
 
-              // User and assistant messages
               return (
-                <Flex
-                  key={idx}
-                  justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}
-                >
+                <Flex key={idx} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}>
                   <Box
                     bg={msg.role === 'user' ? 'blue.500' : 'white'}
                     color={msg.role === 'user' ? 'white' : 'gray.800'}
@@ -367,49 +107,45 @@ export function ChatInterface() {
                     borderColor="gray.200"
                   >
                     {msg.role === 'assistant' ? (
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        table: ({ children }) => (
-                          <Box as="table" w="full" my={2} borderWidth="1px" borderColor="gray.300">
-                            {children}
-                          </Box>
-                        ),
-                        thead: ({ children }) => (
-                          <Box as="thead" bg="gray.50">
-                            {children}
-                          </Box>
-                        ),
-                        th: ({ children }) => (
-                          <Box as="th" px={3} py={2} borderWidth="1px" borderColor="gray.300" fontWeight="semibold" textAlign="left">
-                            {children}
-                          </Box>
-                        ),
-                        td: ({ children }) => (
-                          <Box as="td" px={3} py={2} borderWidth="1px" borderColor="gray.300">
-                            {children}
-                          </Box>
-                        ),
-                        p: ({ children }) => <Text mb={2}>{children}</Text>,
-                        ul: ({ children }) => <Box as="ul" pl={5} my={2}>{children}</Box>,
-                        ol: ({ children }) => <Box as="ol" pl={5} my={2}>{children}</Box>,
-                        li: ({ children }) => <Text as="li" mb={1}>{children}</Text>,
-                        code: ({ children }) => (
-                          <Box as="code" bg="gray.100" px={1} rounded="sm" fontFamily="mono" fontSize="sm">
-                            {children}
-                          </Box>
-                        ),
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
-                  ) : (
-                    <Text whiteSpace="pre-wrap">{msg.content}</Text>
-                  )}
-                </Box>
-              </Flex>
-            )
-          })
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          table: ({ children }) => (
+                            <Box as="table" w="full" my={2} borderWidth="1px" borderColor="gray.300">
+                              {children}
+                            </Box>
+                          ),
+                          thead: ({ children }) => <Box as="thead" bg="gray.50">{children}</Box>,
+                          th: ({ children }) => (
+                            <Box as="th" px={3} py={2} borderWidth="1px" borderColor="gray.300" fontWeight="semibold" textAlign="left">
+                              {children}
+                            </Box>
+                          ),
+                          td: ({ children }) => (
+                            <Box as="td" px={3} py={2} borderWidth="1px" borderColor="gray.300">
+                              {children}
+                            </Box>
+                          ),
+                          p: ({ children }) => <Text mb={2}>{children}</Text>,
+                          ul: ({ children }) => <Box as="ul" pl={5} my={2}>{children}</Box>,
+                          ol: ({ children }) => <Box as="ol" pl={5} my={2}>{children}</Box>,
+                          li: ({ children }) => <Text as="li" mb={1}>{children}</Text>,
+                          code: ({ children }) => (
+                            <Box as="code" bg="gray.100" px={1} rounded="sm" fontFamily="mono" fontSize="sm">
+                              {children}
+                            </Box>
+                          ),
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
+                    ) : (
+                      <Text whiteSpace="pre-wrap">{msg.content}</Text>
+                    )}
+                  </Box>
+                </Flex>
+              )
+            })
           )}
           {isLoading && (
             <Flex justify="flex-start">
@@ -427,8 +163,7 @@ export function ChatInterface() {
         <form onSubmit={handleSubmit}>
           <Flex gap={2} maxW="4xl" mx="auto">
             <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
+              name="message"
               onKeyDown={handleKeyDown}
               placeholder="Type your message..."
               size="lg"
@@ -440,7 +175,7 @@ export function ChatInterface() {
               colorScheme="blue"
               size="lg"
               loading={isLoading}
-              disabled={!input.trim() || isLoading}
+              disabled={isLoading}
             >
               Send
             </Button>
