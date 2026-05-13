@@ -9,21 +9,26 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.models import StreamEvent
+from app.tools.flight_client import FlightAPIClient
 from app.tools.flight_search import search_flights
 
 
 class ChatService:
     """Service for managing chat conversations with LangChain and tool calling."""
 
-    def __init__(self, llm: BaseChatModel) -> None:
-        """Initialize the chat service with LLM.
+    def __init__(self, flight_client: FlightAPIClient, llm: BaseChatModel) -> None:
+        """Initialize the chat service with flight client and LLM.
 
         Args:
+            flight_client: Flight API client injected into the search_flights tool
             llm: LangChain BaseChatModel instance (ChatOllama, ChatOpenAI, etc.)
         """
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
         self._metadata: dict[str, dict[str, str]] = {}  # Session metadata (provider, model)
         self._last_activity: dict[str, float] = {}
+
+        # Wire the tool's client dependency here so callers don't need to know internals
+        search_flights._flight_client = flight_client  # type: ignore[attr-defined]
 
         # Bind tools to LLM
         self.llm = llm.bind_tools([search_flights])
@@ -191,7 +196,11 @@ class ChatService:
                 # Stream the final response
                 accumulated_final = ""
                 async for final_chunk in self.llm.astream(messages_with_tools):
-                    if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
+                    if (
+                        hasattr(final_chunk, "content")
+                        and isinstance(final_chunk.content, str)
+                        and final_chunk.content
+                    ):
                         accumulated_final += final_chunk.content
                         yield StreamEvent(
                             chunk=final_chunk.content,
