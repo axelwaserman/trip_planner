@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.api.main import app
+from app.api.main import app
 from app.models import StreamEvent
 
 
@@ -41,9 +41,7 @@ def test_chat_endpoint_rejects_invalid_session(client: TestClient) -> None:
 def test_chat_endpoint_streams_response(client: TestClient) -> None:
     """Test chat endpoint returns streaming response."""
 
-    async def mock_stream(
-        message: str, session_id: str
-    ) -> AsyncGenerator[StreamEvent]:
+    async def mock_stream(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
         """Mock async generator for streaming."""
         yield StreamEvent(
             type="content",

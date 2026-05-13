@@ -163,6 +163,8 @@ async def delete_session(
     # Delete the session
     if session_id in chat_service._histories:
         del chat_service._histories[session_id]
+    if session_id in chat_service._metadata:
+        del chat_service._metadata[session_id]
     if session_id in chat_service._last_activity:
         del chat_service._last_activity[session_id]
 

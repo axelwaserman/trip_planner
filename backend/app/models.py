@@ -139,7 +139,9 @@ class Flight(BaseModel):
 class SessionCreateRequest(BaseModel):
     """Request model for creating a new chat session."""
 
-    provider: str | None = Field(default=None, description="LLM provider (ollama, openai, anthropic)")
+    provider: str | None = Field(
+        default=None, description="LLM provider (ollama, openai, anthropic)"
+    )
     model: str | None = Field(default=None, description="Model name for the provider")
 
 
@@ -171,6 +173,10 @@ class StreamEvent(BaseModel):
     )
     # Tool-specific fields (populated based on type)
     tool_name: str | None = Field(default=None, description="Tool name (for tool_call/result)")
-    tool_args: dict[str, Any] | None = Field(default=None, description="Tool arguments (for tool_call)")
+    tool_args: dict[str, Any] | None = Field(
+        default=None, description="Tool arguments (for tool_call)"
+    )
     tool_result: str | None = Field(default=None, description="Tool result text (for tool_result)")
-    elapsed_ms: int | None = Field(default=None, description="Execution time in ms (for tool_result)")
+    elapsed_ms: int | None = Field(
+        default=None, description="Execution time in ms (for tool_result)"
+    )

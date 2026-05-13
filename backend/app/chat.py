@@ -20,24 +20,20 @@ class ChatService:
         """Initialize the chat service with flight client and LLM.
 
         Args:
-            flight_client: Flight API client for tool to use
+            flight_client: Flight API client injected into the search_flights tool
             llm: LangChain BaseChatModel instance (ChatOllama, ChatOpenAI, etc.)
         """
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
         self._metadata: dict[str, dict[str, str]] = {}  # Session metadata (provider, model)
         self._last_activity: dict[str, float] = {}
 
-        # Inject flight client into the tool
-        search_flights._flight_client = flight_client
+        # Wire the tool's client dependency here so callers don't need to know internals
+        search_flights._flight_client = flight_client  # type: ignore[attr-defined]
 
         # Bind tools to LLM
         self.llm = llm.bind_tools([search_flights])
 
-    def create_session(
-        self,
-        provider: str | None = None,
-        model: str | None = None
-    ) -> str:
+    def create_session(self, provider: str | None = None, model: str | None = None) -> str:
         """Create a new chat session with optional provider/model selection.
 
         Args:
@@ -57,19 +53,22 @@ class ChatService:
         self._last_activity[session_id] = time.time()
         return session_id
 
-    def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory | None:
+    def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         """Get history for a session.
 
         Args:
             session_id: Session identifier
 
         Returns:
-            Chat history if session exists, None otherwise
+            Chat history for the session
+
+        Raises:
+            ValueError: If session does not exist
         """
         if session_id in self._histories:
             self._last_activity[session_id] = time.time()
             return self._histories[session_id]
-        return None
+        raise ValueError(f"Session {session_id} not found")
 
     def cleanup_expired_sessions(self, max_age_seconds: int = 3600) -> int:
         """Remove expired sessions based on inactivity.
@@ -94,9 +93,7 @@ class ChatService:
 
         return len(expired)
 
-    async def chat_stream(
-        self, message: str, session_id: str
-    ) -> AsyncGenerator[StreamEvent]:
+    async def chat_stream(self, message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
         """Stream a chat response chunk by chunk with tool calling support.
 
         Args:
@@ -107,13 +104,6 @@ class ChatService:
             StreamEvent objects with simplified structure
         """
         history = self.get_session_history(session_id)
-        if not history:
-            yield StreamEvent(
-                chunk="",
-                session_id=session_id,
-                type="content",
-            )
-            return
 
         # Build messages with history
         from langchain_core.messages import BaseMessage
@@ -144,7 +134,7 @@ class ChatService:
             # Process content (only if not thinking)
             if not has_thinking and hasattr(chunk, "content") and chunk.content:
                 content = chunk.content
-                if content.strip():
+                if isinstance(content, str) and content.strip():
                     accumulated_content += content
                     yield StreamEvent(
                         chunk=content,
@@ -206,7 +196,11 @@ class ChatService:
                 # Stream the final response
                 accumulated_final = ""
                 async for final_chunk in self.llm.astream(messages_with_tools):
-                    if hasattr(final_chunk, "content") and final_chunk.content:
+                    if (
+                        hasattr(final_chunk, "content")
+                        and isinstance(final_chunk.content, str)
+                        and final_chunk.content
+                    ):
                         accumulated_final += final_chunk.content
                         yield StreamEvent(
                             chunk=final_chunk.content,
