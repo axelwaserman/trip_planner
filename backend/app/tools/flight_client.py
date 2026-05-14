@@ -243,10 +243,8 @@ class MockFlightAPIClient(FlightAPIClient):
             price = Decimal(str(base_price))
 
             # Generate booking class (mostly economy)
-            booking_class: BookingClass = self._rng.choices(
-                ["economy", "premium_economy", "business", "first"],
-                weights=[70, 15, 10, 5],
-            )[0]
+            booking_class_choices: list[BookingClass] = ["economy", "premium_economy", "business", "first"]
+            booking_class = self._rng.choices(booking_class_choices, weights=[70, 15, 10, 5])[0]
 
             if booking_class == "business":
                 price *= Decimal("2.5")

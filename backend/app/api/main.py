@@ -80,7 +80,7 @@ app.add_middleware(
 # Override the get_chat_service dependency to use app state
 async def get_chat_service_override(request: Request) -> ChatService:
     """Get the chat service from app state."""
-    return request.app.state.chat_service
+    return request.app.state.chat_service  # type: ignore[no-any-return]
 
 
 app.dependency_overrides[routes.get_chat_service] = get_chat_service_override

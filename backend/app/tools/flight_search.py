@@ -75,7 +75,7 @@ async def search_flights(
     """
     # Get the flight client from the tool's context
     # NOTE: This will be injected when the tool is bound to the ChatService
-    client: FlightAPIClient = getattr(search_flights, "_flight_client", None)
+    client: FlightAPIClient | None = getattr(search_flights, "_flight_client", None)
 
     if client is None:
         return "Error: Flight search service not initialized. Please contact support."
