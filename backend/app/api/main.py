@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     )
 
     # Inject flight_client into search_flights tool
-    search_flights._flight_client = flight_client
+    search_flights._flight_client = flight_client  # type: ignore[attr-defined]
 
     # Initialize chat service
     chat_service = ChatService(
