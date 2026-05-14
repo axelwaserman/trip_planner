@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+  schedule:
+    # Run e2e nightly at 02:00 UTC
+    - cron: "0 2 * * *"
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    # Skip backend on scheduled runs (those are e2e-only)
+    if: github.event_name != 'schedule'
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Cache uv virtualenv
+        uses: actions/cache@v4
+        with:
+          path: backend/.venv
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy app/
+
+      - name: Pytest
+        run: uv run pytest -m "not slow" --cov=app --cov-fail-under=60
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    # Skip frontend on scheduled runs (those are e2e-only)
+    if: github.event_name != 'schedule'
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit --project tsconfig.app.json
+
+  e2e:
+    name: E2E (Ollama)
+    runs-on: ubuntu-latest
+    # Only runs on workflow_dispatch or schedule — never on push/PR
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull llama3.2:3b
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run E2E tests
+        run: uv run pytest -m "slow" --timeout=120
+        working-directory: backend
