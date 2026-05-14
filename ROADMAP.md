@@ -5,7 +5,7 @@
 ## Current Status
 - **Active Phase**: Phase 3 ✅ COMPLETE
 - **Next Phase**: Phase 4 - LLM Provider Flexibility & UI Polish
-- **Current Focus**: See [NOW.md](NOW.md) for detailed priorities
+- **Current Focus**: Detailed priorities tracked separately
 - **Blockers**: None
 
 ---

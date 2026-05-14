@@ -1,0 +1,25 @@
+{
+  "source_path": "/Users/axel/code/trip_planner/README.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Trip Planner",
+  "summary": "Project README covering tech stack, quick-start instructions, development workflow, and a feature roadmap checklist.",
+  "scope": [
+    "project overview",
+    "backend setup",
+    "frontend setup",
+    "development workflow",
+    "tech stack",
+    "feature roadmap"
+  ],
+  "cross_refs": [
+    "./PLAN.md",
+    "./copilot-instructions.md",
+    "./backend/README.md",
+    "./frontend/README.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

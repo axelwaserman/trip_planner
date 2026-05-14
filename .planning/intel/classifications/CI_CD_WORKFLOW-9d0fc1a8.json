@@ -1,0 +1,23 @@
+{
+  "source_path": "/Users/axel/code/trip_planner/.planning/CI_CD_WORKFLOW.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "CI/CD Workflow",
+  "summary": "Reference GitHub Actions CI workflow YAML for backend, frontend, and E2E jobs plus branch-protection settings.",
+  "scope": [
+    "GitHub Actions",
+    "CI pipeline",
+    "backend Python 3.13 job",
+    "frontend Node 22 job",
+    "E2E Ollama job",
+    "branch protection",
+    "code coverage"
+  ],
+  "cross_refs": [
+    ".github/workflows/ci.yml"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

@@ -1,0 +1,21 @@
+{
+  "source_path": "/Users/axel/code/trip_planner/phases/phase-4.1-llm-provider-config.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Phase 4.1: LLM Provider UI & Configuration",
+  "summary": "Phase completion report documenting backend and frontend work to let users select an LLM provider and model from the UI with persistence.",
+  "scope": [
+    "LLM provider selection",
+    "ProviderSelector component",
+    "/api/providers endpoint",
+    "ChatService session metadata",
+    "session creation endpoint",
+    "localStorage persistence",
+    "Ollama/OpenAI/Anthropic providers"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

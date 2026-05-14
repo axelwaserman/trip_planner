@@ -1,0 +1,27 @@
+{
+  "source_path": "/Users/axel/code/trip_planner/ARCHITECTURE.md",
+  "type": "DOC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Trip Planner - Architecture & Code Patterns",
+  "summary": "Architectural reference describing named code patterns, LangChain integration, error handling, testing strategy, embedded ADRs, tech stack, and project structure for the Trip Planner backend and frontend.",
+  "scope": [
+    "backend architecture",
+    "named code patterns",
+    "LangChain 1.0 integration",
+    "error handling",
+    "testing strategy",
+    "architecture decision records",
+    "technology stack",
+    "project structure",
+    "FastAPI",
+    "Pydantic models",
+    "dependency injection",
+    "abstract client pattern",
+    "frontend structure"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "Dominantly a documentation/reference guide (prose + patterns + tech stack + project structure), but contains five embedded ADR sections (ADR-001 through ADR-005) with explicit Status fields. ADR-001, ADR-003, ADR-004, ADR-005 are 'Accepted' (locked decisions); ADR-002 is 'Deprecated'. Synthesizer should consider extracting these embedded ADRs as locked decisions even though the parent doc is classified DOC. Type ambiguity: DOC vs ADR-collection — chose DOC because the document is primarily an architecture guide with ADRs as one of many sections, not a single decision record."
+}

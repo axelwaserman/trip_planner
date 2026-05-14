@@ -1,0 +1,27 @@
+{
+  "source_path": "/Users/axel/code/trip_planner/phases/pre-phase-4-refactor.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Pre-Phase 4 Refactor: Technical Debt Resolution",
+  "summary": "Phase task breakdown listing 10 prioritized refactoring tasks (sessions, LLM provider abstraction, event hierarchy, logging, validators, DI fixes) to address technical debt before Phase 4.",
+  "scope": [
+    "session management",
+    "LLM provider abstraction",
+    "StreamEvent model hierarchy",
+    "flight search tool output format",
+    "frontend chat state management",
+    "structured logging",
+    "Pydantic validators",
+    "test fixtures",
+    "FastAPI dependency injection",
+    "markdown XSS sanitization"
+  ],
+  "cross_refs": [
+    "../NOW.md",
+    "ROADMAP.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

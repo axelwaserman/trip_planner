@@ -1,0 +1,41 @@
+{
+  "source_path": "/Users/axel/code/trip_planner/CLAUDE.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "CLAUDE.md",
+  "summary": "Onboarding guide for Claude Code in the trip_planner repo: commands, architecture overview, key constraints, context files, and GSD/skills workflow pointers.",
+  "scope": [
+    "just command runner",
+    "backend FastAPI app",
+    "frontend Vite/React app",
+    "ChatService and SSE streaming",
+    "LangChain bind_tools tool-calling loop",
+    "MockFlightAPIClient and search_flights tool",
+    "test structure (unit/integration/e2e)",
+    "lint/format/typecheck constraints",
+    "JWT auth with pwdlib",
+    "GSD framework commands",
+    "tech-specific skills (fastapi, chakra-ui, pydantic-ai-agent-builder)"
+  ],
+  "cross_refs": [
+    "backend/app/api/main.py",
+    "backend/app/chat.py",
+    "backend/app/tools/flight_search.py",
+    "backend/app/tools/flight_client.py",
+    "backend/app/models.py",
+    "backend/app/api/routes/auth.py",
+    "frontend/src/App.tsx",
+    "frontend/src/components/ChatInterface.tsx",
+    "frontend/src/components/ToolExecutionCard.tsx",
+    "frontend/src/components/ThinkingCard.tsx",
+    "frontend/vite.config.ts",
+    "NOW.md",
+    "ROADMAP.md",
+    "ARCHITECTURE.md",
+    "phases/*.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

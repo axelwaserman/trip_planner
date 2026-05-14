@@ -1,0 +1,21 @@
+{
+  "source_path": "/Users/axel/code/trip_planner/ROADMAP.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Trip Planner - Development Roadmap",
+  "summary": "Phase status overview tracking completed and planned development phases for the Trip Planner project.",
+  "scope": [
+    "project phases",
+    "FastAPI backend",
+    "LangChain integration",
+    "flight search tool",
+    "LLM provider flexibility",
+    "Amadeus API",
+    "production readiness"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}
