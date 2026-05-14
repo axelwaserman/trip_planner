@@ -98,7 +98,7 @@ export function ProviderSelector({
 
   // Get available providers (filter out those without credentials)
   const availableProviders = Object.entries(providers).filter(
-    ([_, provider]) => provider.available
+    ([, provider]) => provider.available
   )
 
   if (availableProviders.length === 0) {

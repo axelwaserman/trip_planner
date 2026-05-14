@@ -118,7 +118,8 @@ async def create_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Provider {request.provider} not available (missing API key)",
             )
-        if request.model and request.model not in providers[request.provider]["models"]:
+        models = providers[request.provider]["models"]
+        if request.model and isinstance(models, list) and request.model not in models:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid model {request.model} for provider {request.provider}",
