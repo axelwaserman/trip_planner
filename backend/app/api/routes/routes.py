@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from app.api.routes.auth import User, get_current_active_user
 from app.chat import ChatService
 from app.config import settings
 from app.models import ChatRequest, SessionCreateRequest, StreamEvent
@@ -26,6 +27,7 @@ async def get_chat_service() -> ChatService:
 async def chat(
     request: ChatRequest,
     chat_service: ChatService = Depends(get_chat_service),
+    _current_user: User = Depends(get_current_active_user),
 ) -> StreamingResponse:
     """Chat endpoint with streaming responses.
 
@@ -86,6 +88,7 @@ async def chat(
 async def create_session(
     chat_service: ChatService = Depends(get_chat_service),
     request: SessionCreateRequest | None = None,
+    _current_user: User = Depends(get_current_active_user),
 ) -> dict[str, str]:
     """Create a new chat session with optional provider/model selection.
 
@@ -183,7 +186,9 @@ async def health_check() -> dict[str, str]:
 
 
 @router.get("/api/providers")
-async def get_providers() -> dict[str, dict[str, list[str] | bool]]:
+async def get_providers(
+    _current_user: User = Depends(get_current_active_user),
+) -> dict[str, dict[str, list[str] | bool]]:
     """Get available LLM providers and their models.
 
     Returns information about which providers are available (have credentials)

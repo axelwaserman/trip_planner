@@ -11,6 +11,7 @@ from app.api.routes import auth, routes
 from app.chat import ChatService
 from app.config import Settings
 from app.tools.flight_client import MockFlightAPIClient
+from app.tools.flight_search import search_flights
 
 
 @asynccontextmanager
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         - Initialize flight API client
         - Initialize LLM with init_chat_model()
         - Initialize ChatService with dependencies
+        - Inject flight_client into search_flights tool
 
     Shutdown:
         - Cleanup expired sessions
@@ -39,8 +41,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         reasoning=True,  # Enable reasoning/thinking tokens for supported models
     )
 
-    # Initialize chat service — passes flight_client so the tool dependency is explicit
-    chat_service = ChatService(flight_client=flight_client, llm=llm)
+    # Inject flight_client into search_flights tool
+    search_flights._flight_client = flight_client
+
+    # Initialize chat service
+    chat_service = ChatService(
+        flight_client=flight_client,
+        llm=llm,
+    )
 
     # Store in app state
     app.state.chat_service = chat_service
