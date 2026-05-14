@@ -5,7 +5,18 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from app.api.routes.auth import create_access_token
 from app.tools.flight_client import MockFlightAPIClient
+
+
+@pytest.fixture
+def auth_headers() -> dict[str, str]:
+    """Return HTTP headers with a valid JWT Bearer token for the default admin user.
+
+    Uses the ``admin`` user that is always present in the default AUTH_USERS store.
+    """
+    token = create_access_token({"sub": "admin"})
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture

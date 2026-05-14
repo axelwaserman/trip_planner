@@ -11,34 +11,40 @@ from app.models import StreamEvent
 
 
 @pytest.fixture
-def client():
+def client() -> TestClient:
     """Create test client with lifespan."""
     with TestClient(app) as c:
         yield c
 
 
-def test_chat_endpoint_requires_session_id(client: TestClient) -> None:
+def test_chat_endpoint_requires_session_id(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     """Test chat endpoint requires session_id."""
     response = client.post(
         "/api/chat",
         json={"message": "Hello"},
+        headers=auth_headers,
     )
     # FastAPI returns 422 for missing required fields
     assert response.status_code == 422
 
 
-def test_chat_endpoint_rejects_invalid_session(client: TestClient) -> None:
+def test_chat_endpoint_rejects_invalid_session(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     """Test chat endpoint rejects invalid session."""
     response = client.post(
         "/api/chat",
         json={"message": "Hello", "session_id": "invalid-session"},
+        headers=auth_headers,
     )
     # Endpoint streams errors in SSE format, not HTTP errors
     # So it returns 200 but the stream will contain error event
     assert response.status_code == 200
 
 
-def test_chat_endpoint_streams_response(client: TestClient) -> None:
+def test_chat_endpoint_streams_response(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Test chat endpoint returns streaming response."""
 
     async def mock_stream(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
@@ -49,7 +55,7 @@ def test_chat_endpoint_streams_response(client: TestClient) -> None:
         )
 
     # Create a session first
-    session_response = client.post("/api/chat/session")
+    session_response = client.post("/api/chat/session", headers=auth_headers)
     assert session_response.status_code == 201  # Created
     session_id = session_response.json()["session_id"]
 
@@ -58,21 +64,23 @@ def test_chat_endpoint_streams_response(client: TestClient) -> None:
         response = client.post(
             "/api/chat",
             json={"message": "Hello", "session_id": session_id},
+            headers=auth_headers,
         )
 
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
 
-def test_chat_endpoint_empty_message(client: TestClient) -> None:
+def test_chat_endpoint_empty_message(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Test chat endpoint rejects empty messages."""
     # Create session first
-    session_response = client.post("/api/chat/session")
+    session_response = client.post("/api/chat/session", headers=auth_headers)
     session_id = session_response.json()["session_id"]
 
     response = client.post(
         "/api/chat",
         json={"message": "", "session_id": session_id},
+        headers=auth_headers,
     )
 
     assert response.status_code == 422  # Validation error
