@@ -1,6 +1,6 @@
 # Decisions (extracted ADRs)
 
-> Synthesizer note: Decisions below were extracted from `ARCHITECTURE.md` per orchestrator instruction. The parent doc was classified `DOC`, but it embeds 5 explicit ADR sections (`ADR-001` through `ADR-005`) with `Status` fields. Accepted ADRs are treated as **locked decisions**; the Deprecated ADR is recorded for history.
+> Synthesizer note: Decisions below were extracted from `ARCHITECTURE.md` per orchestrator instruction. The parent doc was classified `DOC`, but it embeds 5 explicit ADR sections (`ADR-001` through `ADR-005`) with `Status` fields. Accepted ADRs are treated as **locked decisions**; the Withdrawn ADR is recorded for history.
 
 ---
 
@@ -32,43 +32,45 @@
 ## ADR-002: Global Chat Store
 
 - source: `/Users/axel/code/trip_planner/ARCHITECTURE.md` (lines 343–365)
-- status: **Deprecated** (superseded by Session Management — see Pre-Phase 4 Task 1, since revised in `NOW.md`)
-- date: 2025-11-08
+- status: **Withdrawn / never implemented**
+- date: 2025-11-08 (proposal); withdrawn 2025-11-14
 - scope: conversation history persistence
 
 **Context:** Need to maintain conversation history across requests.
 
-**Decision (deprecated):** Use global `_global_chat_store` dictionary with session IDs.
+**Proposal (never shipped):** Use a global `_global_chat_store` dictionary with session IDs.
 
-**Replacement:** `ChatService._histories` dict managed per-instance — no global store. See `NOW.md` (2025-11-14): "No global `_global_chat_store` exists - was a misunderstanding." `CLAUDE.md` confirms: "There is no global store."
+**Why withdrawn:** The proposal never reached the codebase. `NOW.md` (2025-11-14) records: "No global `_global_chat_store` exists - was a misunderstanding." `CLAUDE.md` confirms: "There is no global store." The actual implementation uses `ChatService._histories` dict managed per-instance — no global store was ever introduced.
 
-**Why preserved:** historical record of the deprecated pattern; downstream consumers should NOT treat this as an active constraint.
+**Why preserved:** historical record of a proposed-but-never-implemented pattern; downstream consumers should NOT treat this as an active constraint and should NOT assume the deprecated pattern was ever live.
 
 ---
 
 ## ADR-003: Streaming with Server-Sent Events
 
-- source: `/Users/axel/code/trip_planner/ARCHITECTURE.md` (lines 368–390)
-- status: **Accepted** → **locked**
+- source: `/Users/axel/code/trip_planner/ARCHITECTURE.md` (lines 368–390); implementation at `/Users/axel/code/trip_planner/backend/app/api/routes/routes.py` (lines 6, 26, 31, 42, 76)
+- status: **locked-as-implemented** (differs from ARCHITECTURE.md target)
 - date: 2025-11-09
 - scope: real-time LLM response streaming to frontend
 
 **Context:** Need real-time streaming of LLM responses to frontend.
 
-**Decision:** Use Server-Sent Events (SSE) with `EventSourceResponse`.
+**Decision (as implemented):** Use Server-Sent Events (SSE) with FastAPI's built-in `StreamingResponse` from `fastapi.responses`.
+
+**Note on drift from ARCHITECTURE.md:** The original ARCHITECTURE.md target named `EventSourceResponse` from `sse_starlette`. That dependency never landed; the codebase ships `StreamingResponse` instead. The locked outcome is the implemented form (`StreamingResponse`), not the documented target. Verification: `grep -n "EventSourceResponse\|StreamingResponse\|sse_starlette" backend/app/api/routes/routes.py` returns only `StreamingResponse`; `sse_starlette` is not a dependency.
 
 **Rationale:**
 - Native browser support (EventSource API)
 - Simpler than WebSockets for unidirectional streaming
 - Works with HTTP/1.1 (no HTTP/2 required)
-- Easy to implement with FastAPI
+- `StreamingResponse` is built into FastAPI — no extra dependency required
 
 **Consequences:**
 - No additional libraries needed
-- Auto-reconnect on connection loss
 - Simple client implementation
 - Unidirectional only (no client→server streaming)
 - Limited to text data (JSON encoded)
+- Auto-reconnect semantics depend on the client's `EventSource` implementation, since `StreamingResponse` does not add server-side reconnect features that `sse_starlette` would provide
 
 ---
 

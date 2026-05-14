@@ -86,17 +86,19 @@
 
 ## CON-ci-pr-gates
 
-- source: `/Users/axel/code/trip_planner/.planning/CI_CD_WORKFLOW.md`, `/Users/axel/code/trip_planner/.planning/IMPLEMENTATION_PLAN.md` (Phase 2)
+- source: `/Users/axel/code/trip_planner/.github/workflows/ci.yml` (lines 14, 60), `/Users/axel/code/trip_planner/.planning/CI_CD_WORKFLOW.md`, `/Users/axel/code/trip_planner/.planning/IMPLEMENTATION_PLAN.md` (Phase 2)
 - type: protocol
-- statement: Branch protection on `master` requires both `Backend (Python 3.13)` and `Frontend (Node 22)` jobs to pass. Branches must be up-to-date before merging. Bypass not permitted.
+- statement: Branch protection on `master` requires both the `Backend` and `Frontend` jobs (literal job names per `ci.yml` lines 15 and 60) to pass. Branches must be up-to-date before merging. Bypass not permitted.
+- note: Earlier drafts cited `Backend (Python 3.13)` and `Frontend (Node 22)` — those parenthetical version suffixes do not appear in the actual workflow `name:` fields and would not match any required-check string.
 
 ---
 
 ## CON-ci-concurrency
 
-- source: `/Users/axel/code/trip_planner/.planning/CI_CD_WORKFLOW.md`
+- source: `/Users/axel/code/trip_planner/.planning/CI_CD_WORKFLOW.md` (target only; not yet in `ci.yml`)
 - type: protocol
-- statement: CI uses `concurrency: { group: ${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: true }` so older in-flight runs are cancelled when a new push arrives on the same ref.
+- statement (target — Phase 6 / Quality Workstream deliverable, NOT currently in `ci.yml`): CI should use `concurrency: { group: ${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: true }` so older in-flight runs are cancelled when a new push arrives on the same ref.
+- evidence: `grep -n concurrency .github/workflows/ci.yml` returns no matches — the block is documented in `CI_CD_WORKFLOW.md` but has not landed in the workflow file. Demoted from current-state to target/backlog.
 
 ---
 
@@ -126,10 +128,20 @@
 
 ## CON-llm-provider-current
 
-- source: `/Users/axel/code/trip_planner/ARCHITECTURE.md`, `/Users/axel/code/trip_planner/NOW.md`, `/Users/axel/code/trip_planner/ROADMAP.md`, `/Users/axel/code/trip_planner/phases/phase-4.1-llm-provider-config.md`
+- source: `/Users/axel/code/trip_planner/NOW.md`, `/Users/axel/code/trip_planner/CLAUDE.md`, `/Users/axel/code/trip_planner/ROADMAP.md`, `/Users/axel/code/trip_planner/phases/phase-4.1-llm-provider-config.md`, `/Users/axel/code/trip_planner/ARCHITECTURE.md`
 - type: tooling
-- statement: Default LLM is **qwen3:4b** via Ollama, accessed through `init_chat_model()` with `reasoning=True` for thinking-token support. `ARCHITECTURE.md` lists `qwen3:8b` (older note); `ROADMAP.md` Phase 3 deliverables and `NOW.md` confirm `qwen3:4b` as current. Authoritative current value: `qwen3:4b`.
+- statement: Default runtime LLM is **qwen3:4b** via Ollama, accessed through `init_chat_model()` with `reasoning=True` for thinking-token support. `ARCHITECTURE.md` lists `qwen3:8b` (older note); `ROADMAP.md` Phase 3 deliverables and `NOW.md`/`CLAUDE.md` confirm `qwen3:4b` as the current runtime default. Authoritative current value: `qwen3:4b`.
 - note: `README.md` references `gpt-oss20b` — that value is stale and superseded by the more recent docs (see INFO entry in conflicts report).
+- note: CI is **not** evidence for this constraint. CI E2E pulls a different model (`llama3.2:3b`) — see `CON-ci-e2e-model-mismatch`.
+
+---
+
+## CON-ci-e2e-model-mismatch
+
+- source: `/Users/axel/code/trip_planner/.github/workflows/ci.yml` (line 119)
+- type: tooling
+- statement: The CI E2E job pulls `llama3.2:3b` (`ollama pull llama3.2:3b` at `ci.yml:119`), not the documented runtime default `qwen3:4b`. This is a Quality Workstream backlog item — either the runtime default and CI model should be reconciled, or the divergence should be documented as intentional (e.g., smaller/faster CI model).
+- evidence: `grep -n "qwen3\|llama3\|ollama pull" .github/workflows/ci.yml` returns only `119: ollama pull llama3.2:3b`.
 
 ---
 
@@ -141,11 +153,24 @@
 
 ---
 
-## CON-cors-origin-allowlist
+## CON-cors-current
 
-- source: `/Users/axel/code/trip_planner/.planning/IMPLEMENTATION_PLAN.md` (Phase 5)
+- source: `/Users/axel/code/trip_planner/backend/app/api/main.py` (lines 72–76)
 - type: protocol
-- statement: CORS origins come from `settings.cors_origins` (default `["http://localhost:5173"]`). Wildcard `*` must never be silently allowed.
+- statement (current): CORS is hard-coded in `backend/app/api/main.py` via `app.add_middleware(CORSMiddleware, ...)`:
+  - `allow_origins=["http://localhost:5173"]` (Vite dev server)
+  - `allow_methods=["*"]`
+  - `allow_headers=["*"]`
+  - `allow_credentials=True`
+- evidence: `grep -n cors_origins backend/app/config.py backend/app/api/main.py` returns no matches — there is no settings-driven allowlist today; values are literal in `main.py`.
+
+---
+
+## CON-cors-allowlist
+
+- source: `/Users/axel/code/trip_planner/.planning/IMPLEMENTATION_PLAN.md` (Phase 5 / Phase 6 security hardening), `REQ-security-hardening`
+- type: protocol
+- statement (target — Phase 6 / REQ-security-hardening deliverable): CORS origins must come from `settings.cors_origins` (default `["http://localhost:5173"]`). Wildcard `*` must never be silently allowed. Wildcard `allow_methods=["*"]` and `allow_headers=["*"]` must be replaced with explicit method and header lists. This supersedes `CON-cors-current` once shipped.
 
 ---
 
@@ -247,6 +272,16 @@
 
 ---
 
+## CON-no-print-statements
+
+- source: `/Users/axel/code/trip_planner/CLAUDE.md` (project rules — structured logging), `REQ-structured-logging`
+- type: protocol
+- statement: Production code must not use `print()` for logging. Use `structlog` (or the project's structured logger) instead. This applies to all backend modules under `backend/app/`.
+- current violations: `backend/app/api/main.py:60` — `print(f"Cleaned up {cleaned_up} sessions on shutdown")`. Verified via `grep -n "print(" backend/app/api/main.py backend/app/chat.py` (only this line matches).
+- target: Phase 6 / `REQ-structured-logging` deliverable replaces the existing `print()` call with a structured-logger invocation as part of the broader logging adoption.
+
+---
+
 ## CON-project-layout
 
 - source: `/Users/axel/code/trip_planner/ARCHITECTURE.md` (Project Structure), `/Users/axel/code/trip_planner/CLAUDE.md`
@@ -281,8 +316,10 @@
 | CON-runtime-versions | tooling |
 | CON-tech-stack-versions | tooling |
 | CON-llm-provider-current | tooling |
+| CON-ci-e2e-model-mismatch | tooling |
 | CON-auth-jwt | protocol |
-| CON-cors-origin-allowlist | protocol |
+| CON-cors-current | protocol |
+| CON-cors-allowlist | protocol |
 | CON-security-headers | protocol |
 | CON-rate-limiting | protocol |
 | CON-markdown-sanitization | protocol |
@@ -293,4 +330,5 @@
 | CON-no-lru-cache-singletons | protocol |
 | CON-error-hierarchy | schema |
 | CON-pydantic-validators-business-rules | schema |
+| CON-no-print-statements | protocol |
 | CON-project-layout | tooling |

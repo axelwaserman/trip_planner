@@ -23,13 +23,14 @@ All 9 source documents were classified `DOC` at the parent-doc level. **ARCHITEC
 ## Decisions extracted
 
 - **Total ADRs extracted:** 5
-- **Locked (Accepted):** 4
+- **Locked (Accepted):** 3
   - ADR-001 LangChain 1.0 with `bind_tools()` — `ARCHITECTURE.md`
-  - ADR-003 SSE streaming — `ARCHITECTURE.md`
   - ADR-004 Pydantic models for all data structures — `ARCHITECTURE.md`
   - ADR-005 Mock-first external API integration — `ARCHITECTURE.md`
-- **Deprecated (recorded for history, not active):** 1
-  - ADR-002 Global Chat Store (superseded by per-instance `ChatService._histories`)
+- **Locked-as-implemented (differs from documented target):** 1
+  - ADR-003 SSE streaming — implemented with `StreamingResponse` from `fastapi.responses`; `ARCHITECTURE.md` named `EventSourceResponse` from `sse_starlette` but that dependency never landed.
+- **Withdrawn / never implemented (recorded for history):** 1
+  - ADR-002 Global Chat Store — proposal never reached the codebase; actual implementation uses per-instance `ChatService._histories`.
 - **Implicit decisions** (project rules promoted to ADR-candidate status): 7 — see `decisions.md` "Implicit decisions" section.
 
 ## Requirements extracted
@@ -61,13 +62,14 @@ Acceptance criteria are listed per requirement in `requirements.md`.
 
 ## Constraints extracted
 
-- **Total:** 28
+- **Total:** 31
 - Breakdown by type:
   - api-contract: 4 (`CON-stream-event-protocol`, `CON-flight-tool-output-schema-current`, `CON-providers-api`, `CON-session-lifecycle-api`)
   - schema: 2 (`CON-error-hierarchy`, `CON-pydantic-validators-business-rules`)
-  - protocol: 9 (async-io, ci-pr-gates, ci-concurrency, auth-jwt, cors-origin-allowlist, security-headers, rate-limiting, markdown-sanitization, no-lru-cache-singletons)
-  - nfr: 6 (test-pyramid, test-no-network-no-ollama, coverage-floor-60, coverage-floor-80, frontend-coverage-future)
-  - tooling: 7 (mypy-strict, package-manager-uv, format-lint, test-aaa-pattern, runtime-versions, tech-stack-versions, llm-provider-current, project-layout)
+  - protocol: 11 (async-io, ci-pr-gates, ci-concurrency, auth-jwt, cors-current, cors-allowlist, security-headers, rate-limiting, markdown-sanitization, no-lru-cache-singletons, no-print-statements)
+  - nfr: 5 (test-pyramid, test-no-network-no-ollama, coverage-floor-60, coverage-floor-80, frontend-coverage-future)
+  - tooling: 9 (mypy-strict, package-manager-uv, format-lint, test-aaa-pattern, runtime-versions, tech-stack-versions, llm-provider-current, ci-e2e-model-mismatch, project-layout)
+  - Net delta vs prior synthesis: +3 (split CORS into current+target; added `CON-ci-e2e-model-mismatch`; added `CON-no-print-statements`). Prior nfr/tooling totals (6/7) double-counted `test-aaa-pattern`; corrected here to 5/9 — totals reconcile: 4 + 2 + 11 + 5 + 9 = 31.
 
 ## Context topics
 
