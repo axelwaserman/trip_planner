@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-3-5-sonnet-20241022"
 
+    # Provider probe (RESEARCH.md Pitfall 3, Assumption A2). 1.5 s caps the worst
+    # case for a misconfigured Ollama daemon; localhost hits are typically 50–200 ms.
+    provider_probe_timeout_seconds: float = 1.5
+
     def model_post_init(self, __context: object) -> None:
         """Emit a warning when the JWT secret is still the insecure default."""
         if self.jwt_secret == _DEFAULT_JWT_SECRET:

@@ -90,6 +90,8 @@ Tests live in `backend/tests/{unit,integration,e2e}`. Markers: `@pytest.mark.uni
 - All I/O must be `async def`; no `requests`, no sync file I/O in async paths
 - `ruff` line length is 100; `isort` first-party prefix is `app`
 - Auth uses JWT (`pyjwt`) with `pwdlib[argon2]` for password hashing (`api/routes/auth.py`); protected routes depend on `get_current_active_user`
+- **Cross-module taxonomies use `StrEnum`, not duplicated `Literal[...]` unions.** When the same set of stable string codes appears in more than one file (e.g. a wire-level error code shared between a service and a Pydantic response model), define it once as a `StrEnum` and import it. See `app.services.provider_probe.ProbeErrorCode` for the canonical example.
+- **Tunable thresholds live on `Settings`, not as module-level constants.** Probe timeouts, retry counts, expiry windows, and similar knobs go in `app/config.py` so they can be overridden per environment via env vars. Module constants are reserved for values that are part of the contract (e.g. JSON keys, MIME types).
 
 ## Context files
 
