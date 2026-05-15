@@ -103,8 +103,8 @@ Plans:
 - [x] 04.2-01-PLAN.md — Wave 0: Create 8 failing test stubs (4 backend, 4 frontend)
 - [x] 04.2-02-PLAN.md — Wave 1: Rename auth router to /api/auth + create provider_probe service
 - [x] 04.2-03-PLAN.md — Wave 1: Frontend auth lib (auth.ts, providerErrors.ts), theme, BrowserRouter, fonts
-- [ ] 04.2-04-PLAN.md — Wave 2: Wire probe_provider() into POST /api/chat/session
-- [ ] 04.2-05-PLAN.md — Wave 2: Login page + routing (RequireAuth, LoginForm, UserMenu, App.tsx)
+- [x] 04.2-04-PLAN.md — Wave 2: Wire probe_provider() into POST /api/chat/session
+- [x] 04.2-05-PLAN.md — Wave 2: Login page + routing (RequireAuth, LoginForm, UserMenu, App.tsx)
 - [ ] 04.2-06-PLAN.md — Wave 3: SelectorErrorBanner + useChat/ProviderSelector rewiring + manual UAT
 **UI hint**: yes
 
