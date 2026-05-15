@@ -1,10 +1,4 @@
-"""Failing test stubs for GET /api/auth/me — Plan 02 will mount this route.
-
-These tests use ``@pytest.mark.xfail(strict=False)`` so the suite stays green while the
-endpoint is absent. Once Plan 02 mounts ``GET /api/auth/me`` under the ``/api/auth``
-prefix and the tests start passing, they will report XPASS and the executor must remove
-the xfail marker.
-"""
+"""Unit tests for GET /api/auth/me — mounted by Plan 02 under the /api/auth prefix."""
 
 from collections.abc import Generator
 
@@ -24,10 +18,6 @@ def client() -> Generator[TestClient]:
         yield c
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="GET /api/auth/me not yet mounted — Plan 02 renames /users/me → /api/auth/me",
-)
 def test_auth_me_returns_401_without_token(client: TestClient) -> None:
     """GET /api/auth/me without a Bearer token returns 401 Unauthorized."""
     # Act
@@ -37,10 +27,6 @@ def test_auth_me_returns_401_without_token(client: TestClient) -> None:
     assert response.status_code == 401
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="GET /api/auth/me not yet mounted — Plan 02 renames /users/me → /api/auth/me",
-)
 def test_auth_me_returns_200_with_valid_token(client: TestClient) -> None:
     """GET /api/auth/me with a valid Bearer token returns 200 + the username."""
     # Arrange

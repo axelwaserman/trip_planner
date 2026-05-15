@@ -1,9 +1,8 @@
-"""Failing integration stubs for the POST /api/auth/token → GET /api/auth/me round-trip.
+"""Integration tests for the POST /api/auth/token → GET /api/auth/me round-trip.
 
 Plan 02 mounts the auth router under ``/api/auth`` so the existing ``POST /token``
-becomes ``POST /api/auth/token`` and the existing ``GET /users/me`` becomes
-``GET /api/auth/me``. These tests exercise the full path; they xfail until Plan 02
-lands the prefix change.
+became ``POST /api/auth/token`` and the existing ``GET /users/me`` became
+``GET /api/auth/me``.
 """
 
 from collections.abc import Generator
@@ -25,10 +24,6 @@ def client() -> Generator[TestClient]:
         yield c
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="POST /api/auth/token + GET /api/auth/me not yet mounted — Plan 02",
-)
 def test_login_and_get_me_round_trip(client: TestClient) -> None:
     """Full flow: log in via /api/auth/token, then fetch /api/auth/me with the token."""
     # Arrange + Act — log in
@@ -55,10 +50,6 @@ def test_login_and_get_me_round_trip(client: TestClient) -> None:
     assert me_body["username"] == "admin"
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="GET /api/auth/me not yet mounted — Plan 02",
-)
 def test_get_me_rejects_expired_token(client: TestClient) -> None:
     """GET /api/auth/me rejects a token whose ``exp`` claim is in the past."""
     # Arrange — craft a token that has already expired.
