@@ -1,25 +1,91 @@
 /**
- * Failing test stubs for the providerErrors module — Plan 03 will create
+ * Tests for the providerErrors module — Plan 03 creates
  * `frontend/src/lib/providerErrors.ts` exporting mapProbeError + PROVIDERS_FETCH_FAILED.
  *
  * F1-F4 copy mappings (UI-SPEC):
- *   F1 ollama_unreachable      → "Ollama is not reachable" + `ollama serve` inline code
- *   F2 model_not_installed     → "Model <model> isn't installed" + `ollama pull <model>` inline code
- *   F3 missing_api_key         → "<PROVIDER>_API_KEY is not set" + ENV_VAR inline code
+ *   F1 ollama_unreachable      → message+hint from backend, inlineCode: ['ollama serve']
+ *   F2 model_not_installed     → inlineCode: [model, `ollama pull <model>`]
+ *   F3 missing_api_key         → inlineCode: [`<PROVIDER>_API_KEY`]
  *   F4 providers_fetch_failed  → "Couldn't load providers" + empty inlineCode array
- *
- * Each case is `test.todo` so Vitest reports them as TODO. The executor that
- * lands Plan 03 replaces each with `it(name, () => { ... })`.
  */
 
-import { describe, test } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import {
+  mapProbeError,
+  PROVIDERS_FETCH_FAILED,
+  type BackendProbeError,
+} from '../providerErrors'
 
-describe('providerErrors (Plan 03 will create src/lib/providerErrors.ts)', () => {
-  test.todo('mapProbeError returns F1 copy with `ollama serve` inlineCode for ollama_unreachable')
-  test.todo(
-    'mapProbeError returns F2 copy with model name and `ollama pull <model>` inlineCode for model_not_installed'
-  )
-  test.todo('mapProbeError returns F3 copy with the matching ENV_VAR inlineCode for missing_api_key')
-  test.todo('PROVIDERS_FETCH_FAILED has code providers_fetch_failed and empty inlineCode array')
-  test.todo('mapProbeError preserves the backend hint string in the ProviderErrorView output')
+describe('providerErrors', () => {
+  it('mapProbeError returns F1 copy with `ollama serve` inlineCode for ollama_unreachable', () => {
+    // Arrange
+    const body: BackendProbeError = {
+      error: 'ollama_unreachable',
+      message: "Can't reach Ollama at http://localhost:11434",
+      hint: 'Run `ollama serve`',
+    }
+
+    // Act
+    const view = mapProbeError(body, { provider: 'ollama', model: 'qwen3:4b' })
+
+    // Assert
+    expect(view.code).toBe('ollama_unreachable')
+    expect(view.message).toBe(body.message)
+    expect(view.hint).toBe(body.hint)
+    expect(view.inlineCode).toEqual(['ollama serve'])
+  })
+
+  it('mapProbeError returns F2 copy with model name and `ollama pull <model>` inlineCode for model_not_installed', () => {
+    // Arrange
+    const body: BackendProbeError = {
+      error: 'model_not_installed',
+      message: "Model qwen3:4b isn't installed",
+      hint: 'Run `ollama pull qwen3:4b`',
+    }
+
+    // Act
+    const view = mapProbeError(body, { provider: 'ollama', model: 'qwen3:4b' })
+
+    // Assert
+    expect(view.code).toBe('model_not_installed')
+    expect(view.inlineCode).toEqual(['qwen3:4b', 'ollama pull qwen3:4b'])
+  })
+
+  it('mapProbeError returns F3 copy with the matching ENV_VAR inlineCode for missing_api_key', () => {
+    // Arrange
+    const body: BackendProbeError = {
+      error: 'missing_api_key',
+      message: 'OPENAI_API_KEY is not set',
+      hint: 'Set OPENAI_API_KEY in your environment.',
+    }
+
+    // Act
+    const view = mapProbeError(body, { provider: 'openai', model: 'gpt-4o-mini' })
+
+    // Assert
+    expect(view.code).toBe('missing_api_key')
+    expect(view.inlineCode).toEqual(['OPENAI_API_KEY'])
+  })
+
+  it('PROVIDERS_FETCH_FAILED has code providers_fetch_failed and empty inlineCode array', () => {
+    expect(PROVIDERS_FETCH_FAILED.code).toBe('providers_fetch_failed')
+    expect(PROVIDERS_FETCH_FAILED.inlineCode).toEqual([])
+    expect(PROVIDERS_FETCH_FAILED.message).toBe("Couldn't load providers.")
+    expect(PROVIDERS_FETCH_FAILED.hint).toBe('Check that the backend is running.')
+  })
+
+  it('mapProbeError preserves the backend hint string in the ProviderErrorView output', () => {
+    // Arrange
+    const body: BackendProbeError = {
+      error: 'ollama_unreachable',
+      message: 'A',
+      hint: 'specific actionable hint string from backend',
+    }
+
+    // Act
+    const view = mapProbeError(body, { provider: 'ollama', model: 'qwen3:4b' })
+
+    // Assert
+    expect(view.hint).toBe('specific actionable hint string from backend')
+  })
 })
