@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Message, MessageType } from '../types/chat'
+import { apiFetch } from '../lib/auth'
+import {
+  mapProbeError,
+  type BackendProbeError,
+  type ProviderErrorView,
+} from '../lib/providerErrors'
 import { readSSEStream } from './useSSEStream'
 
 interface UseChatReturn {
@@ -8,25 +14,64 @@ interface UseChatReturn {
   sessionId: string | null
   currentProvider: string
   currentModel: string
+  providerError: ProviderErrorView | null
   sendMessage: (text: string) => Promise<void>
   handleProviderChange: (provider: string, model: string) => void
+  retryProvider: () => void
+}
+
+interface SessionData {
+  session_id: string
+  provider: string
+  model: string
+}
+
+type CreateSessionResult =
+  | { ok: true; data: SessionData }
+  | { ok: false; probeError: ProviderErrorView }
+  | { ok: false; probeError: null }
+
+function isProbeErrorBody(value: unknown): value is { detail: BackendProbeError } {
+  if (typeof value !== 'object' || value === null) return false
+  const detail = (value as { detail?: unknown }).detail
+  if (typeof detail !== 'object' || detail === null) return false
+  const d = detail as Record<string, unknown>
+  return (
+    typeof d.error === 'string' &&
+    typeof d.message === 'string' &&
+    typeof d.hint === 'string'
+  )
 }
 
 async function createSession(
   provider: string,
   model: string
-): Promise<{ session_id: string; provider: string; model: string }> {
-  const response = await fetch('/api/chat/session', {
+): Promise<CreateSessionResult> {
+  const response = await apiFetch('/api/chat/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider, model }),
   })
 
-  if (!response.ok) {
-    throw new Error('Failed to create session')
+  if (response.ok) {
+    const data = (await response.json()) as SessionData
+    return { ok: true, data }
   }
 
-  return response.json() as Promise<{ session_id: string; provider: string; model: string }>
+  // Try to parse the structured probe error body. Anything else falls through
+  // to a non-probe failure that the caller's existing error UI handles.
+  try {
+    const body: unknown = await response.json()
+    if (isProbeErrorBody(body)) {
+      return {
+        ok: false,
+        probeError: mapProbeError(body.detail, { provider, model }),
+      }
+    }
+  } catch {
+    // Body wasn't JSON — fall through.
+  }
+  return { ok: false, probeError: null }
 }
 
 export function useChat(): UseChatReturn {
@@ -35,20 +80,36 @@ export function useChat(): UseChatReturn {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [currentProvider, setCurrentProvider] = useState('ollama')
   const [currentModel, setCurrentModel] = useState('qwen3:4b')
+  const [providerError, setProviderError] = useState<ProviderErrorView | null>(null)
 
   const initSession = useCallback(async (provider: string, model: string) => {
+    setProviderError(null)
+    setCurrentProvider(provider)
+    setCurrentModel(model)
+
     try {
-      const data = await createSession(provider, model)
-      setSessionId(data.session_id)
-      setCurrentProvider(data.provider)
-      setCurrentModel(data.model)
-    } catch {
+      const result = await createSession(provider, model)
+
+      if (result.ok) {
+        setSessionId(result.data.session_id)
+        setCurrentProvider(result.data.provider)
+        setCurrentModel(result.data.model)
+        return
+      }
+
+      if (result.probeError) {
+        setProviderError(result.probeError)
+        return
+      }
+
       setMessages([
         {
           role: 'assistant',
           content: '❌ Failed to initialize chat session. Please refresh the page.',
         },
       ])
+    } catch {
+      // apiFetch's 401 handler already redirected; nothing to do here.
     }
   }, [])
 
@@ -65,10 +126,16 @@ export function useChat(): UseChatReturn {
   const handleProviderChange = useCallback(
     (provider: string, model: string) => {
       setMessages([])
+      setProviderError(null)
       void initSession(provider, model)
     },
     [initSession]
   )
+
+  const retryProvider = useCallback(() => {
+    setProviderError(null)
+    void initSession(currentProvider, currentModel)
+  }, [currentProvider, currentModel, initSession])
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -78,7 +145,7 @@ export function useChat(): UseChatReturn {
       setMessages((prev) => [...prev, { role: 'user', content: text }])
 
       try {
-        const response = await fetch('/api/chat', {
+        const response = await apiFetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: text, session_id: sessionId }),
@@ -221,7 +288,9 @@ export function useChat(): UseChatReturn {
     sessionId,
     currentProvider,
     currentModel,
+    providerError,
     sendMessage,
     handleProviderChange,
+    retryProvider,
   }
 }

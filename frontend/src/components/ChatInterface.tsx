@@ -6,15 +6,37 @@ import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
 import { ThinkingCard } from './ThinkingCard'
 import { ProviderSelector } from './ProviderSelector'
+import { SelectorErrorBanner } from './chat/SelectorErrorBanner'
 import { UserMenu } from './chat/UserMenu'
 import { useChat } from '../hooks/useChat'
 import { apiFetch } from '../lib/auth'
+import type { ProviderErrorView } from '../lib/providerErrors'
 
 export function ChatInterface() {
-  const { messages, isLoading, currentProvider, currentModel, sendMessage, handleProviderChange } =
-    useChat()
+  const {
+    messages,
+    isLoading,
+    currentProvider,
+    currentModel,
+    providerError,
+    sendMessage,
+    handleProviderChange,
+    retryProvider,
+  } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [username, setUsername] = useState<string>('')
+  const [selectorError, setSelectorError] = useState<ProviderErrorView | null>(null)
+  const activeError = providerError ?? selectorError
+
+  const handleSelectorChange = (provider: string, model: string) => {
+    setSelectorError(null)
+    handleProviderChange(provider, model)
+  }
+
+  const handleRetry = () => {
+    setSelectorError(null)
+    retryProvider()
+  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -78,7 +100,8 @@ export function ChatInterface() {
           </Box>
           <Box>
             <ProviderSelector
-              onProviderChange={handleProviderChange}
+              onProviderChange={handleSelectorChange}
+              onProviderError={setSelectorError}
               initialProvider={currentProvider}
               initialModel={currentModel}
             />
@@ -90,6 +113,7 @@ export function ChatInterface() {
           </Text>
           {username && <UserMenu username={username} />}
         </Flex>
+        <SelectorErrorBanner error={activeError} onRetry={handleRetry} />
       </Box>
 
       {/* Messages */}

@@ -1,6 +1,8 @@
 import { Box, Flex, Text } from '@chakra-ui/react'
 import type { ChangeEvent } from 'react'
 import { useEffect, useState } from 'react'
+import { apiFetch } from '../lib/auth'
+import { PROVIDERS_FETCH_FAILED, type ProviderErrorView } from '../lib/providerErrors'
 
 interface Provider {
   available: boolean
@@ -13,12 +15,14 @@ interface Providers {
 
 interface ProviderSelectorProps {
   onProviderChange: (provider: string, model: string) => void
+  onProviderError?: (error: ProviderErrorView) => void
   initialProvider?: string
   initialModel?: string
 }
 
 export function ProviderSelector({
   onProviderChange,
+  onProviderError,
   initialProvider = 'ollama',
   initialModel = 'qwen3:4b',
 }: ProviderSelectorProps) {
@@ -31,7 +35,7 @@ export function ProviderSelector({
   useEffect(() => {
     const fetchProviders = async () => {
       try {
-        const response = await fetch('/api/providers')
+        const response = await apiFetch('/api/providers')
         if (!response.ok) {
           throw new Error('Failed to fetch providers')
         }
@@ -47,15 +51,16 @@ export function ProviderSelector({
             setSelectedModel(model)
           }
         }
-      } catch (error) {
-        console.error('Failed to fetch providers:', error)
+      } catch {
+        // apiFetch handles 401 via redirect; surface every other failure as F4.
+        onProviderError?.(PROVIDERS_FETCH_FAILED)
       } finally {
         setLoading(false)
       }
     }
 
     fetchProviders()
-  }, [])
+  }, [onProviderError])
 
   // Save to localStorage and notify parent when selection changes
   const handleProviderChange = (newProvider: string) => {
