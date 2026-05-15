@@ -3,7 +3,7 @@
  * `frontend/src/lib/providerErrors.ts` exporting mapProbeError + PROVIDERS_FETCH_FAILED.
  *
  * F1-F4 copy mappings (UI-SPEC):
- *   F1 ollama_unreachable      → message+hint from backend, inlineCode: ['ollama serve']
+ *   F1 provider_unreachable    → message+hint from backend, inlineCode: ['ollama serve'] (ollama only)
  *   F2 model_not_installed     → inlineCode: [model, `ollama pull <model>`]
  *   F3 missing_api_key         → inlineCode: [`<PROVIDER>_API_KEY`]
  *   F4 providers_fetch_failed  → "Couldn't load providers" + empty inlineCode array
@@ -17,10 +17,10 @@ import {
 } from '../providerErrors'
 
 describe('providerErrors', () => {
-  it('mapProbeError returns F1 copy with `ollama serve` inlineCode for ollama_unreachable', () => {
+  it('mapProbeError returns F1 copy with `ollama serve` inlineCode for provider_unreachable on ollama', () => {
     // Arrange
     const body: BackendProbeError = {
-      error: 'ollama_unreachable',
+      error: 'provider_unreachable',
       message: "Can't reach Ollama at http://localhost:11434",
       hint: 'Run `ollama serve`',
     }
@@ -29,10 +29,23 @@ describe('providerErrors', () => {
     const view = mapProbeError(body, { provider: 'ollama', model: 'qwen3:4b' })
 
     // Assert
-    expect(view.code).toBe('ollama_unreachable')
+    expect(view.code).toBe('provider_unreachable')
     expect(view.message).toBe(body.message)
     expect(view.hint).toBe(body.hint)
     expect(view.inlineCode).toEqual(['ollama serve'])
+  })
+
+  it('mapProbeError omits the ollama snippet for provider_unreachable on a non-ollama provider', () => {
+    const body: BackendProbeError = {
+      error: 'provider_unreachable',
+      message: "Can't reach OpenAI",
+      hint: 'Check your network connectivity.',
+    }
+
+    const view = mapProbeError(body, { provider: 'openai', model: 'gpt-4o-mini' })
+
+    expect(view.code).toBe('provider_unreachable')
+    expect(view.inlineCode).toEqual([])
   })
 
   it('mapProbeError returns F2 copy with model name and `ollama pull <model>` inlineCode for model_not_installed', () => {
@@ -77,7 +90,7 @@ describe('providerErrors', () => {
   it('mapProbeError preserves the backend hint string in the ProviderErrorView output', () => {
     // Arrange
     const body: BackendProbeError = {
-      error: 'ollama_unreachable',
+      error: 'provider_unreachable',
       message: 'A',
       hint: 'specific actionable hint string from backend',
     }
