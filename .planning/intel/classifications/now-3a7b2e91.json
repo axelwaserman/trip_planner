@@ -1,0 +1,23 @@
+{
+  "source_path": "/Users/axel/code/trip_planner/NOW.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Current Focus: Phase 3 Complete, Planning Next Steps",
+  "summary": "Status snapshot of Phase 3 completion and a reassessed list of Phase 4 priorities for the trip planner project.",
+  "scope": [
+    "Phase 3 completion status",
+    "Phase 4 priorities",
+    "Tool visibility and streaming",
+    "Session management",
+    "LLM provider configuration",
+    "Frontend state management",
+    "Testing and polish"
+  ],
+  "cross_refs": [
+    "ROADMAP.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

@@ -297,9 +297,13 @@ async def test_short_distance_flights_have_fewer_stops(mock_client: MockFlightAP
 
 
 @pytest.mark.asyncio
-async def test_price_varies_by_stops(mock_client: MockFlightAPIClient) -> None:
-    """Test direct flights tend to be more expensive than flights with stops."""
-    # Run multiple searches to get statistical sample
+async def test_price_varies_by_stops() -> None:
+    """Direct flights tend to be more expensive than flights with stops.
+
+    Uses fixed seeds across many iterations so the mock's per-flight cabin/refundable
+    multipliers (up to 4x) cannot statistically out-vote the +100 direct-flight
+    surcharge. Without a fixed sample size this assertion is structurally flaky.
+    """
     query = FlightQuery(
         origin="JFK",
         destination="LAX",
@@ -307,20 +311,21 @@ async def test_price_varies_by_stops(mock_client: MockFlightAPIClient) -> None:
     )
 
     all_flights = []
-    for _ in range(5):
-        client = MockFlightAPIClient()  # New seed each time
+    for seed in range(50):
+        client = MockFlightAPIClient(seed=seed)
         flights = await client.search(query)
         all_flights.extend(flights)
 
     direct_flights = [f for f in all_flights if f.stops == 0]
     one_stop_flights = [f for f in all_flights if f.stops == 1]
 
-    if direct_flights and one_stop_flights:
-        avg_direct_price = sum(f.price for f in direct_flights) / len(direct_flights)
-        avg_one_stop_price = sum(f.price for f in one_stop_flights) / len(one_stop_flights)
+    assert direct_flights, "expected at least one direct flight across 50 seeded searches"
+    assert one_stop_flights, "expected at least one one-stop flight across 50 seeded searches"
 
-        # Direct flights should generally be more expensive
-        assert avg_direct_price > avg_one_stop_price
+    avg_direct_price = sum(f.price for f in direct_flights) / len(direct_flights)
+    avg_one_stop_price = sum(f.price for f in one_stop_flights) / len(one_stop_flights)
+
+    assert avg_direct_price > avg_one_stop_price
 
 
 @pytest.mark.asyncio
