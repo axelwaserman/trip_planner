@@ -9,6 +9,7 @@ from app.api.routes.auth import User, get_current_active_user
 from app.chat import ChatService
 from app.config import settings
 from app.models import ChatRequest, SessionCreateRequest, StreamEvent
+from app.services.provider_probe import ProbeErrorCode, probe_provider
 
 router = APIRouter()
 
@@ -124,6 +125,19 @@ async def create_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid model {request.model} for provider {request.provider}",
             )
+
+    if request.provider and request.model:
+        probe = await probe_provider(request.provider, request.model)
+        if probe is not None:
+            # Network-level reachability failures map to 502 Bad Gateway; everything
+            # else (model not installed, missing API key) is the user's misconfig
+            # and surfaces as 400 Bad Request.
+            probe_status = (
+                status.HTTP_502_BAD_GATEWAY
+                if probe.error == ProbeErrorCode.PROVIDER_UNREACHABLE
+                else status.HTTP_400_BAD_REQUEST
+            )
+            raise HTTPException(status_code=probe_status, detail=probe.model_dump())
 
     session_id = chat_service.create_session(
         provider=request.provider,
