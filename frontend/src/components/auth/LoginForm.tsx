@@ -67,7 +67,7 @@ export function LoginForm() {
   }
 
   return (
-    <Box as="form" onSubmit={onSubmit} aria-labelledby="signin-heading">
+    <form onSubmit={onSubmit} aria-labelledby="signin-heading">
       <Stack gap="4">
         <Field.Root invalid={!!error}>
           <Field.Label htmlFor="login-username">Username</Field.Label>
@@ -123,6 +123,6 @@ export function LoginForm() {
           <ArrowRight size={16} />
         </Button>
       </Stack>
-    </Box>
+    </form>
   )
 }
