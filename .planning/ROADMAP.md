@@ -100,9 +100,9 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
   5. `AUTH_USERS=user1:pass1,...` remains the user source — no Postgres yet (deferred to Phase 5).
 **Plans**: 6 plans across 4 waves
 Plans:
-- [ ] 04.2-01-PLAN.md — Wave 0: Create 8 failing test stubs (4 backend, 4 frontend)
-- [ ] 04.2-02-PLAN.md — Wave 1: Rename auth router to /api/auth + create provider_probe service
-- [ ] 04.2-03-PLAN.md — Wave 1: Frontend auth lib (auth.ts, providerErrors.ts), theme, BrowserRouter, fonts
+- [x] 04.2-01-PLAN.md — Wave 0: Create 8 failing test stubs (4 backend, 4 frontend)
+- [x] 04.2-02-PLAN.md — Wave 1: Rename auth router to /api/auth + create provider_probe service
+- [x] 04.2-03-PLAN.md — Wave 1: Frontend auth lib (auth.ts, providerErrors.ts), theme, BrowserRouter, fonts
 - [ ] 04.2-04-PLAN.md — Wave 2: Wire probe_provider() into POST /api/chat/session
 - [ ] 04.2-05-PLAN.md — Wave 2: Login page + routing (RequireAuth, LoginForm, UserMenu, App.tsx)
 - [ ] 04.2-06-PLAN.md — Wave 3: SelectorErrorBanner + useChat/ProviderSelector rewiring + manual UAT

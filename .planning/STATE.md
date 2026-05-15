@@ -4,8 +4,8 @@ milestone: v1.5
 milestone_name: Re-platform
 status: executing
 stopped_at: Phase 4.2 UI-SPEC approved
-last_updated: "2026-05-15T15:22:46.933Z"
-last_activity: 2026-05-15 -- Phase 4.2 planning complete
+last_updated: "2026-05-15T15:29:49.062Z"
+last_activity: 2026-05-15 -- Phase 04.2 execution started
 progress:
   total_phases: 15
   completed_phases: 0
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** A user can authenticate via a real login page, pick an LLM provider (a local Ollama model discovered from the host, or a cloud provider via API key), hold a natural conversation with the agent, watch it reason and call travel tools live, and trust that the results are structured, sanitized, and rendered usefully.
-**Current focus:** Phase 4.2 — **Unbreak the App** (the in-browser flow is broken: no login page, broken model selector). v1 starts by restoring end-to-end usability before any new feature work.
+**Current focus:** Phase 04.2 — unbreak-the-app
 
 ## Current Position
 
-Phase: 4.2 of 15 (Unbreak the App)
-Plan: 0 of TBD in current phase
-Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 4.2 planning complete
+Phase: 04.2 (unbreak-the-app) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 04.2
+Last activity: 2026-05-15 -- Phase 04.2 execution started
 
 Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases fully complete: 2, 3; Phase 1 and Phase 4.1 partial)
 
