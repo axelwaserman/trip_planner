@@ -39,7 +39,10 @@ export function RequireAuth({ children }: RequireAuthProps) {
 
   if (verified === 'fail') {
     const from = `${location.pathname}${location.search}`
-    return <Navigate to={`/login?from=${encodeURIComponent(from)}`} replace />
+    // For the default landing route, redirect to bare /login — no ?from= noise.
+    const isDefault = location.pathname === '/app' && !location.search
+    const target = isDefault ? '/login' : `/login?from=${encodeURIComponent(from)}`
+    return <Navigate to={target} replace />
   }
 
   if (verified === 'pending') {

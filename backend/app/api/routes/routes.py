@@ -106,18 +106,16 @@ async def create_session(
     if request is None:
         request = SessionCreateRequest()
 
-    # Validate provider and model if specified
+    # Validate provider and model if specified.
+    # Note: we deliberately do NOT short-circuit on `available=False` here — the
+    # probe (below) is the single authority on missing-key errors and emits the
+    # structured `missing_api_key` ProbeError that the frontend banner consumes.
     if request.provider:
         providers = settings.get_available_providers()
         if request.provider not in providers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid provider: {request.provider}. Available: {list(providers.keys())}",
-            )
-        if not providers[request.provider]["available"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Provider {request.provider} not available (missing API key)",
             )
         models = providers[request.provider]["models"]
         if request.model and isinstance(models, list) and request.model not in models:

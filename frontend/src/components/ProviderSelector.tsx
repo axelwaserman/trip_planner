@@ -101,12 +101,13 @@ export function ProviderSelector({
     )
   }
 
-  // Get available providers (filter out those without credentials)
-  const availableProviders = Object.entries(providers).filter(
-    ([, provider]) => provider.available
-  )
+  // Show every provider the backend exposes — even those without credentials.
+  // The probe runs at session-create and emits a structured F3 banner if the
+  // user picks a provider whose API key is missing, so we let the user reach
+  // that error path instead of hiding the option entirely.
+  const allProviders = Object.entries(providers)
 
-  if (availableProviders.length === 0) {
+  if (allProviders.length === 0) {
     return (
       <Text fontSize="sm" color="red.500">
         No providers available
@@ -126,9 +127,9 @@ export function ProviderSelector({
           }}
           value={selectedProvider}
           onChange={(e: ChangeEvent<HTMLSelectElement>) => handleProviderChange(e.target.value)}
-          disabled={availableProviders.length === 1}
+          disabled={allProviders.length === 1}
         >
-          {availableProviders.map(([name]) => (
+          {allProviders.map(([name]) => (
             <option key={name} value={name}>
               {name.charAt(0).toUpperCase() + name.slice(1)}
             </option>

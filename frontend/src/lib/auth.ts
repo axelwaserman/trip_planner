@@ -47,7 +47,12 @@ export async function apiFetch(
   if (response.status === 401) {
     clearToken()
     const fromPath = window.location.pathname + window.location.search
-    const target = `/login?flash=session_expired&from=${encodeURIComponent(fromPath)}`
+    // For the default landing route, redirect to a bare ?flash — no ?from= noise.
+    const isDefault =
+      window.location.pathname === '/app' && !window.location.search
+    const target = isDefault
+      ? '/login?flash=session_expired'
+      : `/login?flash=session_expired&from=${encodeURIComponent(fromPath)}`
     window.location.assign(target)
     throw new Error('Session expired')
   }

@@ -7,7 +7,6 @@ a live Ollama daemon.
 """
 
 from collections.abc import Generator
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -89,29 +88,12 @@ def test_session_create_returns_400_when_cloud_key_missing(
 ) -> None:
     """OPENAI_API_KEY absent → probe returns 400 missing_api_key.
 
-    The existing ``available=False`` 400 path also fires when no key is set, so
-    we override ``get_available_providers`` to report openai as available; that
-    lets the probe become the authority for the missing-key signal.
+    The probe is the authority for the missing-key signal — the route no longer
+    short-circuits on ``available=False``.
     """
-    from app.api.routes import routes as routes_module
     from app.services import provider_probe as probe_module
 
-    available_override: dict[str, dict[str, Any]] = {
-        "ollama": {"available": True, "models": ["qwen3:4b"]},
-        "openai": {"available": True, "models": ["gpt-4o-mini"]},
-    }
-
-    class FakeSettings:
-        openai_api_key: str | None = None
-        anthropic_api_key: str | None = None
-        ollama_base_url: str = "http://localhost:11434"
-
-        def get_available_providers(self) -> dict[str, dict[str, Any]]:
-            return available_override
-
-    fake_settings = FakeSettings()
-    monkeypatch.setattr(routes_module, "settings", fake_settings)
-    monkeypatch.setattr(probe_module, "settings", fake_settings)
+    monkeypatch.setattr(probe_module.settings, "openai_api_key", None, raising=False)
 
     response = client.post(
         "/api/chat/session",

@@ -48,8 +48,12 @@ export function LoginForm() {
           return
         }
         setToken(payload.access_token)
-        const from = searchParams.get('from') ?? '/'
-        navigate(from, { replace: true })
+        const from = searchParams.get('from') ?? '/app'
+        // Guard against open-redirect via crafted ?from= values: only honor
+        // same-origin paths (must start with '/' and not '//').
+        const safeFrom =
+          from.startsWith('/') && !from.startsWith('//') ? from : '/app'
+        navigate(safeFrom, { replace: true })
         return
       }
 
