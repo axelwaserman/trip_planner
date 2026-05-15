@@ -1,3 +1,19 @@
+---
+gsd_state_version: 1.0
+milestone: v1.5
+milestone_name: Re-platform
+status: planning
+stopped_at: Phase 4.2 context gathered
+last_updated: "2026-05-15T13:22:46.511Z"
+last_activity: "2026-05-15 — PR #6 adversarial-review pass; roadmap renumbered to 4.2 → 4.8 + 5 (PG+compose) + 6 (PydanticAI) + 7 (Real API) + 8 (Hardening); rate limiting dropped; `aiohttp` → `pyreqwest`; status-corrected partial Phase 4.1 / auth / CI shipments. Follow-up review caught phase-count, ADR-002 wording, declared-as-shipped targets, and Phase 5↔6 rework risk."
+progress:
+  total_phases: 15
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 13
+---
+
 # Project State
 
 ## Project Reference
@@ -19,6 +35,7 @@ Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases f
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: retroactive (PRs #1, #3, #5 + Phase 4.1 partial) — pre-GSD-tracking, no per-plan durations recorded
 - Average duration: n/a
 - Total execution time: n/a
@@ -33,6 +50,7 @@ Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases f
 | 4.1. LLM Provider UI Config | retro (partial) | shipped 2026-05-13 (wiring broken) | n/a |
 
 **Recent Trend:**
+
 - Last 5 plans: not tracked (pre-GSD)
 - Trend: n/a — first GSD-tracked phase is 4.2
 
@@ -95,6 +113,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-05-15
-Stopped at: PR #6 review — applied roadmap amendments across PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md.
-Resume file: None — next action is `/gsd-plan-phase 4.2` (Unbreak the App).
+Last session: 2026-05-15T13:22:46.506Z
+Stopped at: Phase 4.2 context gathered
+Resume file: .planning/phases/04.2-unbreak-the-app/04.2-CONTEXT.md
