@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
 status: planning
-stopped_at: Phase 4.2 context gathered
-last_updated: "2026-05-15T13:22:46.511Z"
+stopped_at: Phase 4.2 UI-SPEC approved
+last_updated: "2026-05-15T13:51:20.800Z"
 last_activity: "2026-05-15 — PR #6 adversarial-review pass; roadmap renumbered to 4.2 → 4.8 + 5 (PG+compose) + 6 (PydanticAI) + 7 (Real API) + 8 (Hardening); rate limiting dropped; `aiohttp` → `pyreqwest`; status-corrected partial Phase 4.1 / auth / CI shipments. Follow-up review caught phase-count, ADR-002 wording, declared-as-shipped targets, and Phase 5↔6 rework risk."
 progress:
   total_phases: 15
@@ -113,6 +113,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-05-15T13:22:46.506Z
-Stopped at: Phase 4.2 context gathered
-Resume file: .planning/phases/04.2-unbreak-the-app/04.2-CONTEXT.md
+Last session: 2026-05-15T13:51:20.795Z
+Stopped at: Phase 4.2 UI-SPEC approved
+Resume file: .planning/phases/04.2-unbreak-the-app/04.2-UI-SPEC.md
