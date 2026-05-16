@@ -3,8 +3,8 @@
 ## Purpose
 
 This directory is the placeholder home for end-to-end tests that drive the
-running backend over HTTP. In Phase 4.3 the CI E2E job is required-for-merge
-as a symbolic gate (D-04): it MUST pass on every PR, but it ships zero real
+running backend over HTTP. As of Phase 4.3 the CI E2E job is required-for-merge
+as a symbolic gate (D-04): it must pass on every PR, but it ships zero real
 behavioural tests.
 
 ## What belongs here
