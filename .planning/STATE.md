@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
-status: executing
-stopped_at: Phase 4.2 complete — plan 06 SUMMARY written
-last_updated: "2026-05-16T16:05:00.000Z"
-last_activity: 2026-05-16 -- plan 04.2-06 SUMMARY written + SelectorErrorBanner stubs promoted to real tests
+status: ready_to_plan
+stopped_at: Phase 04.3 complete (7/7) — ready to discuss Phase 4.4
+last_updated: 2026-05-16T14:03:20.152Z
+last_activity: 2026-05-16 -- Phase 04.3 execution started
 progress:
   total_phases: 15
   completed_phases: 0
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_plans: 13
+  completed_plans: 12
+  percent: 0
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** A user can authenticate via a real login page, pick an LLM provider (a local Ollama model discovered from the host, or a cloud provider via API key), hold a natural conversation with the agent, watch it reason and call travel tools live, and trust that the results are structured, sanitized, and rendered usefully.
-**Current focus:** Phase 04.2 — unbreak-the-app
+**Current focus:** Phase 4.4 — mock chat in tests
 
 ## Current Position
 
-Phase: 04.2 (unbreak-the-app) — COMPLETE (all 6 plans, all SUMMARY artifacts written)
-Plan: 6 of 6
-Status: Phase 04.2 complete; ready to start Phase 04.3 (CI Reset + Lint/DI Migration)
-Last activity: 2026-05-16 -- plan 04.2-06 SUMMARY written + SelectorErrorBanner stubs promoted to real tests
+Phase: 4.4
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-16
 
-Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases fully complete: 2, 3; Phase 1 and Phase 4.1 partial; Phase 4.2 plans + summaries complete, phase-level VERIFICATION/UAT optional)
+Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases fully complete: 2, 3; Phase 1 and Phase 4.1 partial)
 
 ## Performance Metrics
 
@@ -48,6 +48,7 @@ Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases f
 | 2. LangChain Integration & Chat Agent | retro | shipped 2025-11-08 → 2025-11-10 | n/a |
 | 3. Mock Flight Search Tool | retro | shipped 2025-11-10 → 2025-11-14 | n/a |
 | 4.1. LLM Provider UI Config | retro (partial) | shipped 2026-05-13 (wiring broken) | n/a |
+| 04.3 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -113,6 +114,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-05-16T16:05:00.000Z
-Stopped at: Phase 4.2 complete — plan 06 SUMMARY written, all 6 plans have SUMMARY artifacts
-Resume file: .planning/phases/04.2-unbreak-the-app/04.2-06-SUMMARY.md
+Last session: 2026-05-16T10:56:35.563Z
+Stopped at: Phase 4.3 context gathered
+Resume file: .planning/phases/04.3-ci-reset-lint-di-migration/04.3-CONTEXT.md
