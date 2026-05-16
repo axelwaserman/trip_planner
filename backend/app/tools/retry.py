@@ -63,9 +63,7 @@ def retry_on_failure(
                         )
                         await asyncio.sleep(delay)
                     else:
-                        logger.error(
-                            f"{func.__name__} failed after {max_retries + 1} attempts: {e}"
-                        )
+                        logger.error(f"{func.__name__} failed after {max_retries + 1} attempts: {e}")
 
             # Raise the last exception after all retries exhausted
             if last_exception:

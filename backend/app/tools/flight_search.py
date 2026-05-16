@@ -89,9 +89,7 @@ async def search_flights(
 
         # Validate IATA codes (basic check)
         if len(origin) != 3 or not origin.isalpha():
-            return (
-                f"Error: Invalid origin airport code '{origin}'. Must be 3 letters (e.g., 'LAX')."
-            )
+            return f"Error: Invalid origin airport code '{origin}'. Must be 3 letters (e.g., 'LAX')."
         if len(destination) != 3 or not destination.isalpha():
             return f"Error: Invalid destination airport code '{destination}'. Must be 3 letters (e.g., 'JFK')."
 
@@ -101,9 +99,7 @@ async def search_flights(
         # Validate sort_by
         valid_sort_by = ["price", "duration", "departure"]
         if sort_by not in valid_sort_by:
-            return (
-                f"Error: Invalid sort_by '{sort_by}'. Must be 'price', 'duration', or 'departure'."
-            )
+            return f"Error: Invalid sort_by '{sort_by}'. Must be 'price', 'duration', or 'departure'."
         sort_by_value: SortBy = sort_by  # type: ignore[assignment]
 
         # Validate numeric parameters
@@ -143,9 +139,7 @@ async def search_flights(
             return f"No flights found from {origin} to {destination} on {departure_date} matching your criteria."
 
         # Format results
-        result_lines = [
-            f"Found {len(flights)} flight(s) from {origin} to {destination} on {departure_date}:\n"
-        ]
+        result_lines = [f"Found {len(flights)} flight(s) from {origin} to {destination} on {departure_date}:\n"]
 
         for i, flight in enumerate(flights, 1):
             # Calculate duration in hours and minutes

@@ -31,9 +31,7 @@ class FlightQuery(BaseModel):
     """
 
     origin: str = Field(..., min_length=3, max_length=3, description="Origin airport IATA code")
-    destination: str = Field(
-        ..., min_length=3, max_length=3, description="Destination airport IATA code"
-    )
+    destination: str = Field(..., min_length=3, max_length=3, description="Destination airport IATA code")
     departure_date: date = Field(..., description="Departure date")
     return_date: date | None = Field(default=None, description="Return date for round trip")
     passengers: int = Field(default=1, ge=1, le=9, description="Number of passengers")
@@ -106,9 +104,7 @@ class Flight(BaseModel):
     flight_number: str = Field(..., description="Flight number (e.g., 'AA123')")
     duration_minutes: int = Field(..., ge=0, description="Flight duration in minutes")
     stops: int = Field(default=0, ge=0, description="Number of stops (0 for direct)")
-    booking_class: BookingClass = Field(
-        default="economy", description="Cabin class (economy, business, first)"
-    )
+    booking_class: BookingClass = Field(default="economy", description="Cabin class (economy, business, first)")
 
     @field_validator("booking_class", mode="before")
     @classmethod
@@ -141,9 +137,7 @@ class Flight(BaseModel):
 class SessionCreateRequest(BaseModel):
     """Request model for creating a new chat session."""
 
-    provider: str | None = Field(
-        default=None, description="LLM provider (ollama, openai, anthropic)"
-    )
+    provider: str | None = Field(default=None, description="LLM provider (ollama, openai, anthropic)")
     model: str | None = Field(default=None, description="Model name for the provider")
 
 
@@ -155,9 +149,7 @@ class SessionCreateError(BaseModel):
     when the chosen provider/model fails its pre-flight probe (Plan 04).
     """
 
-    error: ProbeErrorCode = Field(
-        ..., description="Stable error code matching the UI-SPEC F1-F4 taxonomy"
-    )
+    error: ProbeErrorCode = Field(..., description="Stable error code matching the UI-SPEC F1-F4 taxonomy")
     message: str = Field(..., description="Human-readable summary for the banner heading")
     hint: str = Field(..., description="Actionable next step for the user")
 
@@ -190,10 +182,6 @@ class StreamEvent(BaseModel):
     )
     # Tool-specific fields (populated based on type)
     tool_name: str | None = Field(default=None, description="Tool name (for tool_call/result)")
-    tool_args: dict[str, Any] | None = Field(
-        default=None, description="Tool arguments (for tool_call)"
-    )
+    tool_args: dict[str, Any] | None = Field(default=None, description="Tool arguments (for tool_call)")
     tool_result: str | None = Field(default=None, description="Tool result text (for tool_result)")
-    elapsed_ms: int | None = Field(
-        default=None, description="Execution time in ms (for tool_result)"
-    )
+    elapsed_ms: int | None = Field(default=None, description="Execution time in ms (for tool_result)")

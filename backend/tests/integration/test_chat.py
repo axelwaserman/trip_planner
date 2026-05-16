@@ -17,9 +17,7 @@ def client() -> TestClient:
         yield c
 
 
-def test_chat_endpoint_requires_session_id(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_chat_endpoint_requires_session_id(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Test chat endpoint requires session_id."""
     response = client.post(
         "/api/chat",
@@ -30,9 +28,7 @@ def test_chat_endpoint_requires_session_id(
     assert response.status_code == 422
 
 
-def test_chat_endpoint_rejects_invalid_session(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_chat_endpoint_rejects_invalid_session(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Test chat endpoint rejects invalid session."""
     response = client.post(
         "/api/chat",
@@ -47,17 +43,18 @@ def test_chat_endpoint_rejects_invalid_session(
 def test_chat_endpoint_streams_response(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Test chat endpoint returns streaming response."""
 
-    async def mock_stream(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
-        """Mock async generator for streaming."""
-        yield StreamEvent(
-            type="content",
-            content="Hello there!",
-        )
-
     # Create a session first
     session_response = client.post("/api/chat/session", headers=auth_headers)
     assert session_response.status_code == 201  # Created
     session_id = session_response.json()["session_id"]
+
+    async def mock_stream(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
+        """Mock async generator for streaming."""
+        yield StreamEvent(
+            type="content",
+            chunk="Hello there!",
+            session_id=session_id,
+        )
 
     # Patch the ChatService.chat_stream method
     with patch("app.chat.ChatService.chat_stream", side_effect=mock_stream):
@@ -69,6 +66,8 @@ def test_chat_endpoint_streams_response(client: TestClient, auth_headers: dict[s
 
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+        assert "Hello there!" in response.text
+        assert "An error occurred" not in response.text
 
 
 def test_chat_endpoint_empty_message(client: TestClient, auth_headers: dict[str, str]) -> None:

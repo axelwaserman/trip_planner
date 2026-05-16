@@ -80,9 +80,7 @@ def test_get_providers_requires_auth(client: TestClient) -> None:
 
 
 @pytest.mark.integration
-def test_get_providers_succeeds_with_valid_token(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_get_providers_succeeds_with_valid_token(client: TestClient, auth_headers: dict[str, str]) -> None:
     """GET /api/providers returns 200 with a valid Bearer token."""
     response = client.get("/api/providers", headers=auth_headers)
     assert response.status_code == 200
@@ -103,9 +101,7 @@ def test_create_session_requires_auth(client: TestClient) -> None:
 
 
 @pytest.mark.integration
-def test_create_session_succeeds_with_valid_token(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_create_session_succeeds_with_valid_token(client: TestClient, auth_headers: dict[str, str]) -> None:
     """POST /api/chat/session returns 201 with a valid Bearer token."""
     response = client.post("/api/chat/session", headers=auth_headers)
     assert response.status_code == 201

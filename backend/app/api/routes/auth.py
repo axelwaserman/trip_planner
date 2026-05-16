@@ -112,11 +112,7 @@ def create_access_token(
         A signed JWT string.
     """
     to_encode = dict(data)
-    delta = (
-        expires_delta
-        if expires_delta is not None
-        else timedelta(minutes=settings.jwt_expire_minutes)
-    )
+    delta = expires_delta if expires_delta is not None else timedelta(minutes=settings.jwt_expire_minutes)
     to_encode["exp"] = datetime.now(UTC) + delta
     return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 

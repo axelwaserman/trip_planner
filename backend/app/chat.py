@@ -80,11 +80,7 @@ class ChatService:
             Number of sessions cleaned up
         """
         now = time.time()
-        expired = [
-            sid
-            for sid, last_active in self._last_activity.items()
-            if now - last_active > max_age_seconds
-        ]
+        expired = [sid for sid, last_active in self._last_activity.items() if now - last_active > max_age_seconds]
 
         for session_id in expired:
             self._histories.pop(session_id, None)
@@ -196,11 +192,7 @@ class ChatService:
                 # Stream the final response
                 accumulated_final = ""
                 async for final_chunk in self.llm.astream(messages_with_tools):
-                    if (
-                        hasattr(final_chunk, "content")
-                        and isinstance(final_chunk.content, str)
-                        and final_chunk.content
-                    ):
+                    if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
                         accumulated_final += final_chunk.content
                         yield StreamEvent(
                             chunk=final_chunk.content,
