@@ -20,7 +20,7 @@ router = APIRouter()
 
 _password_hasher = PasswordHash([Argon2Hasher()])
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
 
 
 # ---------------------------------------------------------------------------
@@ -192,9 +192,12 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> d
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@router.get("/users/me")
-async def read_users_me(
+@router.get("/me")
+async def read_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> User:
-    """Return the currently authenticated user's profile."""
+    """Return the currently authenticated user's profile.
+
+    Mounted at ``/api/auth/me`` once main.py applies the router prefix.
+    """
     return current_user

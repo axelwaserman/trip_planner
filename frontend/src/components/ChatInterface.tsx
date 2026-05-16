@@ -1,21 +1,69 @@
 import { Box, Button, Flex, Input, Stack, Text } from '@chakra-ui/react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
 import { ThinkingCard } from './ThinkingCard'
 import { ProviderSelector } from './ProviderSelector'
+import { SelectorErrorBanner } from './chat/SelectorErrorBanner'
+import { UserMenu } from './chat/UserMenu'
 import { useChat } from '../hooks/useChat'
+import { apiFetch } from '../lib/auth'
+import type { ProviderErrorView } from '../lib/providerErrors'
 
 export function ChatInterface() {
-  const { messages, isLoading, currentProvider, currentModel, sendMessage, handleProviderChange } =
-    useChat()
+  const {
+    messages,
+    isLoading,
+    currentProvider,
+    currentModel,
+    providerError,
+    sendMessage,
+    handleProviderChange,
+    retryProvider,
+  } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [username, setUsername] = useState<string>('')
+  const [selectorError, setSelectorError] = useState<ProviderErrorView | null>(null)
+  const activeError = providerError ?? selectorError
+
+  const handleSelectorChange = (provider: string, model: string) => {
+    setSelectorError(null)
+    handleProviderChange(provider, model)
+  }
+
+  const handleRetry = () => {
+    setSelectorError(null)
+    retryProvider()
+  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
+
+  useEffect(() => {
+    let cancelled = false
+    apiFetch('/api/auth/me')
+      .then((response) => {
+        if (cancelled || !response.ok) return
+        return response.json()
+      })
+      .then((payload: unknown) => {
+        if (cancelled || !payload) return
+        if (typeof payload === 'object' && payload !== null && 'username' in payload) {
+          const value = (payload as { username: unknown }).username
+          if (typeof value === 'string') setUsername(value)
+        }
+      })
+      .catch(() => {
+        // apiFetch already handles the 401 redirect; swallow other errors so the
+        // header just renders without a username rather than breaking the chat.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -52,15 +100,20 @@ export function ChatInterface() {
           </Box>
           <Box>
             <ProviderSelector
-              onProviderChange={handleProviderChange}
+              onProviderChange={handleSelectorChange}
+              onProviderError={setSelectorError}
               initialProvider={currentProvider}
               initialModel={currentModel}
             />
           </Box>
         </Flex>
-        <Text fontSize="xs" color="gray.500">
-          Using: {currentProvider} / {currentModel}
-        </Text>
+        <Flex justify="space-between" align="center">
+          <Text fontSize="xs" color="gray.500">
+            Using: {currentProvider} / {currentModel}
+          </Text>
+          {username && <UserMenu username={username} />}
+        </Flex>
+        <SelectorErrorBanner error={activeError} onRetry={handleRetry} />
       </Box>
 
       {/* Messages */}

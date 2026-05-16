@@ -7,6 +7,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.services.provider_probe import ProbeErrorCode
+
 # Type aliases
 BookingClass = Literal["economy", "premium_economy", "business", "first"]
 SortBy = Literal["price", "duration", "departure"]
@@ -143,6 +145,21 @@ class SessionCreateRequest(BaseModel):
         default=None, description="LLM provider (ollama, openai, anthropic)"
     )
     model: str | None = Field(default=None, description="Model name for the provider")
+
+
+class SessionCreateError(BaseModel):
+    """Structured probe failure surfaced via ``HTTPException.detail``.
+
+    Mirrors :class:`app.services.provider_probe.ProbeError` so the OpenAPI schema
+    documents the F1-F4 error envelope returned by ``POST /api/chat/session``
+    when the chosen provider/model fails its pre-flight probe (Plan 04).
+    """
+
+    error: ProbeErrorCode = Field(
+        ..., description="Stable error code matching the UI-SPEC F1-F4 taxonomy"
+    )
+    message: str = Field(..., description="Human-readable summary for the banner heading")
+    hint: str = Field(..., description="Actionable next step for the user")
 
 
 class ChatRequest(BaseModel):

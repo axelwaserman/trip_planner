@@ -87,4 +87,4 @@ app.dependency_overrides[routes.get_chat_service] = get_chat_service_override
 
 # Include router
 app.include_router(routes.router)
-app.include_router(auth.router)
+app.include_router(auth.router, prefix="/api/auth")

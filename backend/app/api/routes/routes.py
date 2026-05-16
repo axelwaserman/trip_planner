@@ -9,6 +9,7 @@ from app.api.routes.auth import User, get_current_active_user
 from app.chat import ChatService
 from app.config import settings
 from app.models import ChatRequest, SessionCreateRequest, StreamEvent
+from app.services.provider_probe import ProbeErrorCode, probe_provider
 
 router = APIRouter()
 
@@ -105,7 +106,10 @@ async def create_session(
     if request is None:
         request = SessionCreateRequest()
 
-    # Validate provider and model if specified
+    # Validate provider and model if specified.
+    # Note: we deliberately do NOT short-circuit on `available=False` here — the
+    # probe (below) is the single authority on missing-key errors and emits the
+    # structured `missing_api_key` ProbeError that the frontend banner consumes.
     if request.provider:
         providers = settings.get_available_providers()
         if request.provider not in providers:
@@ -113,17 +117,25 @@ async def create_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid provider: {request.provider}. Available: {list(providers.keys())}",
             )
-        if not providers[request.provider]["available"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Provider {request.provider} not available (missing API key)",
-            )
         models = providers[request.provider]["models"]
         if request.model and isinstance(models, list) and request.model not in models:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid model {request.model} for provider {request.provider}",
             )
+
+    if request.provider and request.model:
+        probe = await probe_provider(request.provider, request.model)
+        if probe is not None:
+            # Network-level reachability failures map to 502 Bad Gateway; everything
+            # else (model not installed, missing API key) is the user's misconfig
+            # and surfaces as 400 Bad Request.
+            probe_status = (
+                status.HTTP_502_BAD_GATEWAY
+                if probe.error == ProbeErrorCode.PROVIDER_UNREACHABLE
+                else status.HTTP_400_BAD_REQUEST
+            )
+            raise HTTPException(status_code=probe_status, detail=probe.model_dump())
 
     session_id = chat_service.create_session(
         provider=request.provider,

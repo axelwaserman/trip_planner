@@ -1,4 +1,4 @@
-"""Integration tests for authentication — /token endpoint and protected routes."""
+"""Integration tests for authentication — /api/auth/token endpoint and protected routes."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,15 +14,15 @@ def client() -> TestClient:
 
 
 # ---------------------------------------------------------------------------
-# POST /token
+# POST /api/auth/token
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 def test_token_endpoint_returns_jwt_for_valid_credentials(client: TestClient) -> None:
-    """POST /token with valid credentials returns access_token and token_type."""
+    """POST /api/auth/token with valid credentials returns access_token and token_type."""
     response = client.post(
-        "/token",
+        "/api/auth/token",
         data={"username": "admin", "password": "admin"},
     )
     assert response.status_code == 200
@@ -36,9 +36,9 @@ def test_token_endpoint_returns_jwt_for_valid_credentials(client: TestClient) ->
 
 @pytest.mark.integration
 def test_token_endpoint_rejects_wrong_password(client: TestClient) -> None:
-    """POST /token with wrong password returns 400."""
+    """POST /api/auth/token with wrong password returns 400."""
     response = client.post(
-        "/token",
+        "/api/auth/token",
         data={"username": "admin", "password": "wrongpassword"},
     )
     assert response.status_code == 400
@@ -46,9 +46,9 @@ def test_token_endpoint_rejects_wrong_password(client: TestClient) -> None:
 
 @pytest.mark.integration
 def test_token_endpoint_rejects_unknown_user(client: TestClient) -> None:
-    """POST /token with unknown username returns 400."""
+    """POST /api/auth/token with unknown username returns 400."""
     response = client.post(
-        "/token",
+        "/api/auth/token",
         data={"username": "nobody", "password": "secret"},
     )
     assert response.status_code == 400
