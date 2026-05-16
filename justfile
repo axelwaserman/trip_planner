@@ -13,13 +13,9 @@ backend:
 frontend:
     cd frontend && npm run dev
 
-# Run backend tests (fast - excludes slow E2E tests)
+# Run all backend tests (unit + integration + e2e via path discovery)
 test:
     cd backend && uv run pytest
-
-# Run all tests including slow E2E tests (13+ min)
-test-all:
-    cd backend && uv run pytest -m ""
 
 # Run only E2E tests with real LLM
 test-e2e:

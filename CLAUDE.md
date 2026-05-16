@@ -10,11 +10,10 @@ The project uses `just` as a command runner. Run from the repo root.
 just install          # Install all backend + frontend dependencies
 just backend          # Start backend dev server (localhost:8000)
 just frontend         # Start frontend dev server (localhost:5173)
-just test             # Backend tests, excludes slow/e2e (default)
+just test             # Backend tests (unit + integration + e2e via path discovery)
 just test-unit        # Unit tests only
 just test-integration # Integration tests only
 just test-e2e         # E2E tests with real LLM (slow, ~13+ min)
-just test-all         # All tests including slow
 just check            # lint + format-check + typecheck (run before committing)
 just fix              # Auto-fix lint + format issues
 just build            # Production frontend build
@@ -82,13 +81,13 @@ The `get_chat_service` dependency is overridden to pull from `app.state`, keepin
 
 ### Test structure
 
-Tests live in `backend/tests/{unit,integration,e2e}`. Markers: `@pytest.mark.unit`, `.integration`, `.e2e`, `.slow`. The default `addopts` in `pyproject.toml` excludes `slow`, so `just test` is fast. E2E tests hit the real Ollama LLM and are excluded from CI.
+Tests live in `backend/tests/{unit,integration,e2e}`. Markers: `@pytest.mark.unit`, `.integration`, `.e2e`, `.slow`. Phase 04.3 dropped the `addopts` filter; `just test` now runs everything under `tests/` (unit + integration + e2e) via path discovery. Tests marked `@pytest.mark.slow` will run by default — opt out explicitly with `pytest -m "not slow"` if needed. `tests/e2e/` is currently a symbolic CI gate — the `E2E` workflow job runs on every push/PR but only collects a no-op placeholder. Real backend-over-HTTP E2E tests (auth flow, optional travel-API tests gated on a CI secret) land in later phases. See `backend/tests/e2e/README.md` for the policy.
 
 ## Key constraints
 
 - `mypy` runs in strict mode — no bare `type: ignore` without a comment explaining why
 - All I/O must be `async def`; no `requests`, no sync file I/O in async paths
-- `ruff` line length is 100; `isort` first-party prefix is `app`
+- `ruff` line length is 120; `isort` first-party prefix is `app`
 - Auth uses JWT (`pyjwt`) with `pwdlib[argon2]` for password hashing (`api/routes/auth.py`); protected routes depend on `get_current_active_user`
 - **Cross-module taxonomies use `StrEnum`, not duplicated `Literal[...]` unions.** When the same set of stable string codes appears in more than one file (e.g. a wire-level error code shared between a service and a Pydantic response model), define it once as a `StrEnum` and import it. See `app.services.provider_probe.ProbeErrorCode` for the canonical example.
 - **Tunable thresholds live on `Settings`, not as module-level constants.** Probe timeouts, retry counts, expiry windows, and similar knobs go in `app/config.py` so they can be overridden per environment via env vars. Module constants are reserved for values that are part of the contract (e.g. JSON keys, MIME types).

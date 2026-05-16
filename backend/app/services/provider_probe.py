@@ -77,9 +77,7 @@ async def _probe_ollama(model: str) -> ProbeError | None:
     # Ollama /api/tags shape: { "models": [ { "name": "...", "model": "...", ... }, ... ] }
     # Match on `name` AND `model` to be robust to minor shape drift (A3).
     models_list = payload.get("models", [])
-    available = {entry.get("name") for entry in models_list} | {
-        entry.get("model") for entry in models_list
-    }
+    available = {entry.get("name") for entry in models_list} | {entry.get("model") for entry in models_list}
     if model not in available:
         return ProbeError(
             error=ProbeErrorCode.MODEL_NOT_INSTALLED,

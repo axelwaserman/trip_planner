@@ -1,6 +1,7 @@
 """Unified routes for Trip Planner API."""
 
 from collections.abc import AsyncGenerator
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -27,8 +28,8 @@ async def get_chat_service() -> ChatService:
 @router.post("/api/chat", response_class=StreamingResponse)
 async def chat(
     request: ChatRequest,
-    chat_service: ChatService = Depends(get_chat_service),
-    _current_user: User = Depends(get_current_active_user),
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    _current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> StreamingResponse:
     """Chat endpoint with streaming responses.
 
@@ -87,9 +88,9 @@ async def chat(
 
 @router.post("/api/chat/session", status_code=status.HTTP_201_CREATED)
 async def create_session(
-    chat_service: ChatService = Depends(get_chat_service),
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    _current_user: Annotated[User, Depends(get_current_active_user)],
     request: SessionCreateRequest | None = None,
-    _current_user: User = Depends(get_current_active_user),
 ) -> dict[str, str]:
     """Create a new chat session with optional provider/model selection.
 
@@ -154,7 +155,7 @@ async def create_session(
 @router.delete("/api/chat/session/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session(
     session_id: str,
-    chat_service: ChatService = Depends(get_chat_service),
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> None:
     """Delete a chat session.
 
@@ -200,7 +201,7 @@ async def health_check() -> dict[str, str]:
 
 @router.get("/api/providers")
 async def get_providers(
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> dict[str, dict[str, list[str] | bool]]:
     """Get available LLM providers and their models.
 

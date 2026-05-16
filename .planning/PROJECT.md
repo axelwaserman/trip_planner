@@ -23,6 +23,7 @@ If everything else fails, login → provider selection → streaming chat with t
 - ✓ Bug-fix + cleanup pass on routes / chat service / tests — PR #1 (REQ-bug-fixes-cleanup)
 - ✓ Vitest + frontend testing infra; `ChatInterface.tsx` decomposed into `parseSSE` + `useSSEStream` + `useChat` hooks — PR #3 (REQ-frontend-testing-refactor; hooks-shape variant)
 - ✓ mypy strict-mode fixes + ESLint cleanup — PR #5 (REQ-mypy-eslint-cleanup)
+- ✓ CI reset — Backend / Frontend / E2E peer required-for-merge jobs on every PR push, no nightly schedule, no Ollama; ruff `line-length=120` + project-wide reformat; `Annotated[T, Depends(...)]` on all FastAPI routes — Phase 4.3 (REQ-ci-reset, REQ-lint-line-length-120, REQ-annotated-depends)
 
 ### Partial / Broken
 
@@ -31,7 +32,7 @@ If everything else fails, login → provider selection → streaming chat with t
 
 - ⚠️ **REQ-auth-backend** — JWT via `pyjwt` + `pwdlib[argon2]`, `POST /token`, protected routes via `Depends(get_current_active_user)`, `AUTH_USERS` env-seeded users — PR #4. **Backend ships; no frontend login page exists, so every `/api/*` call returns 401 in the browser.**
 - ⚠️ **REQ-llm-provider-ui-config** — `GET /api/providers`, `POST /api/chat/session` accepts `{provider, model}`, frontend dropdown, localStorage persistence — Phase 4.1. **UI ships but the model selector does not produce a working session — wiring is broken.**
-- ⚠️ **REQ-ci-cd-pipeline** — GitHub Actions CI (backend + frontend) + branch protection — PR #2. **Schedule fires nightly E2E with no useful signal; E2E currently exercises Ollama rather than auth + real travel APIs.**
+- ✓ **REQ-ci-cd-pipeline** — GitHub Actions CI (backend + frontend) + branch protection — PR #2 (initial), Phase 4.3 (reset). Nightly schedule dropped, Ollama removed, E2E retained as a symbolic always-pass gate; real auth-flow + travel-API coverage deferred to later phases.
 
 ### Active
 
@@ -41,7 +42,6 @@ If everything else fails, login → provider selection → streaming chat with t
 
 - [ ] **REQ-login-page** — React login route, login form, token storage, protected routing, "logged-in user" affordance; quick-and-dirty backend user source (still env-seeded for now) (Phase 4.2)
 - [ ] **REQ-llm-provider-ui-fix** — Restore working session creation when a provider/model is picked from the UI; deterministic error surface when the chosen provider is misconfigured (Phase 4.2)
-- [ ] **REQ-ci-reset** — Drop the nightly schedule; lint + unit + integration run on every push to a PR branch and must pass to merge; E2E job retained only for auth-flow + real-travel-API tests, gated on credentials being present (Phase 4.3)
 - [ ] **REQ-mock-chat-tests** — Replace Ollama-bound chat tests with a `MockLLMStream` fixture; default `pytest` no longer requires Ollama; remove the `slow` marker; document the unit / integration / e2e split by purpose (Phase 4.4)
 - [ ] **REQ-llm-provider-abstraction** — `LLMProvider` Protocol + `LLMProviderFactory`; **dynamic Ollama model discovery from the host** (no hard-coded list); **cloud-LLM API key path** (OpenAI + Anthropic, real implementations not stubs) supplied via env or session payload; per-session provider injection into `ChatService` (Phase 4.5)
 - [ ] **REQ-tool-json-output** — `search_flights()` returns a vendor-neutral JSON shape designed to map cleanly onto Amadeus / Skyscanner / Google Flights responses (IATA + city for endpoints, ISO-8601 datetimes with timezone, `segments[]` for multi-leg, `price: {amount, currency}`); `ToolExecutionCard` renders tables / lists / nested objects (Phase 4.6)
@@ -146,4 +146,6 @@ If everything else fails, login → provider selection → streaming chat with t
 | Adopt user-stated milestone goal: unbreak app → re-platform onto PG+compose → swap to PydanticAI → real travel API → hardening | User's success metric: working browser demo (login → provider select → chat → real flight results), 80% backend coverage, no CRITICAL security findings | — Pending — drives v1 roadmap |
 
 ---
-*Last updated: 2026-05-15 after PR #6 review pass — promoted Postgres+compose & PydanticAI into v1, dropped rate limiting, status-corrected partial Phase 4.1 / auth / CI shipments, renumbered phases through Phase 8. Follow-up adversarial review then reframed declared-as-shipped targets (ruff 120, Annotated DI, `slow` marker) as Phase 4.3/4.4 deliverables, added rework-risk + sequencing notes around Phase 4.5 ↔ 5 ↔ 6, added a `psycopg`+SQLModel pre-phase spike to ADR-006, and named acceptance fixture sources for REQ-tool-json-output.*
+*Last updated: 2026-05-16 after Phase 4.3 completion — CI reset shipped (Backend/Frontend/E2E peer required jobs, no schedule, no Ollama), ruff `line-length=120` + project-wide reformat, FastAPI routes migrated to `Annotated[T, Depends(...)]`. REQ-ci-reset / REQ-lint-line-length-120 / REQ-annotated-depends moved Active → Validated; REQ-ci-cd-pipeline reframed as ✓ shipped via PR #2 + Phase 4.3 reset.*
+
+*2026-05-15: PR #6 review pass — promoted Postgres+compose & PydanticAI into v1, dropped rate limiting, status-corrected partial Phase 4.1 / auth / CI shipments, renumbered phases through Phase 8. Follow-up adversarial review then reframed declared-as-shipped targets (ruff 120, Annotated DI, `slow` marker) as Phase 4.3/4.4 deliverables, added rework-risk + sequencing notes around Phase 4.5 ↔ 5 ↔ 6, added a `psycopg`+SQLModel pre-phase spike to ADR-006, and named acceptance fixture sources for REQ-tool-json-output.*
