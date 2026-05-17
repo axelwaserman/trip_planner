@@ -15,19 +15,20 @@ Per RESEARCH.md §"Pattern 2: Factory Builds from Session-Scoped Config",
 ``Settings.{provider}_api_key`` env var) and the analogous ``base_url``
 fallback for local providers.
 
-Phase 4.5 Plan 02 ships the **skeleton only** — ``build`` raises
-``NotImplementedError``. Plans 03/04/04b/05 land the four concrete providers
-(``OllamaProvider``, ``LMStudioProvider``, ``OpenAIProvider``,
-``AnthropicProvider``) in Wave 2. Plan 06 fills in the ``match`` body in
-``build`` once the four ``app.llm.providers.*`` modules exist. The signature
-is locked NOW so per-provider tests in Wave 2 can write assertions against
-this exact shape.
+Plan 06 fills in the ``match`` body in ``build`` — three concrete provider
+classes (``OllamaProvider``, ``OpenAIProvider``, ``AnthropicProvider``) ship in
+this phase. ``lmstudio`` is intentionally OUT of scope here; a future phase
+extends the match block with a ``"lmstudio"`` case when ``LMStudioProvider``
+lands.
 """
 
 from dataclasses import dataclass
 
 from app.config import Settings
 from app.llm.protocol import LLMProvider
+from app.llm.providers.anthropic import AnthropicProvider
+from app.llm.providers.ollama import OllamaProvider
+from app.llm.providers.openai import OpenAIProvider
 
 
 @dataclass(frozen=True)
@@ -67,15 +68,41 @@ class LLMProviderFactory:
         self._settings = settings
 
     def build(self, config: SessionLLMConfig) -> LLMProvider:
-        """Build the per-session provider; signature locked in Plan 02, body in Plan 06.
+        """Build the per-session provider; dispatch on ``config.provider``.
 
-        Plan 06 will dispatch on ``config.provider`` via ``match`` against a
-        fixed ``Literal`` set, returning the matching ``OllamaProvider`` /
-        ``LMStudioProvider`` / ``OpenAIProvider`` / ``AnthropicProvider``
-        instance (RESEARCH.md §"Pattern 2"). The signature is locked here so
-        per-provider tests in Wave 2 (Plans 03/04/04b/05) can write assertions
-        against this exact shape without re-importing.
+        Resolves D-08 precedence inline: when the payload supplies a value for
+        ``api_key`` or ``base_url`` it wins; otherwise the corresponding
+        ``Settings`` field is used as fallback.
+
+        Args:
+            config: Session-scoped configuration DTO.
+
+        Returns:
+            A concrete provider instance structurally satisfying
+            :class:`app.llm.protocol.LLMProvider`.
+
+        Raises:
+            ValueError: When ``config.provider`` is not one of the three
+                supported provider names. ``routes.py`` 400s on unknown names
+                before reaching the factory in normal flow; this branch is the
+                defense-in-depth backstop (T-04.5-06-01).
         """
-        raise NotImplementedError(
-            "Plan 06 wires concrete providers; this is the Plan 02 skeleton."
-        )
+        match config.provider:
+            case "ollama":
+                return OllamaProvider(
+                    model=config.model,
+                    base_url=config.base_url or self._settings.ollama_base_url,
+                    probe_timeout_seconds=self._settings.provider_probe_timeout_seconds,
+                )
+            case "openai":
+                return OpenAIProvider(
+                    model=config.model,
+                    api_key=config.api_key or self._settings.openai_api_key,
+                )
+            case "anthropic":
+                return AnthropicProvider(
+                    model=config.model,
+                    api_key=config.api_key or self._settings.anthropic_api_key,
+                )
+            case _:
+                raise ValueError(f"Unknown provider: {config.provider}")
