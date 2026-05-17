@@ -56,10 +56,12 @@ async def test_chat_stream_retains_history_across_turns() -> None:
     # Arrange — one MockLLM with two inner stream lists (one per turn)
     service = ChatService(
         flight_client=MockFlightAPIClient(seed=42),
-        llm=MockLLM(streams=[
-            *MockLLMStream.greeting(),   # first turn: one inner list of Content chunks
-            *MockLLMStream.multi_turn(),  # second turn: one inner list of Content chunks
-        ]),
+        llm=MockLLM(
+            streams=[
+                *MockLLMStream.greeting(),  # first turn: one inner list of Content chunks
+                *MockLLMStream.multi_turn(),  # second turn: one inner list of Content chunks
+            ]
+        ),
     )
     session_id = service.create_session()
 
@@ -77,9 +79,7 @@ async def test_chat_stream_retains_history_across_turns() -> None:
     assert isinstance(msgs[3], AIMessage)
 
 
-def test_post_chat_streams_tool_events_via_mock_llm(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_post_chat_streams_tool_events_via_mock_llm(client: TestClient, auth_headers: dict[str, str]) -> None:
     """HTTP layer: POST /api/chat with MockLLM injected produces tool event SSE stream."""
     # Arrange — replace app.state.chat_service BEFORE the POST
     client.app.state.chat_service = ChatService(  # type: ignore[attr-defined]

@@ -105,9 +105,7 @@ class MockLLM(BaseChatModel):
                     yield ChatGenerationChunk(
                         message=AIMessageChunk(
                             content="",
-                            tool_call_chunks=[
-                                ToolCallChunk(name=n, args=json.dumps(a), id=i, index=0)
-                            ],
+                            tool_call_chunks=[ToolCallChunk(name=n, args=json.dumps(a), id=i, index=0)],
                         )
                     )
 
