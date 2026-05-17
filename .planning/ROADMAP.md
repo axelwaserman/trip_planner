@@ -162,7 +162,10 @@ Plans:
   2. The fixtures above (or their documented substitutes) normalize into our shape without lossy field collapses, asserted by tests in `backend/tests/unit/test_tool_json_normalization.py` (or equivalent).
   3. `ToolExecutionCard` renders the structured result as a table for `results[]`, lists for arrays, and labelled sections for nested objects — never a raw JSON blob.
   4. The LLM still narrates results naturally in chat alongside the structured card; the two views remain consistent.
-**Plans**: TBD
+**Plans**: 2 plans across 1 wave
+Plans:
+- [ ] 04.6-01-PLAN.md — Wave 1: Backend FlightSearchResult Pydantic models + Amadeus/Skyscanner normalization adapters + unit tests
+- [ ] 04.6-02-PLAN.md — Wave 1: Frontend FlightSearchResultData types + ToolExecutionCard structured Table renderer + component tests
 **UI hint**: yes
 
 ### Phase 4.7: Error Handling + StreamEvent Hierarchy
@@ -254,7 +257,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.3. CI Reset | v1 | 7/7 | Complete   | 2026-05-16 |
 | 4.4. Mock Chat in Tests | v1 | 2/2 | Complete   | 2026-05-17 |
 | 4.5. LLM Provider Abstraction (real) | v1 | 0 / TBD | Not started | - |
-| 4.6. Vendor-Neutral Tool JSON | v1 | 0 / TBD | Not started | - |
+| 4.6. Vendor-Neutral Tool JSON | v1 | 0 / 2 | Not started | - |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / TBD | Not started | - |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / TBD | Not started | - |
 | 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
