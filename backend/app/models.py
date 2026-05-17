@@ -4,10 +4,11 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal, Self
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.services.provider_probe import ProbeErrorCode
+from app.llm.errors import ProbeErrorCode
 
 # Type aliases
 BookingClass = Literal["economy", "premium_economy", "business", "first"]
@@ -135,10 +136,61 @@ class Flight(BaseModel):
 
 
 class SessionCreateRequest(BaseModel):
-    """Request model for creating a new chat session."""
+    """Request model for creating a new chat session.
+
+    Per CONTEXT.md D-24, the canonical session-create payload carries four
+    optional fields: provider, model, base_url (local providers only), api_key
+    (cloud providers only). Per D-09, ``api_key`` lives only in session memory —
+    never logged or persisted.
+
+    Validators enforce the threat-model mitigations from PLAN.md:
+    - SSRF guard on ``base_url`` (allowlist localhost / 127.0.0.1 /
+      host.docker.internal; http/https schemes only).
+    - Length cap on ``api_key`` (≤ 256 chars after whitespace stripping;
+      empty-after-strip normalises to ``None``).
+    """
 
     provider: str | None = Field(default=None, description="LLM provider (ollama, openai, anthropic)")
     model: str | None = Field(default=None, description="Model name for the provider")
+    base_url: str | None = Field(
+        default=None,
+        description="Local providers only; ignored for cloud",
+    )
+    api_key: str | None = Field(
+        default=None,
+        description=(
+            "Cloud providers only; ignored for local. Stored in session memory "
+            "only — never logged or persisted."
+        ),
+    )
+
+    @field_validator("api_key")
+    @classmethod
+    def _strip_and_bound_api_key(cls, v: str | None) -> str | None:
+        """Strip whitespace, normalise empty to None, cap length at 256 chars."""
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        if len(stripped) > 256:
+            raise ValueError("api_key exceeds maximum length (256 chars)")
+        return stripped
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, v: str | None) -> str | None:
+        """SSRF guard: allowlist of {localhost, 127.0.0.1, host.docker.internal}; http/https only."""
+        if v is None:
+            return None
+        parsed = urlparse(v)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("base_url must be http or https")
+        if parsed.hostname not in {"localhost", "127.0.0.1", "host.docker.internal"}:
+            raise ValueError(
+                "base_url host must be localhost, 127.0.0.1, or host.docker.internal in v1"
+            )
+        return v
 
 
 class SessionCreateError(BaseModel):
