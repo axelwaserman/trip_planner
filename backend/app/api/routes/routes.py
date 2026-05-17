@@ -16,6 +16,7 @@ from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.models import (
     ChatRequest,
     ChatSessionsListResponse,
+    ProviderInfo,
     ProviderRefreshEntry,
     ProviderRefreshResponse,
     ProviderTestRequest,
@@ -161,9 +162,7 @@ async def create_session(
         api_key=request.api_key,
     )
 
-    session_id, probe_error = await chat_service.create_session(
-        config, user_id=current_user.username
-    )
+    session_id, probe_error = await chat_service.create_session(config, user_id=current_user.username)
     if probe_error is not None:
         # Network-level reachability failures map to 502 Bad Gateway; everything
         # else (model not installed, missing API key) is the user's misconfig
@@ -232,32 +231,77 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
+# Plan 04.5-06b — local providers Ollama and LM Studio share the discovery
+# cache populated by POST /api/providers/refresh and lazy-read by GET /api/providers.
+_LOCAL_PROVIDER_NAMES: tuple[str, ...] = ("ollama", "lmstudio")
+
+
 @router.get("/api/providers")
 async def get_providers(
+    request: Request,
     _current_user: Annotated[User, Depends(get_current_active_user)],
-) -> dict[str, dict[str, list[str] | bool]]:
-    """Get available LLM providers and their models.
+    factory: Annotated[LLMProviderFactory, Depends(get_llm_factory)],
+) -> dict[str, ProviderInfo]:
+    """Get available LLM providers and their models (D-25).
 
-    Returns information about which providers are available (have credentials)
-    and what models each provider supports.
+    Local providers (``ollama``, ``lmstudio``) read their model list from the
+    discovery cache populated by ``POST /api/providers/refresh``. On first
+    load, the cache is empty for at least one local entry — we lazy-trigger a
+    single ``factory.refresh_local_models()`` call and serve from the resulting
+    cache. Cloud providers (``openai``, ``anthropic``) keep the curated static
+    model list from :meth:`Settings.get_available_providers` — we don't probe
+    cloud APIs here (would burn quota on every settings page load).
 
-    Returns:
-        Dictionary mapping provider names to their configuration:
-        {
-            "ollama": {"available": True, "models": [...]},
-            "openai": {"available": False, "models": [...]},
-            ...
-        }
+    Every entry now carries ``base_url``: populated from
+    ``Settings.{provider}_base_url`` for local providers; ``None`` for cloud.
+    Frontend consumers that ignore ``base_url`` continue to work — additive change.
+
+    The endpoint stays auth-protected via ``Depends(get_current_active_user)``.
     """
-    return settings.get_available_providers()
+    cache: dict[str, list[str]] = request.app.state.provider_models_cache
+    timestamps: dict[str, float] = request.app.state.provider_models_cache_timestamps
+    now = time.time()
+
+    # Lazy first-load: if any local provider has no cache entry yet, trigger a
+    # one-shot discovery. Subsequent calls hit the cache regardless of TTL —
+    # the explicit /refresh endpoint owns the re-discovery cadence.
+    needs_lazy_load = any(name not in cache for name in _LOCAL_PROVIDER_NAMES)
+    if needs_lazy_load:
+        fresh = await factory.refresh_local_models()
+        for name, models in fresh.items():
+            cache[name] = [] if models is None else models
+            timestamps[name] = now
+
+    # Cloud providers — curated lists from Settings, no live probe.
+    curated = settings.get_available_providers()
+
+    result: dict[str, ProviderInfo] = {}
+    # Local providers: models from discovery cache, base_url from Settings.
+    result["ollama"] = ProviderInfo(
+        available=bool(cache.get("ollama", [])),
+        models=cache.get("ollama", []),
+        base_url=settings.ollama_base_url,
+    )
+    result["lmstudio"] = ProviderInfo(
+        available=bool(cache.get("lmstudio", [])),
+        models=cache.get("lmstudio", []),
+        base_url=settings.lmstudio_base_url,
+    )
+    # Cloud providers: curated static list, base_url=None.
+    for name in ("openai", "anthropic"):
+        entry = curated[name]
+        models_field = entry["models"]
+        result[name] = ProviderInfo(
+            available=bool(entry["available"]),
+            models=list(models_field) if isinstance(models_field, list) else [],
+            base_url=None,
+        )
+    return result
 
 
 # ----------------------------------------------------------------------------
 # Plan 04.5-06b — three new endpoints (D-06, D-14, D-22, D-27)
 # ----------------------------------------------------------------------------
-
-
-_LOCAL_PROVIDER_NAMES: tuple[str, ...] = ("ollama", "lmstudio")
 
 
 @router.post("/api/providers/refresh", response_model=ProviderRefreshResponse)
@@ -279,11 +323,7 @@ async def refresh_providers(
     ttl = settings.provider_models_cache_ttl_seconds
     now = time.time()
 
-    stale = [
-        name
-        for name in _LOCAL_PROVIDER_NAMES
-        if name not in timestamps or (now - timestamps[name]) > ttl
-    ]
+    stale = [name for name in _LOCAL_PROVIDER_NAMES if name not in timestamps or (now - timestamps[name]) > ttl]
 
     if stale:
         fresh = await factory.refresh_local_models()

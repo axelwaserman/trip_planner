@@ -159,8 +159,7 @@ class SessionCreateRequest(BaseModel):
     api_key: str | None = Field(
         default=None,
         description=(
-            "Cloud providers only; ignored for local. Stored in session memory "
-            "only — never logged or persisted."
+            "Cloud providers only; ignored for local. Stored in session memory only — never logged or persisted."
         ),
     )
 
@@ -187,9 +186,7 @@ class SessionCreateRequest(BaseModel):
         if parsed.scheme not in {"http", "https"}:
             raise ValueError("base_url must be http or https")
         if parsed.hostname not in {"localhost", "127.0.0.1", "host.docker.internal"}:
-            raise ValueError(
-                "base_url host must be localhost, 127.0.0.1, or host.docker.internal in v1"
-            )
+            raise ValueError("base_url host must be localhost, 127.0.0.1, or host.docker.internal in v1")
         return v
 
 
@@ -242,6 +239,25 @@ class StreamEvent(BaseModel):
 # ============================================================================
 # Provider Discovery / Test / Sessions API Models (Plan 04.5-06b)
 # ============================================================================
+
+
+class ProviderInfo(BaseModel):
+    """Single provider entry in the GET /api/providers response (D-25).
+
+    The legacy 4.2 shape carried only ``available`` + ``models``; Plan 04.5-06b
+    adds ``base_url`` so the settings page can pre-fill the local-provider URL
+    field. Cloud providers (OpenAI, Anthropic) leave ``base_url`` as ``None``;
+    local providers (Ollama, LM Studio) populate it from ``Settings``.
+    """
+
+    available: bool = Field(..., description="True when the provider is reachable / has credentials.")
+    models: list[str] = Field(
+        default_factory=list, description="Model identifiers — discovered for local, curated for cloud."
+    )
+    base_url: str | None = Field(
+        default=None,
+        description="Local-provider base URL (e.g., 'http://localhost:11434'); None for cloud providers.",
+    )
 
 
 class ProviderRefreshEntry(BaseModel):
