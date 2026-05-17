@@ -1,14 +1,24 @@
 /**
- * Vitest spec for the ProviderCard component (Plan 04.5-08 Task 1).
+ * Vitest spec for the ProviderCard component.
  *
- * Behaviour the spec asserts (mirrors UI-SPEC §"ProviderCard"):
- *   1. Ollama variant renders a Base URL field, NO API Key field.
- *   2. OpenAI variant renders an API Key field (type=password), NO Base URL.
- *   3. Anthropic variant renders an API Key field, NO Base URL.
- *   4. The show/hide toggle on the API Key field flips input.type between
- *      password and text.
- *   5. Clicking "Use this provider" calls onSave with the updated
- *      ProviderSettings record (selected.provider/model + per-provider entry).
+ * Plan 08 final polish (2026-05-17):
+ *   - Settings page renders only the Ollama card. OpenAI / Anthropic kinds
+ *     stay in the type union for forward compat (lib layer + backend still
+ *     drive them), but the visible cards on /settings/providers are gone
+ *     pending a real Test-connection probe.
+ *   - The card no longer has a Model dropdown — models render as a read-only
+ *     informational chip-list. Active model is picked in the chat-header
+ *     popover, not here.
+ *
+ * Behaviour the spec asserts:
+ *   1. Ollama variant renders a Base URL field, NO API Key field, and NO
+ *      Model dropdown — the chip-list shows discovered models.
+ *   2. OpenAI / Anthropic variants still work (forward compat) — API Key
+ *      field with show/hide toggle, type=password, autoComplete=off.
+ *   3. Clicking "Use this provider" calls onSave with the updated
+ *      ProviderSettings record.
+ *   4. Helper copy is the short honest version: "We never store your key
+ *      on our servers."
  */
 
 import { describe, it, expect, vi } from 'vitest'
@@ -38,10 +48,34 @@ function renderCard(
 }
 
 describe('ProviderCard', () => {
-  it('renders Ollama variant with Base URL field and no API Key field', () => {
+  it('renders Ollama variant with Base URL field, no API Key field, and no Model dropdown', () => {
     renderCard('ollama')
     expect(screen.getByLabelText('Base URL')).toBeInTheDocument()
     expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument()
+    // The Model dropdown was removed — models are now a read-only chip-list.
+    expect(screen.queryByRole('combobox', { name: /Model/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/Available models/i)).toBeInTheDocument()
+  })
+
+  it('renders Ollama discovered models as informational chips', () => {
+    renderCard('ollama', {
+      ollama: { base_url: 'http://localhost:11434', models: ['qwen3:4b', 'llama3:8b', 'mistral'] },
+    })
+    expect(screen.getByText('qwen3:4b')).toBeInTheDocument()
+    expect(screen.getByText('llama3:8b')).toBeInTheDocument()
+    expect(screen.getByText('mistral')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Pick the active model from the badge in the chat header/i)
+    ).toBeInTheDocument()
+  })
+
+  it('shows the Ollama empty-state hint when no models are discovered', () => {
+    renderCard('ollama', {
+      ollama: { base_url: 'http://localhost:11434', models: [] },
+    })
+    expect(
+      screen.getByText(/No models discovered\. Run `ollama pull qwen3:4b` then save below/i)
+    ).toBeInTheDocument()
   })
 
   it('renders OpenAI variant with API Key field type=password and no Base URL field', () => {
@@ -108,17 +142,13 @@ describe('ProviderCard', () => {
     expect(updatedArg.openai.api_key).toBe('sk-test-12345')
   })
 
-  it('renders the honest helper copy for cloud providers (we never STORE the key)', () => {
+  it('renders the short honest helper copy for cloud providers', () => {
     renderCard('openai')
-    // The helper text must (a) make the no-server-storage claim and (b) tell
-    // the user the key DOES travel to the backend at session start. The
-    // earlier draft "Stored in this browser only. Never sent to our server."
-    // misled readers into thinking the key never left the browser.
+    // The helper makes the no-server-storage claim only; the longer
+    // "travels to backend at session start" framing was dropped per UAT
+    // feedback as too verbose.
     expect(
       screen.getByText(/We never store your key on our servers\./i)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/travels to our backend only when starting a chat session/i)
     ).toBeInTheDocument()
   })
 

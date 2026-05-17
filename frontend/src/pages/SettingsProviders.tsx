@@ -1,9 +1,15 @@
 /**
- * /settings/providers — the user-facing surface for picking a provider + model.
+ * /settings/providers — the user-facing surface for configuring a provider.
  *
- * Renders the editorial header (eyebrow "SETTINGS" + display heading "Providers"
- * + locked intro paragraph) and three ProviderCards (Ollama, OpenAI, Anthropic).
- * LM Studio is OUT of orchestrator scope — it lands in Plan 08b.
+ * Plan 08 final polish (2026-05-17):
+ * - Renders ONLY the Ollama card. OpenAI and Anthropic cards were dropped
+ *   pending a real Test-connection probe (deferred to a later plan); the
+ *   underlying ProviderSettings schema and useChat lib layer still carry the
+ *   openai/anthropic entries so the wire contract stays stable.
+ * - On mount, fetches GET /api/providers and merges the live ollama.models
+ *   discovery list into local settings state — that's the source the card's
+ *   informational model list reads from. Lazy-discovery in the backend
+ *   guarantees the first call populates the cache.
  *
  * On Save: writes the updated ProviderSettings to localStorage under the
  * 'provider_settings' key (D-21 schema, same key useChat reads at next mount)
@@ -11,10 +17,11 @@
  * selection and creates a fresh session (D-02).
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Box, Grid, GridItem, Heading, Stack, Text } from '@chakra-ui/react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ProviderCard, type ProviderSettings } from '../components/ProviderCard'
+import { apiFetch } from '../lib/auth'
 
 const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   selected: { provider: 'ollama', model: 'qwen3:4b' },
@@ -49,9 +56,57 @@ function loadProviderSettings(): ProviderSettings {
   return DEFAULT_PROVIDER_SETTINGS
 }
 
+interface ProviderInfo {
+  available: boolean
+  models: string[]
+  base_url: string | null
+}
+type ProvidersResponse = Record<string, ProviderInfo>
+
+function isProvidersResponse(value: unknown): value is ProvidersResponse {
+  if (typeof value !== 'object' || value === null) return false
+  // We only care that .ollama exists with a models array — the rest is best-effort.
+  const v = value as Record<string, unknown>
+  const ollama = v.ollama
+  if (typeof ollama !== 'object' || ollama === null) return false
+  const models = (ollama as { models?: unknown }).models
+  return Array.isArray(models)
+}
+
 export function SettingsProviders() {
   const navigate = useNavigate()
   const [settings, setSettings] = useState<ProviderSettings>(() => loadProviderSettings())
+
+  // Discover the live model list from the backend on mount. The backend
+  // lazy-runs `factory.refresh_local_models()` on the first call so this
+  // hits the daemon at /api/tags, populates the cache, and serves the full
+  // list. Falls back silently to the in-localStorage models if the call
+  // fails — the card stays usable; an error banner is overkill on a page
+  // that already has a working selection.
+  useEffect(() => {
+    let cancelled = false
+    apiFetch('/api/providers')
+      .then((response) => {
+        if (cancelled || !response.ok) return null
+        return response.json() as Promise<unknown>
+      })
+      .then((payload) => {
+        if (cancelled || !payload || !isProvidersResponse(payload)) return
+        setSettings((prev) => ({
+          ...prev,
+          ollama: {
+            ...prev.ollama,
+            models: payload.ollama.models,
+          },
+        }))
+      })
+      .catch(() => {
+        // apiFetch handles 401; everything else is non-fatal here.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function handleSave(_kind: 'ollama' | 'openai' | 'anthropic', updated: ProviderSettings) {
     localStorage.setItem('provider_settings', JSON.stringify(updated))
@@ -90,16 +145,11 @@ export function SettingsProviders() {
             Providers
           </Heading>
           <Text mt="6" maxW="44ch" color="fg.secondary" fontSize="15px" lineHeight="1.5">
-            Pick where the agent thinks. Local providers run on your machine;
-            cloud providers send messages to OpenAI or Anthropic. We never store
-            your keys — they live in this browser and travel to our backend only
-            when starting a chat session, so the model can authenticate.
+            Pick where the agent thinks. We never store your keys on our servers.
           </Text>
 
           <Stack gap="6" mt="8">
             <ProviderCard kind="ollama" settings={settings} onSave={handleSave} />
-            <ProviderCard kind="openai" settings={settings} onSave={handleSave} />
-            <ProviderCard kind="anthropic" settings={settings} onSave={handleSave} />
           </Stack>
 
           <Box mt="8">

@@ -1,21 +1,24 @@
 /**
  * ProviderCard — one card per provider on the /settings/providers page.
  *
- * Renders three shapes (kind = 'ollama' | 'openai' | 'anthropic'):
- *   - Ollama (LOCAL): Base URL field + Model select.
- *   - OpenAI / Anthropic (CLOUD): API Key field with show/hide toggle + Model select.
+ * Plan 08 final polish (2026-05-17):
+ * - Settings page renders ONLY the Ollama card. OpenAI / Anthropic kinds
+ *   remain in the type union for forward compat (the lib layer + backend
+ *   still know how to drive them) — the parent page just doesn't render
+ *   them today, pending a real Test-connection probe (deferred).
+ * - The card NO LONGER shows a Model dropdown. Models are presented as a
+ *   read-only informational chip-list. Active model selection happens in
+ *   the chat-header quick-switcher popover; the settings page is for
+ *   configuring the provider (URL / key) only.
  *
  * UI-SPEC §"ProviderCard" governs layout, colors, and copy. Tokens are pulled
  * from frontend/src/theme/index.ts — no inline OKLCH values are introduced.
- *
- * The Refresh and Test connection buttons that UI-SPEC describes are out of
- * scope for Plan 08 (the underlying endpoints land in 08b/later phases).
  *
  * The component is presentational + form-state-managing only. It does not
  * touch localStorage directly; the parent page does that on `onSave`.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -26,6 +29,7 @@ import {
   Input,
   Stack,
   Text,
+  Wrap,
 } from '@chakra-ui/react'
 import { Eye, EyeOff } from 'lucide-react'
 
@@ -49,7 +53,7 @@ interface ProviderMeta {
   displayName: string
   subtitle: string
   models: string[]
-  emptyOption: string | null
+  emptyMessage: string | null
 }
 
 const OPENAI_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-mini', 'o3-mini']
@@ -66,8 +70,8 @@ function getMeta(kind: ProviderKind, settings: ProviderSettings): ProviderMeta {
       displayName: 'Ollama',
       subtitle: 'Open-source models running on your machine. No key needed.',
       models: settings.ollama.models,
-      emptyOption:
-        'No models discovered. Run `ollama pull qwen3:4b`, then refresh in Settings.',
+      emptyMessage:
+        'No models discovered. Run `ollama pull qwen3:4b` then save below to refresh.',
     }
   }
   if (kind === 'openai') {
@@ -76,7 +80,7 @@ function getMeta(kind: ProviderKind, settings: ProviderSettings): ProviderMeta {
       displayName: 'OpenAI',
       subtitle: 'gpt-4o, gpt-4o-mini, o-series. Bring your own key.',
       models: OPENAI_MODELS,
-      emptyOption: null,
+      emptyMessage: null,
     }
   }
   return {
@@ -84,7 +88,7 @@ function getMeta(kind: ProviderKind, settings: ProviderSettings): ProviderMeta {
     displayName: 'Anthropic',
     subtitle: 'Claude 3.5 Sonnet, Haiku, Opus. Bring your own key.',
     models: ANTHROPIC_MODELS,
-    emptyOption: null,
+    emptyMessage: null,
   }
 }
 
@@ -134,39 +138,10 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
   const [baseUrl, setBaseUrl] = useState<string>(savedBaseUrl)
   const [apiKey, setApiKey] = useState<string>(savedApiKey)
   const [showKey, setShowKey] = useState<boolean>(false)
-  const initialModel =
-    kind === 'ollama'
-      ? settings.ollama.models[0] ?? settings.selected.model
-      : kind === 'openai'
-        ? settings.openai.model
-        : settings.anthropic.model
-  const [model, setModel] = useState<string>(initialModel)
-
-  // Re-derive Model select state when the upstream settings change.
-  //
-  // Without this effect, if the parent page mutates settings.ollama.models
-  // (e.g. after a future Refresh action lands in 08b, or after the user types
-  // a new Base URL into a sibling card), the dropdown stays stuck on the
-  // mount-time initialModel value. The effect re-aligns local state with
-  // upstream truth: if the previously-selected model is still in the new
-  // list, keep it; otherwise fall back to the first model.
-  useEffect(() => {
-    if (kind !== 'ollama') return
-    const models = settings.ollama.models
-    if (models.length === 0) return
-    if (!models.includes(model)) {
-      setModel(models[0])
-    }
-    // Only react to the upstream model list changing — local edits to `model`
-    // should NOT trigger this effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, settings.ollama.models])
 
   // Detect Base URL edits that haven't been saved yet — the displayed model
   // list is derived from settings.ollama.models, which only refreshes after a
-  // round-trip (Save here writes localStorage; the live discovery endpoint
-  // lands in Plan 08b). Surface that to the user so they don't trust a stale
-  // dropdown.
+  // round-trip. Surface that to the user so they don't trust a stale list.
   const baseUrlEdited = useMemo(
     () => kind === 'ollama' && baseUrl.trim() !== savedBaseUrl.trim(),
     [kind, baseUrl, savedBaseUrl]
@@ -174,12 +149,28 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
 
   // The meta object carries the displayed model list. Recompute on every
   // render so a downstream settings.ollama.models change is reflected in the
-  // dropdown options without waiting for a remount.
+  // chip-list without waiting for a remount.
   const meta = getMeta(kind, settings)
 
   const fieldId = `provider-${kind}`
 
+  // Choose the model to write into the saved selection on Save:
+  //  - For Ollama: pick the first discovered model (informational list, not
+  //    user-selectable). The chat-header popover is where the user picks.
+  //  - For OpenAI / Anthropic: keep the previously-saved model (these cards
+  //    aren't rendered today, but the code path is preserved for forward
+  //    compat when a future plan re-enables them with a real probe).
+  function pickModelOnSave(): string {
+    if (kind === 'ollama') {
+      const discovered = settings.ollama.models
+      if (discovered.length > 0) return discovered[0]
+      return settings.selected.model || 'qwen3:4b'
+    }
+    return kind === 'openai' ? settings.openai.model : settings.anthropic.model
+  }
+
   function handleSave() {
+    const model = pickModelOnSave()
     let updated: ProviderSettings
     if (kind === 'ollama') {
       updated = {
@@ -312,46 +303,50 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
               </IconButton>
             </Box>
             <Field.HelperText>
-              We never store your key on our servers. It travels to our backend
-              only when starting a chat session, so the model can authenticate
-              to {kind === 'openai' ? 'OpenAI' : 'Anthropic'}.
+              We never store your key on our servers.
             </Field.HelperText>
           </Field.Root>
         )}
 
-        <Field.Root>
-          <Field.Label htmlFor={`${fieldId}-model`}>Model</Field.Label>
-          <select
-            id={`${fieldId}-model`}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            disabled={meta.models.length === 0}
-            style={{
-              width: '100%',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              borderWidth: '1px',
-              borderStyle: 'solid',
-              borderColor: 'var(--chakra-colors-border-subtle)',
-              backgroundColor: 'var(--chakra-colors-bg-surface)',
-              color: 'var(--chakra-colors-fg-primary)',
-              fontSize: '14px',
-              fontFamily: 'var(--chakra-fonts-body)',
-            }}
+        <Box>
+          <Text
+            id={`${fieldId}-models`}
+            fontSize="14px"
+            fontWeight="500"
+            color="fg.primary"
+            mb="2"
           >
-            {meta.models.length === 0 && meta.emptyOption ? (
-              <option disabled value="">
-                {meta.emptyOption}
-              </option>
-            ) : (
-              meta.models.map((m) => (
-                <option key={m} value={m}>
+            Available models
+          </Text>
+          {meta.models.length === 0 ? (
+            <Text fontSize="13px" color="fg.secondary" lineHeight="1.5">
+              {meta.emptyMessage ?? 'No models available.'}
+            </Text>
+          ) : (
+            <Wrap gap="2" aria-labelledby={`${fieldId}-models`}>
+              {meta.models.map((m) => (
+                <Box
+                  key={m}
+                  as="span"
+                  bg="bg.canvas"
+                  borderWidth="1px"
+                  borderColor="border.subtle"
+                  borderRadius="full"
+                  px="3"
+                  py="1"
+                  fontSize="13px"
+                  fontFamily="mono"
+                  color="fg.primary"
+                >
                   {m}
-                </option>
-              ))
-            )}
-          </select>
-        </Field.Root>
+                </Box>
+              ))}
+            </Wrap>
+          )}
+          <Text fontSize="13px" color="fg.secondary" mt="2">
+            Pick the active model from the badge in the chat header.
+          </Text>
+        </Box>
 
         <Flex justify="flex-end" mt="2">
           <Button colorPalette="accent" onClick={handleSave} type="button">

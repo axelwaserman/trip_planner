@@ -18,44 +18,81 @@ interface QuickSwitchOption {
   label: string
 }
 
+interface ProviderInfo {
+  available: boolean
+  models: string[]
+  base_url: string | null
+}
+type ProvidersResponse = Record<string, ProviderInfo>
+
+function isProvidersResponse(value: unknown): value is ProvidersResponse {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  const ollama = v.ollama
+  if (typeof ollama !== 'object' || ollama === null) return false
+  const models = (ollama as { models?: unknown }).models
+  return Array.isArray(models)
+}
+
 /**
- * Read provider_settings from localStorage and project the "Ready" providers
- * into a flat list of {provider, model} pairs the active-model badge popover
- * can render. Empty array if nothing has been configured yet.
+ * Project provider_settings + the live discovery list from GET /api/providers
+ * into a flat {provider, model} list the active-model badge popover renders.
  *
- * "Ready" means the user has actually configured the provider on the
- * /settings/providers page (base_url for ollama; non-empty api_key for
- * openai/anthropic). Cards that show "Needs setup" are excluded — switching
- * to them would just produce a probe error.
+ * For Ollama, every discovered model becomes its own row. If discovery hasn't
+ * run yet (cold first load before /api/providers resolves), fall back to the
+ * saved default so the popover always has at least one row.
+ *
+ * For OpenAI / Anthropic, configured providers get a single row built from
+ * the saved {api_key, model}. Plan 08 doesn't render their settings cards;
+ * the lib layer still drives them and useChat sends their api_key when the
+ * user has saved one out-of-band, so we honor that here.
  */
-function readQuickSwitchOptions(): QuickSwitchOption[] {
+function buildQuickSwitchOptions(
+  liveOllamaModels: string[] | null
+): QuickSwitchOption[] {
+  let parsed: {
+    ollama?: { base_url?: string; models?: string[] }
+    openai?: { api_key?: string; model?: string }
+    anthropic?: { api_key?: string; model?: string }
+  } = {}
   try {
     const raw = localStorage.getItem('provider_settings')
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as {
-      ollama?: { base_url?: string; models?: string[] }
-      openai?: { api_key?: string; model?: string }
-      anthropic?: { api_key?: string; model?: string }
-    }
-
-    const opts: QuickSwitchOption[] = []
-    if (parsed.ollama?.base_url && parsed.ollama.base_url.trim().length > 0) {
-      const models = parsed.ollama.models ?? []
-      const m = models[0] ?? 'qwen3:4b'
-      opts.push({ provider: 'ollama', model: m, label: `ollama · ${m}` })
-    }
-    if (parsed.openai?.api_key && parsed.openai.api_key.trim().length > 0) {
-      const m = parsed.openai.model ?? 'gpt-4o-mini'
-      opts.push({ provider: 'openai', model: m, label: `openai · ${m}` })
-    }
-    if (parsed.anthropic?.api_key && parsed.anthropic.api_key.trim().length > 0) {
-      const m = parsed.anthropic.model ?? 'claude-3-5-sonnet-20241022'
-      opts.push({ provider: 'anthropic', model: m, label: `anthropic · ${m}` })
-    }
-    return opts
+    if (raw) parsed = JSON.parse(raw)
   } catch {
-    return []
+    // Corrupt JSON — treat as empty.
   }
+
+  const opts: QuickSwitchOption[] = []
+
+  // Ollama: prefer the live discovery list when it has loaded; otherwise fall
+  // back to whatever the user-saved settings record carries.
+  const ollamaBaseUrl = parsed.ollama?.base_url?.trim() ?? ''
+  const ollamaModels =
+    liveOllamaModels !== null && liveOllamaModels.length > 0
+      ? liveOllamaModels
+      : (parsed.ollama?.models ?? [])
+  // Show Ollama rows whenever a base_url is configured OR the live discovery
+  // returned models — covers the cold-run case where localStorage is empty
+  // but the daemon is reachable through the backend default.
+  if (ollamaBaseUrl.length > 0 || ollamaModels.length > 0) {
+    if (ollamaModels.length === 0) {
+      opts.push({ provider: 'ollama', model: 'qwen3:4b', label: 'ollama · qwen3:4b' })
+    } else {
+      for (const m of ollamaModels) {
+        opts.push({ provider: 'ollama', model: m, label: `ollama · ${m}` })
+      }
+    }
+  }
+
+  if (parsed.openai?.api_key && parsed.openai.api_key.trim().length > 0) {
+    const m = parsed.openai.model ?? 'gpt-4o-mini'
+    opts.push({ provider: 'openai', model: m, label: `openai · ${m}` })
+  }
+  if (parsed.anthropic?.api_key && parsed.anthropic.api_key.trim().length > 0) {
+    const m = parsed.anthropic.model ?? 'claude-3-5-sonnet-20241022'
+    opts.push({ provider: 'anthropic', model: m, label: `anthropic · ${m}` })
+  }
+  return opts
 }
 
 export function ChatInterface() {
@@ -72,11 +109,39 @@ export function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [username, setUsername] = useState<string>('')
   const [quickSwitchTick, setQuickSwitchTick] = useState(0)
+  const [liveOllamaModels, setLiveOllamaModels] = useState<string[] | null>(null)
+
+  // Discover the live Ollama model list on mount (lazy-discovery in the
+  // backend means this triggers a one-shot daemon probe on first call) so the
+  // active-model popover lists every installed model — not just whichever
+  // single model the saved settings happened to remember. Falls back silently
+  // if the call fails; the popover still renders from saved settings.
+  useEffect(() => {
+    let cancelled = false
+    apiFetch('/api/providers')
+      .then((response) => {
+        if (cancelled || !response.ok) return null
+        return response.json() as Promise<unknown>
+      })
+      .then((payload) => {
+        if (cancelled || !payload || !isProvidersResponse(payload)) return
+        setLiveOllamaModels(payload.ollama.models)
+      })
+      .catch(() => {
+        // apiFetch handles 401; everything else is non-fatal here.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Re-read saved settings every time the badge is opened so the list reflects
-  // edits the user just made on /settings/providers without a remount.
+  // edits the user just made on /settings/providers without a remount. The
+  // live discovery list is mixed in too — once it has loaded it's the source
+  // of truth for Ollama's row set.
   const quickSwitchOptions = useMemo(
-    () => readQuickSwitchOptions(),
-    [quickSwitchTick]
+    () => buildQuickSwitchOptions(liveOllamaModels),
+    [liveOllamaModels, quickSwitchTick]
   )
 
   useEffect(() => {
