@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:4b"  # Fallback if not specified
 
+    # LM Studio Configuration (D-28)
+    # OpenAI-compatible local server. Default port 1234 with /v1 prefix; no API key in v1 (D-17).
+    lmstudio_base_url: str = "http://localhost:1234/v1"
+
     # OpenAI Configuration (optional)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
