@@ -154,8 +154,8 @@ Plans:
 - [x] 04.5-04-PLAN.md — Wave 2: OpenAIProvider implementation (real cloud via langchain_openai)
 - [x] 04.5-05-PLAN.md — Wave 2: AnthropicProvider implementation (real cloud via langchain_anthropic; Pitfall 2 guard)
 - [x] 04.5-06-PLAN.md — Wave 3: LLMProviderFactory.build + ChatService rewire (async create_session, per-session bound providers) + lifespan rewire + POST /api/chat/session payload extension
-- [ ] 04.5-06b-PLAN.md — Wave 4: supplemental — POST /api/providers/refresh, POST /api/providers/{provider}/test, GET /api/chat/sessions; per-user session partitioning
-- [ ] 04.5-07-PLAN.md — Wave 4: providerErrors.ts F5 + useChat extended payload + provider_settings localStorage migration
+- [x] 04.5-06b-PLAN.md — Wave 4: supplemental — POST /api/providers/refresh, POST /api/providers/{provider}/test, GET /api/chat/sessions; per-user session partitioning
+- [x] 04.5-07-PLAN.md — Wave 4: providerErrors.ts F5 + useChat extended payload + provider_settings localStorage migration
 - [ ] 04.5-08-PLAN.md — Wave 4: ProviderCard + SettingsProviders page + ChatInterface badge + /settings/providers route + manual UAT
 - [ ] 04.5-09-PLAN.md — Wave 5: real cloud acceptance tests (gated) + delete app/services/provider_probe.py
 **UI hint**: yes
@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.2. Unbreak the App | v1 | 0 / TBD | Not started | - |
 | 4.3. CI Reset | v1 | 7/7 | Complete   | 2026-05-16 |
 | 4.4. Mock Chat in Tests | v1 | 0 / TBD | Not started | - |
-| 4.5. LLM Provider Abstraction (real) | v1 | 6/13 | In Progress|  |
+| 4.5. LLM Provider Abstraction (real) | v1 | 10/13 | In Progress|  |
 | 4.6. Vendor-Neutral Tool JSON | v1 | 0 / TBD | Not started | - |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / TBD | Not started | - |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / TBD | Not started | - |
