@@ -1,17 +1,28 @@
 """Unified routes for Trip Planner API."""
 
+import time
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.routes.auth import User, get_current_active_user
 from app.chat import ChatService
 from app.config import settings
-from app.llm.errors import ProbeErrorCode
-from app.llm.factory import SessionLLMConfig
-from app.models import ChatRequest, SessionCreateRequest, StreamEvent
+from app.llm.errors import ProbeError, ProbeErrorCode
+from app.llm.factory import LLMProviderFactory, SessionLLMConfig
+from app.models import (
+    ChatRequest,
+    ChatSessionsListResponse,
+    ProviderRefreshEntry,
+    ProviderRefreshResponse,
+    ProviderTestRequest,
+    ProviderTestResponse,
+    SessionCreateRequest,
+    StreamEvent,
+)
 
 router = APIRouter()
 
@@ -24,6 +35,15 @@ async def get_chat_service() -> ChatService:
     """
     # This will be replaced by the actual chat service from app.state in main.py
     raise RuntimeError("ChatService not configured in app state")
+
+
+# Dependency injection for LLMProviderFactory (Plan 04.5-06b — D-06 refresh).
+async def get_llm_factory() -> LLMProviderFactory:
+    """Get the LLM factory from app state.
+
+    Replaced by the actual factory from app.state in main.py via dependency_overrides.
+    """
+    raise RuntimeError("LLMProviderFactory not configured in app state")
 
 
 @router.post("/api/chat", response_class=StreamingResponse)
@@ -230,3 +250,185 @@ async def get_providers(
         }
     """
     return settings.get_available_providers()
+
+
+# ----------------------------------------------------------------------------
+# Plan 04.5-06b — three new endpoints (D-06, D-14, D-22, D-27)
+# ----------------------------------------------------------------------------
+
+
+_LOCAL_PROVIDER_NAMES: tuple[str, ...] = ("ollama", "lmstudio")
+
+
+@router.post("/api/providers/refresh", response_model=ProviderRefreshResponse)
+async def refresh_providers(
+    request: Request,
+    _current_user: Annotated[User, Depends(get_current_active_user)],
+    factory: Annotated[LLMProviderFactory, Depends(get_llm_factory)],
+) -> ProviderRefreshResponse:
+    """Re-discover all local providers in parallel; return enriched provider list (D-06).
+
+    Cache TTL gating: per-entry, ttl from
+    :attr:`Settings.provider_models_cache_ttl_seconds`. On partial unreachable,
+    returns 200 with the unreachable entries marked ``available=False`` and
+    ``error="provider_unreachable"`` — clients show the marker rather than
+    failing the whole settings page.
+    """
+    cache: dict[str, list[str]] = request.app.state.provider_models_cache
+    timestamps: dict[str, float] = request.app.state.provider_models_cache_timestamps
+    ttl = settings.provider_models_cache_ttl_seconds
+    now = time.time()
+
+    stale = [
+        name
+        for name in _LOCAL_PROVIDER_NAMES
+        if name not in timestamps or (now - timestamps[name]) > ttl
+    ]
+
+    if stale:
+        fresh = await factory.refresh_local_models()
+        for name, models in fresh.items():
+            if name not in stale:
+                # Skip non-stale even if refresh returned them — preserves TTL.
+                continue
+            cache[name] = [] if models is None else models
+            timestamps[name] = now
+
+    # Build the response from cache. Mark unreachable when cache is empty
+    # (a cache entry of [] means we just probed and the daemon didn't answer).
+    entries: list[ProviderRefreshEntry] = []
+    for name in _LOCAL_PROVIDER_NAMES:
+        models = cache.get(name, [])
+        available = bool(models)
+        error = None if available else "provider_unreachable"
+        entries.append(
+            ProviderRefreshEntry(
+                name=name,
+                models=models,
+                available=available,
+                error=error,
+            )
+        )
+
+    return ProviderRefreshResponse(providers=entries)
+
+
+async def _test_openai_key(api_key: str) -> ProbeError | None:
+    """OpenAI: GET /v1/models is auth-required and zero-cost. Returns None on success.
+
+    api_key NEVER appears in any log line, exception detail, or response body
+    on any path — only ProbeError.message + hint surface.
+    """
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=settings.provider_probe_timeout_seconds) as client:
+            response = await client.get("https://api.openai.com/v1/models", headers=headers)
+        if response.status_code == 401:
+            return ProbeError(
+                error=ProbeErrorCode.INVALID_API_KEY,
+                message="OpenAI rejected this API key.",
+                hint="Check the key in /settings/providers and re-paste from your OpenAI dashboard.",
+            )
+        response.raise_for_status()
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
+        return ProbeError(
+            error=ProbeErrorCode.PROVIDER_UNREACHABLE,
+            message="Can't reach OpenAI right now.",
+            hint="Try again in a moment.",
+        )
+    return None
+
+
+async def _test_anthropic_key(api_key: str, model: str) -> ProbeError | None:
+    """Anthropic: POST /v1/messages with max_tokens=1 (RESEARCH.md A2 — billable but cheap).
+
+    401 → invalid_api_key; 429 → ok (rate-limited but key valid per A3);
+    network error → provider_unreachable.
+    api_key NEVER appears in any log line, exception detail, or response body.
+    """
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    body = {
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "x"}],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=settings.provider_probe_timeout_seconds) as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json=body,
+            )
+        if response.status_code == 401:
+            return ProbeError(
+                error=ProbeErrorCode.INVALID_API_KEY,
+                message="Anthropic rejected this API key.",
+                hint="Check the key in /settings/providers and re-paste from your Anthropic console.",
+            )
+        if response.status_code == 429:
+            # Rate-limited but key is valid (researcher A3).
+            return None
+        response.raise_for_status()
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
+        return ProbeError(
+            error=ProbeErrorCode.PROVIDER_UNREACHABLE,
+            message="Can't reach Anthropic right now.",
+            hint="Try again in a moment.",
+        )
+    return None
+
+
+@router.post(
+    "/api/providers/{provider}/test",
+    response_model=ProviderTestResponse,
+)
+async def test_provider_connection(
+    provider: str,
+    body: ProviderTestRequest,
+    _current_user: Annotated[User, Depends(get_current_active_user)],
+) -> ProviderTestResponse:
+    """Live cloud key validation — the opt-in 'Test connection' button (D-14).
+
+    Outbound call costs are minimal but documented in the UI tooltip
+    (researcher A2 — Anthropic max_tokens=1 produces a billable single-token reply).
+    api_key NEVER appears in logs, exceptions, or response bodies on any path.
+    """
+    if provider == "openai":
+        probe_error = await _test_openai_key(body.api_key)
+    elif provider == "anthropic":
+        probe_error = await _test_anthropic_key(
+            body.api_key,
+            model=body.model or settings.anthropic_model,
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Provider {provider!r} does not support live test (cloud providers only).",
+        )
+
+    if probe_error is not None:
+        probe_status = (
+            status.HTTP_502_BAD_GATEWAY
+            if probe_error.error == ProbeErrorCode.PROVIDER_UNREACHABLE
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=probe_status, detail=probe_error.model_dump())
+    return ProviderTestResponse(status="ok")
+
+
+@router.get("/api/chat/sessions", response_model=ChatSessionsListResponse)
+async def list_chat_sessions(
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> ChatSessionsListResponse:
+    """List the authenticated user's active sessions (D-22, D-27).
+
+    Per RESEARCH.md Open Question 5 (RESOLVED): sessions are partitioned by
+    ``_metadata[session_id]['user_id']``. A user can only see their own sessions.
+    """
+    sessions = chat_service.list_sessions_for_user(current_user.username)
+    return ChatSessionsListResponse(sessions=sessions)

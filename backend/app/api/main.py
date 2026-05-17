@@ -97,7 +97,13 @@ async def get_chat_service_override(request: Request) -> ChatService:
     return request.app.state.chat_service  # type: ignore[no-any-return]
 
 
+async def get_llm_factory_override(request: Request) -> LLMProviderFactory:
+    """Get the LLM factory from app state (Plan 04.5-06b — D-06 refresh)."""
+    return request.app.state.llm_factory  # type: ignore[no-any-return]
+
+
 app.dependency_overrides[routes.get_chat_service] = get_chat_service_override
+app.dependency_overrides[routes.get_llm_factory] = get_llm_factory_override
 
 # Include router
 app.include_router(routes.router)
