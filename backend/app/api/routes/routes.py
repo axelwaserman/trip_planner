@@ -90,7 +90,7 @@ async def chat(
 @router.post("/api/chat/session", status_code=status.HTTP_201_CREATED)
 async def create_session(
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
-    _current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
     request: SessionCreateRequest | None = None,
 ) -> dict[str, str]:
     """Create a new chat session with optional provider/model selection.
@@ -141,7 +141,9 @@ async def create_session(
         api_key=request.api_key,
     )
 
-    session_id, probe_error = await chat_service.create_session(config)
+    session_id, probe_error = await chat_service.create_session(
+        config, user_id=current_user.username
+    )
     if probe_error is not None:
         # Network-level reachability failures map to 502 Bad Gateway; everything
         # else (model not installed, missing API key) is the user's misconfig

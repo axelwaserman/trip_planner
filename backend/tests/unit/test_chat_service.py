@@ -31,7 +31,7 @@ def _default_config(provider: str = "ollama", model: str = "qwen3:4b") -> Sessio
 class TestGetSessionHistory:
     async def test_returns_history_for_existing_session(self) -> None:
         service = make_service()
-        session_id, _ = await service.create_session(_default_config())
+        session_id, _ = await service.create_session(_default_config(), user_id="testuser")
 
         history = service.get_session_history(session_id)
 
@@ -45,7 +45,7 @@ class TestGetSessionHistory:
 
     async def test_updates_last_activity_on_access(self) -> None:
         service = make_service()
-        session_id, _ = await service.create_session(_default_config())
+        session_id, _ = await service.create_session(_default_config(), user_id="testuser")
         service._last_activity[session_id] = 0.0
 
         service.get_session_history(session_id)
@@ -56,7 +56,7 @@ class TestGetSessionHistory:
 class TestCreateSession:
     async def test_returns_uuid_string(self) -> None:
         service = make_service()
-        session_id, error = await service.create_session(_default_config())
+        session_id, error = await service.create_session(_default_config(), user_id="testuser")
 
         assert error is None
         assert isinstance(session_id, str)
@@ -65,17 +65,19 @@ class TestCreateSession:
     async def test_stores_metadata(self) -> None:
         service = make_service()
         session_id, _ = await service.create_session(
-            _default_config(provider="openai", model="gpt-4o")
+            _default_config(provider="openai", model="gpt-4o"), user_id="testuser"
         )
 
         meta = service._metadata[session_id]
         assert meta["provider"] == "openai"
         assert meta["model"] == "gpt-4o"
+        assert meta["user_id"] == "testuser"
+        assert "T" in meta["created_at"]  # ISO 8601 contains 'T' between date and time
 
     async def test_stores_bound_provider(self) -> None:
         """create_session must stash the BoundProvider for chat_stream to use."""
         service = make_service()
-        session_id, _ = await service.create_session(_default_config())
+        session_id, _ = await service.create_session(_default_config(), user_id="testuser")
 
         assert session_id in service._bound_providers
 
@@ -83,7 +85,7 @@ class TestCreateSession:
 class TestCleanupExpiredSessions:
     async def test_removes_expired_session_from_all_dicts(self) -> None:
         service = make_service()
-        session_id, _ = await service.create_session(_default_config())
+        session_id, _ = await service.create_session(_default_config(), user_id="testuser")
         service._last_activity[session_id] = time.time() - 7200  # 2 hours ago
 
         removed = service.cleanup_expired_sessions(max_age_seconds=3600)
@@ -96,7 +98,7 @@ class TestCleanupExpiredSessions:
 
     async def test_leaves_active_sessions(self) -> None:
         service = make_service()
-        session_id, _ = await service.create_session(_default_config())
+        session_id, _ = await service.create_session(_default_config(), user_id="testuser")
 
         removed = service.cleanup_expired_sessions(max_age_seconds=3600)
 
@@ -107,8 +109,9 @@ class TestCleanupExpiredSessions:
         service = make_service()
         ids: list[str] = []
         for _ in range(3):
-            sid, _ = await service.create_session(_default_config())
+            sid, _ = await service.create_session(_default_config(), user_id="testuser")
             ids.append(sid)
+
         for sid in ids[:2]:
             service._last_activity[sid] = time.time() - 9999
 

@@ -16,6 +16,7 @@ non-``None`` at construction.
 import time
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.messages import AIMessage, HumanMessage
@@ -23,7 +24,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.llm.errors import ProbeError
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.llm.protocol import BoundProvider
-from app.models import StreamEvent
+from app.models import ChatSessionInfo, StreamEvent
 from app.tools.flight_client import FlightAPIClient
 from app.tools.flight_search import search_flights
 
@@ -54,11 +55,15 @@ class ChatService:
         # Wire the tool's client dependency here so callers don't need to know internals
         search_flights._flight_client = flight_client  # type: ignore[attr-defined]
 
-    async def create_session(self, config: SessionLLMConfig) -> tuple[str, ProbeError | None]:
+    async def create_session(
+        self, config: SessionLLMConfig, user_id: str
+    ) -> tuple[str, ProbeError | None]:
         """Create a new chat session: build provider, probe, bind tools, store.
 
         Args:
             config: Per-session LLM configuration (provider/model/base_url/api_key).
+            user_id: Authenticated username — used as the session-partition key
+                (D-22, D-27; RESEARCH.md Open Question 5 RESOLVED). Required.
 
         Returns:
             ``(session_id, None)`` on success; ``("", probe_error)`` when the
@@ -78,10 +83,47 @@ class ChatService:
         self._metadata[session_id] = {
             "provider": config.provider,
             "model": config.model,
-            "created_at": str(time.time()),
+            "user_id": user_id,
+            "created_at": datetime.now(UTC).isoformat(),
         }
         self._last_activity[session_id] = time.time()
         return session_id, None
+
+    def list_sessions_for_user(self, user_id: str) -> list[ChatSessionInfo]:
+        """Return ``ChatSessionInfo`` records for sessions owned by ``user_id``.
+
+        Sessions are partitioned by ``_metadata[session_id]["user_id"]``
+        (D-22, D-27; RESEARCH.md Open Question 5 RESOLVED — partition now,
+        not at the Phase 5 PG migration). ``first_message_preview`` is the
+        first ``HumanMessage`` content truncated to 80 chars, or ``None``
+        when the history is empty. Results are sorted newest-first by
+        ``created_at`` so the sidebar's reverse-chronological order is the
+        natural default.
+        """
+        results: list[ChatSessionInfo] = []
+        for session_id, metadata in self._metadata.items():
+            if metadata.get("user_id") != user_id:
+                continue
+            history = self._histories.get(session_id)
+            preview: str | None = None
+            if history is not None:
+                for msg in history.messages:
+                    if isinstance(msg, HumanMessage):
+                        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                        preview = content[:80]
+                        break
+            results.append(
+                ChatSessionInfo(
+                    session_id=session_id,
+                    provider=metadata["provider"],
+                    model=metadata["model"],
+                    created_at=metadata["created_at"],
+                    first_message_preview=preview,
+                )
+            )
+        # Newest first — the sidebar is reverse-chronological.
+        results.sort(key=lambda info: info.created_at, reverse=True)
+        return results
 
     def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         """Get history for a session.

@@ -59,6 +59,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.chat_service = chat_service
     app.state.llm_factory = llm_factory
 
+    # D-05 + D-06: discovery cache + per-entry timestamps for TTL gating.
+    # Populated by POST /api/providers/refresh and read by GET /api/providers.
+    app.state.provider_models_cache = {}
+    app.state.provider_models_cache_timestamps = {}
+
     yield
 
     # Shutdown: cleanup expired sessions
