@@ -1,8 +1,8 @@
-import { Box, Button, Flex, IconButton, Input, Stack, Text } from '@chakra-ui/react'
-import { useEffect, useRef, useState } from 'react'
+import { Box, Button, Flex, IconButton, Input, Menu, Portal, Stack, Text } from '@chakra-ui/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Cpu, Settings as SettingsIcon } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ChevronDown, Cpu, Settings as SettingsIcon } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
@@ -12,6 +12,52 @@ import { UserMenu } from './chat/UserMenu'
 import { useChat } from '../hooks/useChat'
 import { apiFetch } from '../lib/auth'
 
+interface QuickSwitchOption {
+  provider: string
+  model: string
+  label: string
+}
+
+/**
+ * Read provider_settings from localStorage and project the "Ready" providers
+ * into a flat list of {provider, model} pairs the active-model badge popover
+ * can render. Empty array if nothing has been configured yet.
+ *
+ * "Ready" means the user has actually configured the provider on the
+ * /settings/providers page (base_url for ollama; non-empty api_key for
+ * openai/anthropic). Cards that show "Needs setup" are excluded — switching
+ * to them would just produce a probe error.
+ */
+function readQuickSwitchOptions(): QuickSwitchOption[] {
+  try {
+    const raw = localStorage.getItem('provider_settings')
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as {
+      ollama?: { base_url?: string; models?: string[] }
+      openai?: { api_key?: string; model?: string }
+      anthropic?: { api_key?: string; model?: string }
+    }
+
+    const opts: QuickSwitchOption[] = []
+    if (parsed.ollama?.base_url && parsed.ollama.base_url.trim().length > 0) {
+      const models = parsed.ollama.models ?? []
+      const m = models[0] ?? 'qwen3:4b'
+      opts.push({ provider: 'ollama', model: m, label: `ollama · ${m}` })
+    }
+    if (parsed.openai?.api_key && parsed.openai.api_key.trim().length > 0) {
+      const m = parsed.openai.model ?? 'gpt-4o-mini'
+      opts.push({ provider: 'openai', model: m, label: `openai · ${m}` })
+    }
+    if (parsed.anthropic?.api_key && parsed.anthropic.api_key.trim().length > 0) {
+      const m = parsed.anthropic.model ?? 'claude-3-5-sonnet-20241022'
+      opts.push({ provider: 'anthropic', model: m, label: `anthropic · ${m}` })
+    }
+    return opts
+  } catch {
+    return []
+  }
+}
+
 export function ChatInterface() {
   const {
     messages,
@@ -20,11 +66,18 @@ export function ChatInterface() {
     currentModel,
     providerError,
     sendMessage,
+    handleProviderChange,
     retryProvider,
   } = useChat()
-  const navigate = useNavigate()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [username, setUsername] = useState<string>('')
+  const [quickSwitchTick, setQuickSwitchTick] = useState(0)
+  // Re-read saved settings every time the badge is opened so the list reflects
+  // edits the user just made on /settings/providers without a remount.
+  const quickSwitchOptions = useMemo(
+    () => readQuickSwitchOptions(),
+    [quickSwitchTick]
+  )
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -87,30 +140,105 @@ export function ChatInterface() {
             </Text>
           </Box>
           <Flex align="center" gap="2">
-            {/* Active-model badge — D-23 + UI-SPEC §"ChatInterface modifications".
-                The whole element is a button so keyboard users can reach it
-                with Tab + Enter. Click navigates to /settings/providers. */}
-            <Box
-              as="button"
-              onClick={() => navigate('/settings/providers')}
-              bg="bg.canvas"
-              borderWidth="1px"
-              borderColor="border.subtle"
-              borderRadius="full"
-              px="3"
-              py="1"
-              fontSize="13px"
-              color="fg.secondary"
-              display="inline-flex"
-              alignItems="center"
-              gap="2"
-              cursor="pointer"
-              title={`This conversation is using ${currentProvider} · ${currentModel}. Switch in Settings.`}
+            {/* Active-model quick-switcher. The badge opens a popover listing
+                providers the user has already configured (Ready in saved
+                settings). Selecting one switches without leaving the chat —
+                handleProviderChange re-reads provider_settings under the
+                hood (Plan 07) so the api_key/base_url for the picked
+                provider is what travels on the next session. The gear icon
+                to the right is the only path to the full settings page. */}
+            <Menu.Root
+              onOpenChange={(details) => {
+                if (details.open) setQuickSwitchTick((t) => t + 1)
+              }}
+              onSelect={(details) => {
+                if (details.value === '__settings__') return
+                const [provider, ...modelParts] = details.value.split('::')
+                const model = modelParts.join('::')
+                if (!provider || !model) return
+                handleProviderChange(provider, model)
+              }}
             >
-              <Cpu size={14} />
-              {currentProvider} · {currentModel}
-            </Box>
-            {/* Settings nav link — D-19. Plan 08b removes this in favor of a
+              <Menu.Trigger asChild>
+                <Box
+                  as="button"
+                  bg="bg.canvas"
+                  borderWidth="1px"
+                  borderColor="border.subtle"
+                  borderRadius="full"
+                  px="3"
+                  py="1"
+                  fontSize="13px"
+                  color="fg.secondary"
+                  display="inline-flex"
+                  alignItems="center"
+                  gap="2"
+                  cursor="pointer"
+                  title={`This conversation is using ${currentProvider} · ${currentModel}. Click to switch.`}
+                >
+                  <Cpu size={14} />
+                  {currentProvider} · {currentModel}
+                  <ChevronDown size={12} />
+                </Box>
+              </Menu.Trigger>
+              <Portal>
+                <Menu.Positioner>
+                  <Menu.Content
+                    bg="bg.surface"
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    boxShadow="md"
+                    p="1"
+                    minW="240px"
+                  >
+                    {quickSwitchOptions.length > 0 ? (
+                      quickSwitchOptions.map((opt) => {
+                        const isActive =
+                          opt.provider === currentProvider &&
+                          opt.model === currentModel
+                        return (
+                          <Menu.Item
+                            key={`${opt.provider}::${opt.model}`}
+                            value={`${opt.provider}::${opt.model}`}
+                            fontSize="14px"
+                            px="3"
+                            py="2"
+                            borderRadius="sm"
+                            color={isActive ? 'accent.solid' : 'fg.primary'}
+                            fontWeight={isActive ? '500' : '400'}
+                          >
+                            {opt.label}
+                            {isActive && (
+                              <Box as="span" ml="2" fontSize="12px" color="fg.secondary">
+                                · current
+                              </Box>
+                            )}
+                          </Menu.Item>
+                        )
+                      })
+                    ) : (
+                      <Box px="3" py="2" fontSize="13px" color="fg.secondary">
+                        No providers configured yet.
+                      </Box>
+                    )}
+                    <Box height="1px" bg="border.subtle" my="1" />
+                    <Menu.Item
+                      value="__settings__"
+                      fontSize="13px"
+                      px="3"
+                      py="2"
+                      borderRadius="sm"
+                      color="accent.solid"
+                      asChild
+                    >
+                      <Link to="/settings/providers">Manage providers…</Link>
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Positioner>
+              </Portal>
+            </Menu.Root>
+            {/* Settings nav — D-19. Plan 08b removes this in favor of a
                 Sidebar entry; here only because 08 ships before Sidebar exists. */}
             <Link to="/settings/providers" aria-label="Open settings">
               <IconButton

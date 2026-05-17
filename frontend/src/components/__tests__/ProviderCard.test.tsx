@@ -108,10 +108,17 @@ describe('ProviderCard', () => {
     expect(updatedArg.openai.api_key).toBe('sk-test-12345')
   })
 
-  it('renders the helper copy "Stored in this browser only. Never sent to our server." for cloud providers', () => {
+  it('renders the honest helper copy for cloud providers (we never STORE the key)', () => {
     renderCard('openai')
+    // The helper text must (a) make the no-server-storage claim and (b) tell
+    // the user the key DOES travel to the backend at session start. The
+    // earlier draft "Stored in this browser only. Never sent to our server."
+    // misled readers into thinking the key never left the browser.
     expect(
-      screen.getByText(/Stored in this browser only\. Never sent to our server\./i)
+      screen.getByText(/We never store your key on our servers\./i)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/travels to our backend only when starting a chat session/i)
     ).toBeInTheDocument()
   })
 

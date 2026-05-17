@@ -89,10 +89,11 @@ export function SettingsProviders() {
           >
             Providers
           </Heading>
-          <Text mt="6" maxW="36ch" color="fg.secondary" fontSize="15px" lineHeight="1.5">
+          <Text mt="6" maxW="44ch" color="fg.secondary" fontSize="15px" lineHeight="1.5">
             Pick where the agent thinks. Local providers run on your machine;
-            cloud providers send messages to OpenAI or Anthropic. Keys you paste
-            here live in this browser only — never on our server.
+            cloud providers send messages to OpenAI or Anthropic. We never store
+            your keys — they live in this browser and travel to our backend only
+            when starting a chat session, so the model can authenticate.
           </Text>
 
           <Stack gap="6" mt="8">

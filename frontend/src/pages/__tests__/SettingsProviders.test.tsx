@@ -53,10 +53,13 @@ describe('SettingsProviders', () => {
 
   it('renders the locked intro paragraph verbatim', () => {
     renderWithProviders()
+    // The intro must (a) make the no-storage claim and (b) tell users the
+    // key travels to the backend at session start. Earlier copy "Keys you
+    // paste here live in this browser only — never on our server." conflated
+    // "we don't store" with "we never receive" and was misleading.
+    expect(screen.getByText(/We never store your keys/i)).toBeInTheDocument()
     expect(
-      screen.getByText(
-        /Keys you paste here live in this browser only — never on our server\./i
-      )
+      screen.getByText(/travel to our backend only when starting a chat session/i)
     ).toBeInTheDocument()
   })
 

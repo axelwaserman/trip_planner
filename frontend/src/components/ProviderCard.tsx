@@ -15,7 +15,7 @@
  * touch localStorage directly; the parent page does that on `onSave`.
  */
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -121,19 +121,18 @@ function deriveStatus(kind: ProviderKind, settings: ProviderSettings): StatusPil
 }
 
 export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
-  const meta = getMeta(kind, settings)
   const status = deriveStatus(kind, settings)
 
-  const [baseUrl, setBaseUrl] = useState<string>(
-    kind === 'ollama' ? settings.ollama.base_url : ''
-  )
-  const [apiKey, setApiKey] = useState<string>(
+  const savedBaseUrl = kind === 'ollama' ? settings.ollama.base_url : ''
+  const savedApiKey =
     kind === 'openai'
       ? settings.openai.api_key
       : kind === 'anthropic'
         ? settings.anthropic.api_key
         : ''
-  )
+
+  const [baseUrl, setBaseUrl] = useState<string>(savedBaseUrl)
+  const [apiKey, setApiKey] = useState<string>(savedApiKey)
   const [showKey, setShowKey] = useState<boolean>(false)
   const initialModel =
     kind === 'ollama'
@@ -142,6 +141,41 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
         ? settings.openai.model
         : settings.anthropic.model
   const [model, setModel] = useState<string>(initialModel)
+
+  // Re-derive Model select state when the upstream settings change.
+  //
+  // Without this effect, if the parent page mutates settings.ollama.models
+  // (e.g. after a future Refresh action lands in 08b, or after the user types
+  // a new Base URL into a sibling card), the dropdown stays stuck on the
+  // mount-time initialModel value. The effect re-aligns local state with
+  // upstream truth: if the previously-selected model is still in the new
+  // list, keep it; otherwise fall back to the first model.
+  useEffect(() => {
+    if (kind !== 'ollama') return
+    const models = settings.ollama.models
+    if (models.length === 0) return
+    if (!models.includes(model)) {
+      setModel(models[0])
+    }
+    // Only react to the upstream model list changing — local edits to `model`
+    // should NOT trigger this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, settings.ollama.models])
+
+  // Detect Base URL edits that haven't been saved yet — the displayed model
+  // list is derived from settings.ollama.models, which only refreshes after a
+  // round-trip (Save here writes localStorage; the live discovery endpoint
+  // lands in Plan 08b). Surface that to the user so they don't trust a stale
+  // dropdown.
+  const baseUrlEdited = useMemo(
+    () => kind === 'ollama' && baseUrl.trim() !== savedBaseUrl.trim(),
+    [kind, baseUrl, savedBaseUrl]
+  )
+
+  // The meta object carries the displayed model list. Recompute on every
+  // render so a downstream settings.ollama.models change is reflected in the
+  // dropdown options without waiting for a remount.
+  const meta = getMeta(kind, settings)
 
   const fieldId = `provider-${kind}`
 
@@ -242,6 +276,14 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
           </Field.Root>
         )}
 
+        {kind === 'ollama' && baseUrlEdited && (
+          <Text fontSize="13px" color="fg.secondary">
+            The model list below was discovered from the previously saved Base
+            URL. Save the new URL to refresh it (live refresh lands in a future
+            update).
+          </Text>
+        )}
+
         {(kind === 'openai' || kind === 'anthropic') && (
           <Field.Root>
             <Field.Label htmlFor={`${fieldId}-api-key`}>API Key</Field.Label>
@@ -270,7 +312,9 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
               </IconButton>
             </Box>
             <Field.HelperText>
-              Stored in this browser only. Never sent to our server.
+              We never store your key on our servers. It travels to our backend
+              only when starting a chat session, so the model can authenticate
+              to {kind === 'openai' ? 'OpenAI' : 'Anthropic'}.
             </Field.HelperText>
           </Field.Root>
         )}
