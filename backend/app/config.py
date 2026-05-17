@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     # case for a misconfigured Ollama daemon; localhost hits are typically 50–200 ms.
     provider_probe_timeout_seconds: float = 1.5
 
+    # Provider model discovery cache (D-05 + D-06). TTL gates how aggressively the
+    # /api/providers/refresh button re-hits local daemons; 60s balances "user
+    # pulled a new model and forgot to click Refresh" UX against thrashing localhost.
+    provider_models_cache_ttl_seconds: int = 60
+
     def model_post_init(self, __context: object) -> None:
         """Emit a warning when the JWT secret is still the insecure default."""
         if self.jwt_secret == _DEFAULT_JWT_SECRET:
