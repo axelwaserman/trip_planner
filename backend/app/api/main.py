@@ -5,11 +5,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from langchain.chat_models import init_chat_model
 
 from app.api.routes import auth, routes
 from app.chat import ChatService
 from app.config import Settings
+from app.llm.factory import LLMProviderFactory
 from app.tools.flight_client import MockFlightAPIClient
 from app.tools.flight_search import search_flights
 
@@ -19,13 +19,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan - manage singleton resources.
 
     Startup:
-        - Initialize flight API client
-        - Initialize LLM with init_chat_model()
-        - Initialize ChatService with dependencies
-        - Inject flight_client into search_flights tool
+        - Initialize flight API client.
+        - Construct the per-app :class:`LLMProviderFactory` (D-03 — replaces the
+          4.2 startup-time chat-model construction; providers are built
+          per-session inside :meth:`ChatService.create_session`).
+        - Initialize :class:`ChatService` with the factory.
+        - Inject ``flight_client`` into the ``search_flights`` tool.
+        - Stash both ``chat_service`` and ``llm_factory`` on ``app.state``.
 
     Shutdown:
-        - Cleanup expired sessions
+        - Cleanup expired sessions.
     """
     # Startup
     settings = Settings()
@@ -33,25 +36,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Initialize flight client
     flight_client = MockFlightAPIClient(seed=42)
 
-    # Initialize LLM using init_chat_model with reasoning enabled
-    llm = init_chat_model(
-        model=settings.ollama_model,
-        model_provider="ollama",
-        base_url=settings.ollama_base_url,
-        reasoning=True,  # Enable reasoning/thinking tokens for supported models
-    )
+    # Construct the per-app LLM factory; providers are built per-session.
+    llm_factory = LLMProviderFactory(settings)
 
     # Inject flight_client into search_flights tool
     search_flights._flight_client = flight_client  # type: ignore[attr-defined]
 
-    # Initialize chat service
+    # Initialize chat service with the factory (D-03 — no singleton bound LLM).
     chat_service = ChatService(
         flight_client=flight_client,
-        llm=llm,
+        factory=llm_factory,
     )
 
     # Store in app state
     app.state.chat_service = chat_service
+    app.state.llm_factory = llm_factory
 
     yield
 

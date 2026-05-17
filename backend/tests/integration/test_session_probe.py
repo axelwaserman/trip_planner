@@ -88,12 +88,17 @@ def test_session_create_returns_400_when_cloud_key_missing(
 ) -> None:
     """OPENAI_API_KEY absent → probe returns 400 missing_api_key.
 
-    The probe is the authority for the missing-key signal — the route no longer
-    short-circuits on ``available=False``.
+    The factory reads from ``Settings.openai_api_key`` at build time and
+    constructs an OpenAIProvider with ``api_key=None``; the provider's
+    :meth:`OpenAIProvider.validate_config` returns the structured
+    ``MISSING_API_KEY`` error inside :meth:`ChatService.create_session`.
     """
-    from app.services import provider_probe as probe_module
-
-    monkeypatch.setattr(probe_module.settings, "openai_api_key", None, raising=False)
+    # Patch the module-level settings instance the route layer reads from.
+    monkeypatch.setattr("app.config.settings.openai_api_key", None, raising=False)
+    # Also clear it on the ChatService's factory's settings instance — the
+    # lifespan-scoped factory captured a Settings() object at app construction.
+    factory = client.app.state.llm_factory
+    monkeypatch.setattr(factory._settings, "openai_api_key", None, raising=False)
 
     response = client.post(
         "/api/chat/session",
