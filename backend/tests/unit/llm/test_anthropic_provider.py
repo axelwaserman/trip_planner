@@ -1,53 +1,112 @@
-"""Failing-stub tests for AnthropicProvider (Phase 4.5 Wave 2 implements).
+"""Unit tests for :class:`app.llm.providers.anthropic.AnthropicProvider` (Wave 2 — Plan 04.5-05).
 
-Mirrors ``test_openai_provider.py`` — same shape, provider name ``anthropic``.
+Mirrors :mod:`backend.tests.unit.llm.test_openai_provider` — the cloud-provider
+shape lifted onto Anthropic. The four ``validate_config`` / ``list_models``
+tests exercise the same key-presence-only contract from
+:mod:`backend.tests.unit.test_provider_probe.test_probe_cloud_missing_key` (the
+4.2 analog) plus an Anthropic-specific regression for **Pitfall 2** (RESEARCH.md):
 
-Per RESEARCH.md §"Pitfall 2: ChatAnthropic Requires a Non-Empty api_key at
-Construction": ``ChatAnthropic.anthropic_api_key`` is required ``SecretStr`` (NOT
-``Optional``). Constructing ``ChatAnthropic(api_key=None)`` raises a Pydantic
-``ValidationError`` BEFORE any code path can probe it. Therefore
-``AnthropicProvider.validate_config()`` MUST guard ``self._api_key is not None``
-BEFORE constructing ``ChatAnthropic`` — and ``bind_tools`` must run AFTER
-``validate_config`` (the factory ordering in ``chat.py::create_session`` already
-guarantees this per Pattern 3).
+    ``ChatAnthropic.anthropic_api_key`` is a required Pydantic ``SecretStr``;
+    constructing ``ChatAnthropic(api_key=None)`` raises a Pydantic
+    ``ValidationError`` BEFORE any user code can intercept it. Therefore
+    :meth:`AnthropicProvider.bind_tools` carries an ``assert self._api_key is
+    not None`` precondition guard, converting that misuse into a clean
+    :class:`AssertionError` rather than a leaky validation stack trace. The
+    last test pins this behaviour.
 
-Wave 0 stub: every test body is ``pytest.skip("Wave 2 implements ...")``.
-
-Future imports the real Wave-2 tests will need::
-
-    from app.llm.errors import ProbeErrorCode
-    from app.llm.providers.anthropic import AnthropicProvider
+Default ``validate_config`` is presence-only (D-13); no outbound API call is
+made. The literal API-key strings here (``"sk-ant-bogus"``, ``"sk-ant-test"``)
+are never sent to ``api.anthropic.com`` — recorded in the threat register
+(T-04.5-05-01 disposition: mitigate).
 """
 
 import pytest
+
+from app.llm.errors import ProbeErrorCode
+from app.llm.providers.anthropic import AnthropicProvider
 
 pytestmark = pytest.mark.unit
 
 
 async def test_validate_config_returns_missing_api_key_when_key_is_none() -> None:
-    """``AnthropicProvider(api_key=None).validate_config()`` → ``MISSING_API_KEY``.
+    """``AnthropicProvider(api_key=None).validate_config()`` → ``MISSING_API_KEY``."""
+    # Arrange
+    provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key=None)
 
-    Wave 2 assertion shape::
+    # Act
+    result = await provider.validate_config()
 
-        provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key=None)
-        result = await provider.validate_config()
-        assert result is not None
-        assert result.error == ProbeErrorCode.MISSING_API_KEY
-        assert "Anthropic" in result.message
-    """
-    pytest.skip("Wave 2 implements AnthropicProvider")
+    # Assert
+    assert result is not None
+    assert result.error == ProbeErrorCode.MISSING_API_KEY
+    assert "Anthropic" in result.message
+    assert "ANTHROPIC_API_KEY" in result.hint or "/settings/providers" in result.hint
 
 
 async def test_validate_config_returns_missing_api_key_when_key_is_empty_string() -> None:
     """``AnthropicProvider(api_key="").validate_config()`` → ``MISSING_API_KEY`` (D-08 truthy guard)."""
-    pytest.skip("Wave 2 implements AnthropicProvider")
+    # Arrange
+    provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key="")
+
+    # Act
+    result = await provider.validate_config()
+
+    # Assert
+    assert result is not None
+    assert result.error == ProbeErrorCode.MISSING_API_KEY
+    assert "Anthropic" in result.message
+    assert "ANTHROPIC_API_KEY" in result.hint or "/settings/providers" in result.hint
 
 
 async def test_validate_config_returns_none_when_key_present() -> None:
     """``AnthropicProvider(api_key="sk-ant-bogus").validate_config()`` → ``None``.
 
-    Default validate_config is presence-only (D-13); does NOT construct
-    ``ChatAnthropic`` (which would raise per Pitfall 2). The literal
-    ``"sk-ant-bogus"`` is fine — never sent to api.anthropic.com.
+    Default ``validate_config`` is presence-only (D-13); does NOT construct
+    ``ChatAnthropic`` (which would raise per Pitfall 2 if the key were ``None``).
+    The literal ``"sk-ant-bogus"`` is fine — never sent to ``api.anthropic.com``.
     """
-    pytest.skip("Wave 2 implements AnthropicProvider")
+    # Arrange
+    provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key="sk-ant-bogus")
+
+    # Act
+    result = await provider.validate_config()
+
+    # Assert
+    assert result is None
+
+
+async def test_list_models_returns_curated_anthropic_list() -> None:
+    """``AnthropicProvider.list_models()`` returns the curated D-04 list verbatim.
+
+    The list MUST stay in sync with
+    ``Settings.get_available_providers()["anthropic"]["models"]``.
+    """
+    # Arrange
+    provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key="sk-ant-bogus")
+
+    # Act
+    result = await provider.list_models()
+
+    # Assert
+    assert result == [
+        "claude-3-5-sonnet-20241022",
+        "claude-3-5-haiku-20241022",
+        "claude-3-opus-20240229",
+    ]
+
+
+def test_bind_tools_raises_assertion_error_when_validate_config_was_skipped() -> None:
+    """Pitfall 2 regression: ``bind_tools`` MUST refuse to construct ``ChatAnthropic``
+    when ``api_key`` is ``None``, raising :class:`AssertionError` before the SDK can
+    raise its own Pydantic ``ValidationError`` (whose stack trace would expose the
+    field path). This pins the precondition guard in
+    :meth:`AnthropicProvider.bind_tools` — protecting against a direct caller who
+    skips :meth:`validate_config` (the normal flow goes through the factory +
+    ``ChatService.create_session`` ordering in Plan 06).
+    """
+    # Arrange
+    provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key=None)
+
+    # Act + Assert
+    with pytest.raises(AssertionError):
+        provider.bind_tools([])
