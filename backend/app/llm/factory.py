@@ -15,11 +15,11 @@ Per RESEARCH.md §"Pattern 2: Factory Builds from Session-Scoped Config",
 ``Settings.{provider}_api_key`` env var) and the analogous ``base_url``
 fallback for local providers.
 
-Plan 06 fills in the ``match`` body in ``build`` — three concrete provider
-classes (``OllamaProvider``, ``OpenAIProvider``, ``AnthropicProvider``) ship in
-this phase. ``lmstudio`` is intentionally OUT of scope here; a future phase
-extends the match block with a ``"lmstudio"`` case when ``LMStudioProvider``
-lands.
+Plan 06 fills in the ``match`` body in ``build`` with the three concrete
+provider classes (``OllamaProvider``, ``OpenAIProvider``, ``AnthropicProvider``).
+Plan 04b extends the match block with a fourth ``"lmstudio"`` case backed by
+:class:`app.llm.providers.lmstudio.LMStudioProvider` — closing CONTEXT.md
+decisions D-15, D-16, D-17, D-18, D-28.
 """
 
 from dataclasses import dataclass
@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from app.config import Settings
 from app.llm.protocol import LLMProvider
 from app.llm.providers.anthropic import AnthropicProvider
+from app.llm.providers.lmstudio import LMStudioProvider
 from app.llm.providers.ollama import OllamaProvider
 from app.llm.providers.openai import OpenAIProvider
 
@@ -103,6 +104,12 @@ class LLMProviderFactory:
                 return AnthropicProvider(
                     model=config.model,
                     api_key=config.api_key or self._settings.anthropic_api_key,
+                )
+            case "lmstudio":
+                return LMStudioProvider(
+                    model=config.model,
+                    base_url=config.base_url or self._settings.lmstudio_base_url,
+                    probe_timeout_seconds=self._settings.provider_probe_timeout_seconds,
                 )
             case _:
                 raise ValueError(f"Unknown provider: {config.provider}")

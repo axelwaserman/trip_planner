@@ -19,6 +19,7 @@ import pytest
 from app.config import Settings
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.llm.providers.anthropic import AnthropicProvider
+from app.llm.providers.lmstudio import LMStudioProvider
 from app.llm.providers.ollama import OllamaProvider
 from app.llm.providers.openai import OpenAIProvider
 
@@ -30,9 +31,7 @@ def test_factory_builds_ollama_provider_for_provider_name_ollama() -> None:
     # Arrange
     settings = Settings()
     factory = LLMProviderFactory(settings)
-    config = SessionLLMConfig(
-        provider="ollama", model="qwen3:4b", base_url=None, api_key=None
-    )
+    config = SessionLLMConfig(provider="ollama", model="qwen3:4b", base_url=None, api_key=None)
 
     # Act
     provider = factory.build(config)
@@ -47,9 +46,7 @@ def test_factory_builds_openai_provider_for_provider_name_openai() -> None:
     # Arrange
     settings = Settings(openai_api_key="sk-test")
     factory = LLMProviderFactory(settings)
-    config = SessionLLMConfig(
-        provider="openai", model="gpt-4o-mini", base_url=None, api_key=None
-    )
+    config = SessionLLMConfig(provider="openai", model="gpt-4o-mini", base_url=None, api_key=None)
 
     # Act
     provider = factory.build(config)
@@ -104,9 +101,7 @@ def test_factory_falls_back_to_settings_env_key_when_payload_key_is_none() -> No
     # Arrange
     settings = Settings(openai_api_key="sk-from-env")
     factory = LLMProviderFactory(settings)
-    config = SessionLLMConfig(
-        provider="openai", model="gpt-4o-mini", base_url=None, api_key=None
-    )
+    config = SessionLLMConfig(provider="openai", model="gpt-4o-mini", base_url=None, api_key=None)
 
     # Act
     provider = factory.build(config)
@@ -121,9 +116,7 @@ def test_factory_raises_value_error_for_unknown_provider() -> None:
     # Arrange
     settings = Settings()
     factory = LLMProviderFactory(settings)
-    config = SessionLLMConfig(
-        provider="bogus", model="x", base_url=None, api_key=None
-    )
+    config = SessionLLMConfig(provider="bogus", model="x", base_url=None, api_key=None)
 
     # Act + Assert
     with pytest.raises(ValueError, match="Unknown provider"):
@@ -148,3 +141,71 @@ def test_factory_uses_payload_base_url_over_settings_for_ollama() -> None:
     # Assert
     assert isinstance(provider, OllamaProvider)
     assert provider._base_url == "http://payload-host:11434"
+
+
+# ---- LM Studio (Plan 04b) ---------------------------------------------------
+
+
+def test_factory_builds_lmstudio_provider_for_provider_name_lmstudio() -> None:
+    """``factory.build(provider="lmstudio", ...)`` returns ``LMStudioProvider``.
+
+    Closes Plan 06's "out of orchestrator scope" gap — `lmstudio` is now a
+    first-class match arm per CONTEXT.md D-15.
+    """
+    # Arrange
+    settings = Settings()
+    factory = LLMProviderFactory(settings)
+    config = SessionLLMConfig(
+        provider="lmstudio",
+        model="qwen2.5-coder-7b",
+        base_url=None,
+        api_key=None,
+    )
+
+    # Act
+    provider = factory.build(config)
+
+    # Assert
+    assert isinstance(provider, LMStudioProvider)
+    assert provider.get_provider_name() == "lmstudio"
+
+
+def test_factory_uses_payload_base_url_over_settings_for_lmstudio() -> None:
+    """D-08 precedence (symmetric): payload base_url wins for lmstudio."""
+    # Arrange
+    settings = Settings()
+    factory = LLMProviderFactory(settings)
+    config = SessionLLMConfig(
+        provider="lmstudio",
+        model="x",
+        base_url="http://127.0.0.1:1234/v1",
+        api_key=None,
+    )
+
+    # Act
+    provider = factory.build(config)
+
+    # Assert
+    assert isinstance(provider, LMStudioProvider)
+    assert provider._base_url == "http://127.0.0.1:1234/v1"
+
+
+def test_factory_falls_back_to_settings_lmstudio_base_url_when_payload_is_none() -> None:
+    """D-08 fallback (symmetric): ``Settings.lmstudio_base_url`` is used when payload is ``None``."""
+    # Arrange
+    settings = Settings()
+    factory = LLMProviderFactory(settings)
+    config = SessionLLMConfig(
+        provider="lmstudio",
+        model="x",
+        base_url=None,
+        api_key=None,
+    )
+
+    # Act
+    provider = factory.build(config)
+
+    # Assert
+    assert isinstance(provider, LMStudioProvider)
+    assert provider._base_url == settings.lmstudio_base_url
+    assert provider._base_url == "http://localhost:1234/v1"
