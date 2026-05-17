@@ -15,6 +15,7 @@ install FIRST in the FastAPI lifespan.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from collections.abc import Mapping
@@ -84,12 +85,8 @@ def install_log_scrubber() -> ApiKeyScrubber:
 def uninstall_log_scrubber(scrubber: ApiKeyScrubber) -> None:
     """Best-effort removal of ``scrubber`` from root + uvicorn loggers."""
     for handler in logging.getLogger().handlers:
-        try:
+        with contextlib.suppress(ValueError):
             handler.removeFilter(scrubber)
-        except ValueError:
-            pass
     for name in _UVICORN_LOGGER_NAMES:
-        try:
+        with contextlib.suppress(ValueError):
             logging.getLogger(name).removeFilter(scrubber)
-        except ValueError:
-            pass

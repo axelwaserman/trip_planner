@@ -7,8 +7,8 @@ and the minimal D-10 API-key log scrubber.
 """
 
 from app.llm.log_scrubbing import (
-    ApiKeyScrubber,
     SECRET_PATTERNS,
+    ApiKeyScrubber,
     install_log_scrubber,
     uninstall_log_scrubber,
 )

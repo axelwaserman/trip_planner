@@ -22,8 +22,8 @@ import logging
 import pytest
 
 from app.llm.log_scrubbing import (
-    ApiKeyScrubber,
     SECRET_PATTERNS,
+    ApiKeyScrubber,
     _scrub,
     install_log_scrubber,
     uninstall_log_scrubber,
