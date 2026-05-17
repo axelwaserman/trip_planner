@@ -9,8 +9,9 @@ from fastapi.responses import StreamingResponse
 from app.api.routes.auth import User, get_current_active_user
 from app.chat import ChatService
 from app.config import settings
+from app.llm.errors import ProbeErrorCode
+from app.llm.factory import SessionLLMConfig
 from app.models import ChatRequest, SessionCreateRequest, StreamEvent
-from app.services.provider_probe import ProbeErrorCode, probe_provider
 
 router = APIRouter()
 
@@ -95,22 +96,25 @@ async def create_session(
     """Create a new chat session with optional provider/model selection.
 
     Generates a new session ID and initializes chat history for that session.
-    Optionally accepts provider and model selection to override defaults.
+    Optionally accepts provider, model, base_url, and api_key fields per D-24.
+    The provider's ``validate_config`` runs inline inside
+    :meth:`ChatService.create_session`; on probe failure the structured
+    :class:`app.llm.errors.ProbeError` surfaces as 502 (provider_unreachable)
+    or 400 (everything else) — the 4.2 wire contract is preserved bit-for-bit.
 
     Args:
-        request: Session creation request with optional provider/model
-        chat_service: Injected ChatService instance
+        request: Session creation request with optional provider/model/base_url/api_key.
+        chat_service: Injected ChatService instance.
 
     Returns:
-        Dictionary with session_id, provider, and model fields
+        Dictionary with ``session_id``, ``provider``, and ``model`` fields.
     """
     if request is None:
         request = SessionCreateRequest()
 
-    # Validate provider and model if specified.
-    # Note: we deliberately do NOT short-circuit on `available=False` here — the
-    # probe (below) is the single authority on missing-key errors and emits the
-    # structured `missing_api_key` ProbeError that the frontend banner consumes.
+    # Defense-in-depth: validate provider name + curated model list at the route
+    # boundary, before reaching the factory. Catches typos in the payload before
+    # the factory's match-default branch raises ValueError.
     if request.provider:
         providers = settings.get_available_providers()
         if request.provider not in providers:
@@ -125,25 +129,30 @@ async def create_session(
                 detail=f"Invalid model {request.model} for provider {request.provider}",
             )
 
-    if request.provider and request.model:
-        probe = await probe_provider(request.provider, request.model)
-        if probe is not None:
-            # Network-level reachability failures map to 502 Bad Gateway; everything
-            # else (model not installed, missing API key) is the user's misconfig
-            # and surfaces as 400 Bad Request.
-            probe_status = (
-                status.HTTP_502_BAD_GATEWAY
-                if probe.error == ProbeErrorCode.PROVIDER_UNREACHABLE
-                else status.HTTP_400_BAD_REQUEST
-            )
-            raise HTTPException(status_code=probe_status, detail=probe.model_dump())
-
-    session_id = chat_service.create_session(
-        provider=request.provider,
-        model=request.model,
+    # Default fallbacks live here (moved out of ChatService — SessionLLMConfig
+    # requires non-None provider/model). NOTE: a follow-up phase wires
+    # GET /api/providers to the dynamic /api/tags discovery cache; for now
+    # settings.get_available_providers() above still returns the curated frozen
+    # list for Ollama.
+    config = SessionLLMConfig(
+        provider=request.provider or settings.default_provider,
+        model=request.model or settings.default_model,
+        base_url=request.base_url,
+        api_key=request.api_key,
     )
 
-    # Return session info including the resolved provider/model
+    session_id, probe_error = await chat_service.create_session(config)
+    if probe_error is not None:
+        # Network-level reachability failures map to 502 Bad Gateway; everything
+        # else (model not installed, missing API key) is the user's misconfig
+        # and surfaces as 400 Bad Request. 4.2 wire contract preserved.
+        probe_status = (
+            status.HTTP_502_BAD_GATEWAY
+            if probe_error.error == ProbeErrorCode.PROVIDER_UNREACHABLE
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=probe_status, detail=probe_error.model_dump())
+
     metadata = chat_service._metadata[session_id]
     return {
         "session_id": session_id,
@@ -182,6 +191,8 @@ async def delete_session(
         del chat_service._histories[session_id]
     if session_id in chat_service._metadata:
         del chat_service._metadata[session_id]
+    if session_id in chat_service._bound_providers:
+        del chat_service._bound_providers[session_id]
     if session_id in chat_service._last_activity:
         del chat_service._last_activity[session_id]
 

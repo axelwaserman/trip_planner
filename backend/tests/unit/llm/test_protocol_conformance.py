@@ -1,9 +1,10 @@
 """Protocol conformance tests for the LLMProvider abstraction (Phase 4.5).
 
-When Wave 1 lands ``app/llm/protocol.py`` defining the ``LLMProvider`` and
-``BoundProvider`` ``Protocol``s, AND Wave 2 lands the four concrete provider
-classes (Ollama / LM Studio / OpenAI / Anthropic), this test asserts that each
-class structurally satisfies the runtime-checkable Protocol.
+Asserts that each concrete provider class structurally satisfies the
+``@runtime_checkable`` ``LLMProvider`` Protocol, and that no concrete provider
+class accidentally also satisfies the ``BoundProvider`` Protocol — only the
+runnable returned by ``LLMProvider.bind_tools(...)`` should match
+``BoundProvider``.
 
 Per RESEARCH.md §"Pattern 1: Two-Protocol Shape" the contract is:
 
@@ -23,25 +24,54 @@ The Protocols are NOT subclasses of ``BaseChatModel`` — they are structural,
 duck-typed surfaces. The ``BoundProvider`` Protocol exists separately because
 ``BaseChatModel.bind_tools(...)`` returns ``Runnable[LanguageModelInput, AIMessage]``,
 NOT a ``BaseChatModel`` (verified against installed ``langchain-core`` 1.x).
-
-Wave 0 stub: skip with the future-truth annotation. Wave 1 replaces the skip body
-with ``isinstance(provider, LLMProvider)`` for each concrete provider class.
 """
 
 import pytest
 
+from app.llm.protocol import BoundProvider, LLMProvider
+from app.llm.providers.anthropic import AnthropicProvider
+from app.llm.providers.ollama import OllamaProvider
+from app.llm.providers.openai import OpenAIProvider
+
 pytestmark = pytest.mark.unit
 
 
-def test_protocols_are_runtime_checkable() -> None:
-    """LLMProvider and BoundProvider are runtime_checkable Protocols.
+def test_ollama_provider_satisfies_llm_provider_protocol() -> None:
+    """``isinstance(OllamaProvider(...), LLMProvider)`` is True."""
+    provider = OllamaProvider(
+        model="qwen3:4b", base_url="http://localhost:11434", probe_timeout_seconds=1.5
+    )
+    assert isinstance(provider, LLMProvider)
 
-    Wave 1 future-truth assertions:
-        - ``isinstance(OllamaProvider(...), LLMProvider) is True``
-        - ``isinstance(OpenAIProvider(...), LLMProvider) is True``
-        - ``isinstance(AnthropicProvider(...), LLMProvider) is True``
-        - ``BoundProvider`` does NOT inherit ``bind_tools`` (the bound Runnable
-          returned by ``LangChain.bind_tools`` exposes ``ainvoke`` + ``astream`` only).
-        - ``LLMProvider`` is NOT a subclass of ``BaseChatModel`` — it's structural.
+
+def test_openai_provider_satisfies_llm_provider_protocol() -> None:
+    """``isinstance(OpenAIProvider(...), LLMProvider)`` is True."""
+    provider = OpenAIProvider(model="gpt-4o-mini", api_key="sk-test")
+    assert isinstance(provider, LLMProvider)
+
+
+def test_anthropic_provider_satisfies_llm_provider_protocol() -> None:
+    """``isinstance(AnthropicProvider(...), LLMProvider)`` is True."""
+    provider = AnthropicProvider(
+        model="claude-3-5-sonnet-20241022", api_key="sk-ant-test"
+    )
+    assert isinstance(provider, LLMProvider)
+
+
+def test_raw_providers_do_not_satisfy_bound_provider_protocol() -> None:
+    """Raw providers are NOT BoundProviders — only the result of bind_tools is.
+
+    Each raw provider exposes ``bind_tools`` (an LLMProvider member) but the
+    BoundProvider Protocol requires ``ainvoke`` + ``astream``. The structural
+    isinstance check fails because the raw classes have neither.
     """
-    pytest.skip("Wave 1 implements LLMProvider + BoundProvider Protocols")
+    ollama = OllamaProvider(
+        model="qwen3:4b", base_url="http://localhost:11434", probe_timeout_seconds=1.5
+    )
+    openai = OpenAIProvider(model="gpt-4o-mini", api_key="sk-test")
+    anthropic = AnthropicProvider(
+        model="claude-3-5-sonnet-20241022", api_key="sk-ant-test"
+    )
+    assert not isinstance(ollama, BoundProvider)
+    assert not isinstance(openai, BoundProvider)
+    assert not isinstance(anthropic, BoundProvider)
