@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
-status: planning
+status: executing
 stopped_at: Phase 4.4 context gathered
-last_updated: "2026-05-17T06:21:49.240Z"
-last_activity: 2026-05-16
+last_updated: "2026-05-17T08:13:35.728Z"
+last_activity: 2026-05-17 -- Phase 04.4 execution started
 progress:
   total_phases: 15
   completed_phases: 1
-  total_plans: 6
+  total_plans: 8
   completed_plans: 6
   percent: 7
 ---
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** A user can authenticate via a real login page, pick an LLM provider (a local Ollama model discovered from the host, or a cloud provider via API key), hold a natural conversation with the agent, watch it reason and call travel tools live, and trust that the results are structured, sanitized, and rendered usefully.
-**Current focus:** Phase 4.4 — mock chat in tests
+**Current focus:** Phase 04.4 — mock-chat-in-tests
 
 ## Current Position
 
-Phase: 4.4
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-05-16
+Phase: 04.4 (mock-chat-in-tests) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 04.4
+Last activity: 2026-05-17 -- Phase 04.4 execution started
 
 Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases fully complete: 2, 3; Phase 1 and Phase 4.1 partial)
 
