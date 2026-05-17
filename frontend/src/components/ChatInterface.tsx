@@ -1,16 +1,16 @@
-import { Box, Button, Flex, Input, Stack, Text } from '@chakra-ui/react'
+import { Box, Button, Flex, IconButton, Input, Stack, Text } from '@chakra-ui/react'
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Cpu, Settings as SettingsIcon } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
 import { ThinkingCard } from './ThinkingCard'
-import { ProviderSelector } from './ProviderSelector'
 import { SelectorErrorBanner } from './chat/SelectorErrorBanner'
 import { UserMenu } from './chat/UserMenu'
 import { useChat } from '../hooks/useChat'
 import { apiFetch } from '../lib/auth'
-import type { ProviderErrorView } from '../lib/providerErrors'
 
 export function ChatInterface() {
   const {
@@ -20,23 +20,11 @@ export function ChatInterface() {
     currentModel,
     providerError,
     sendMessage,
-    handleProviderChange,
     retryProvider,
   } = useChat()
+  const navigate = useNavigate()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [username, setUsername] = useState<string>('')
-  const [selectorError, setSelectorError] = useState<ProviderErrorView | null>(null)
-  const activeError = providerError ?? selectorError
-
-  const handleSelectorChange = (provider: string, model: string) => {
-    setSelectorError(null)
-    handleProviderChange(provider, model)
-  }
-
-  const handleRetry = () => {
-    setSelectorError(null)
-    retryProvider()
-  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -98,22 +86,48 @@ export function ChatInterface() {
               Ask me anything about planning your trip!
             </Text>
           </Box>
-          <Box>
-            <ProviderSelector
-              onProviderChange={handleSelectorChange}
-              onProviderError={setSelectorError}
-              initialProvider={currentProvider}
-              initialModel={currentModel}
-            />
-          </Box>
+          <Flex align="center" gap="2">
+            {/* Active-model badge — D-23 + UI-SPEC §"ChatInterface modifications".
+                The whole element is a button so keyboard users can reach it
+                with Tab + Enter. Click navigates to /settings/providers. */}
+            <Box
+              as="button"
+              onClick={() => navigate('/settings/providers')}
+              bg="bg.canvas"
+              borderWidth="1px"
+              borderColor="border.subtle"
+              borderRadius="full"
+              px="3"
+              py="1"
+              fontSize="13px"
+              color="fg.secondary"
+              display="inline-flex"
+              alignItems="center"
+              gap="2"
+              cursor="pointer"
+              title={`This conversation is using ${currentProvider} · ${currentModel}. Switch in Settings.`}
+            >
+              <Cpu size={14} />
+              {currentProvider} · {currentModel}
+            </Box>
+            {/* Settings nav link — D-19. Plan 08b removes this in favor of a
+                Sidebar entry; here only because 08 ships before Sidebar exists. */}
+            <Link to="/settings/providers" aria-label="Open settings">
+              <IconButton
+                aria-label="Settings"
+                variant="ghost"
+                size="sm"
+                type="button"
+              >
+                <SettingsIcon size={20} />
+              </IconButton>
+            </Link>
+          </Flex>
         </Flex>
-        <Flex justify="space-between" align="center">
-          <Text fontSize="xs" color="gray.500">
-            Using: {currentProvider} / {currentModel}
-          </Text>
+        <Flex justify="flex-end" align="center">
           {username && <UserMenu username={username} />}
         </Flex>
-        <SelectorErrorBanner error={activeError} onRetry={handleRetry} />
+        <SelectorErrorBanner error={providerError} onRetry={retryProvider} />
       </Box>
 
       {/* Messages */}
