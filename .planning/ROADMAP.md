@@ -142,6 +142,17 @@ Plans:
   4. `LLMProviderFactory` builds a provider from session-scoped config; `ChatService` accepts a provider via DI rather than a bare `BaseChatModel`.
   5. `validate_config` surfaces missing API keys as clear 400 errors at session creation; the UI displays the error.
   6. Happy-path acceptance test exists for each real cloud provider, gated on the corresponding API key being present in the test environment (skipped in default PR CI).
+**Plans**: 9 plans across 6 waves
+Plans:
+- [ ] 04.5-01-PLAN.md — Wave 0: deps + test scaffolds (langchain-openai/anthropic; backend/tests/unit/llm/ stubs; tests/integration/test_cloud_providers_real.py skipif)
+- [ ] 04.5-02-PLAN.md — Wave 1: Protocol + errors + factory skeleton + SessionCreateRequest validators (app/llm/{protocol,errors,factory}.py; SSRF + key-length guards)
+- [ ] 04.5-03-PLAN.md — Wave 2: OllamaProvider implementation + dynamic /api/tags discovery
+- [ ] 04.5-04-PLAN.md — Wave 2: OpenAIProvider implementation (real cloud via langchain_openai)
+- [ ] 04.5-05-PLAN.md — Wave 2: AnthropicProvider implementation (real cloud via langchain_anthropic; Pitfall 2 guard)
+- [ ] 04.5-06-PLAN.md — Wave 3: LLMProviderFactory.build + ChatService rewire (async create_session, per-session bound providers) + lifespan rewire + POST /api/chat/session payload extension
+- [ ] 04.5-07-PLAN.md — Wave 4: providerErrors.ts F5 + useChat extended payload + provider_settings localStorage migration
+- [ ] 04.5-08-PLAN.md — Wave 4: ProviderCard + SettingsProviders page + ChatInterface badge + /settings/providers route + manual UAT
+- [ ] 04.5-09-PLAN.md — Wave 5: real cloud acceptance tests (gated) + delete app/services/provider_probe.py
 **UI hint**: yes
 
 ### Phase 4.6: Vendor-Neutral Tool JSON
@@ -249,7 +260,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.2. Unbreak the App | v1 | 0 / TBD | Not started | - |
 | 4.3. CI Reset | v1 | 7/7 | Complete   | 2026-05-16 |
 | 4.4. Mock Chat in Tests | v1 | 0 / TBD | Not started | - |
-| 4.5. LLM Provider Abstraction (real) | v1 | 0 / TBD | Not started | - |
+| 4.5. LLM Provider Abstraction (real) | v1 | 0 / 9 | Not started | - |
 | 4.6. Vendor-Neutral Tool JSON | v1 | 0 / TBD | Not started | - |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / TBD | Not started | - |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / TBD | Not started | - |
