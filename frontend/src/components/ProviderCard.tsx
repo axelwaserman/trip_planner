@@ -277,24 +277,23 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
 
         <Field.Root>
           <Field.Label htmlFor={`${fieldId}-model`}>Model</Field.Label>
-          <Box
-            as="select"
+          <select
             id={`${fieldId}-model`}
             value={model}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-              setModel(e.target.value)
-            }
+            onChange={(e) => setModel(e.target.value)}
             disabled={meta.models.length === 0}
-            w="100%"
-            px="3"
-            py="2"
-            borderRadius="md"
-            borderWidth="1px"
-            borderColor="border.subtle"
-            bg="bg.surface"
-            color="fg.primary"
-            fontSize="14px"
-            fontFamily="body"
+            style={{
+              width: '100%',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              borderWidth: '1px',
+              borderStyle: 'solid',
+              borderColor: 'var(--chakra-colors-border-subtle)',
+              backgroundColor: 'var(--chakra-colors-bg-surface)',
+              color: 'var(--chakra-colors-fg-primary)',
+              fontSize: '14px',
+              fontFamily: 'var(--chakra-fonts-body)',
+            }}
           >
             {meta.models.length === 0 && meta.emptyOption ? (
               <option disabled value="">
@@ -307,7 +306,7 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
                 </option>
               ))
             )}
-          </Box>
+          </select>
         </Field.Root>
 
         <Flex justify="flex-end" mt="2">

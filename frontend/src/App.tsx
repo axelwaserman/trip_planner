@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { ChatInterface } from './components/ChatInterface'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { Login } from './pages/Login'
+import { SettingsProviders } from './pages/SettingsProviders'
 
 function App() {
   return (
@@ -12,6 +13,14 @@ function App() {
         element={
           <RequireAuth>
             <ChatInterface />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/settings/providers"
+        element={
+          <RequireAuth>
+            <SettingsProviders />
           </RequireAuth>
         }
       />
