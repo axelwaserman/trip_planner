@@ -14,8 +14,6 @@ from fastapi.testclient import TestClient
 from app.api.main import app
 from app.api.routes.auth import create_access_token
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture
 def client() -> Generator[TestClient]:

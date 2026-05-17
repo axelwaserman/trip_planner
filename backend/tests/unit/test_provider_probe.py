@@ -9,12 +9,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import pytest
 
 from app.services.provider_probe import ProbeErrorCode, probe_provider
-
-pytestmark = pytest.mark.unit
-
 
 # ---------------------------------------------------------------------------
 # Helpers
