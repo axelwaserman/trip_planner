@@ -147,7 +147,7 @@ Plans:
   9. A minimal log scrubber redacts `api_key` JSON fields and `sk-…` / `sk-ant-…` substring patterns from logs in 4.5; processor-based scrubbing is deferred to Phase 8.
 **Plans**: 11 plans across 6 waves
 Plans:
-- [ ] 04.5-01-PLAN.md — Wave 0: deps + test scaffolds (langchain-openai/anthropic; backend/tests/unit/llm/ stubs; tests/integration/test_cloud_providers_real.py skipif)
+- [x] 04.5-01-PLAN.md — Wave 0: deps + test scaffolds (langchain-openai/anthropic; backend/tests/unit/llm/ stubs; tests/integration/test_cloud_providers_real.py skipif)
 - [ ] 04.5-02-PLAN.md — Wave 1: Protocol + errors + factory skeleton + SessionCreateRequest validators (app/llm/{protocol,errors,factory}.py; SSRF + key-length guards)
 - [ ] 04.5-02b-PLAN.md — Wave 1: minimal API-key log scrubber per D-10 (app/llm/log_scrubbing.py + lifespan wiring; sequenced after Plan 06 for the wiring task)
 - [ ] 04.5-03-PLAN.md — Wave 2: OllamaProvider implementation + dynamic /api/tags discovery
@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.2. Unbreak the App | v1 | 0 / TBD | Not started | - |
 | 4.3. CI Reset | v1 | 7/7 | Complete   | 2026-05-16 |
 | 4.4. Mock Chat in Tests | v1 | 0 / TBD | Not started | - |
-| 4.5. LLM Provider Abstraction (real) | v1 | 0 / 10 | Not started | - |
+| 4.5. LLM Provider Abstraction (real) | v1 | 1/13 | In Progress|  |
 | 4.6. Vendor-Neutral Tool JSON | v1 | 0 / TBD | Not started | - |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / TBD | Not started | - |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / TBD | Not started | - |
