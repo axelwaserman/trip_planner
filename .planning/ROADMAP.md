@@ -129,6 +129,10 @@ Plans:
   2. All chat tests in `unit/` and `integration/` consume the mock; no chat test in the default suite calls a real Ollama instance.
   3. The `slow` pytest marker is removed (`pyproject.toml` `addopts` updated). Default `pytest` is fast and offline.
   4. README / `CLAUDE.md` describe what unit / integration / e2e tests *contain* by purpose, not just by directory.
+**Plans**: 2 plans across 1 wave
+Plans:
+- [ ] 04.4-01-PLAN.md — Wave 1: MockLLM fixture + three locked test scenarios; delete dead mock_llm.py and .skip files
+- [ ] 04.4-02-PLAN.md — Wave 1: Strip four custom pytest markers + expand CLAUDE.md test-structure docs to collaborator-scope taxonomy
 
 ### Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)
 **Goal**: The provider layer supports a real cloud LLM via API key and a dynamically-discovered local Ollama model, both selectable per session.
