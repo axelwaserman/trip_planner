@@ -113,3 +113,48 @@ class LLMProviderFactory:
                 )
             case _:
                 raise ValueError(f"Unknown provider: {config.provider}")
+
+    async def refresh_local_models(self) -> dict[str, list[str] | None]:
+        """Re-discover all local providers in parallel (D-06).
+
+        Per D-06, ``POST /api/providers/refresh`` re-runs ``OllamaProvider.list_models``
+        and ``LMStudioProvider.list_models`` against the configured base URLs.
+        Cloud providers are no-ops here; their curated lists live elsewhere.
+
+        Returns a dict mapping each local provider name to its discovered models,
+        or ``None`` when the daemon was unreachable. Per RESEARCH.md Pitfall 6,
+        ``asyncio.gather(..., return_exceptions=True)`` ensures one slow daemon
+        does not block the other.
+        """
+        import asyncio
+
+        # Build local provider instances. ``model=""`` is intentional —
+        # ``list_models`` does not consult ``self._model``. The probe_timeout
+        # from Settings caps each call.
+        ollama = OllamaProvider(
+            model="",
+            base_url=self._settings.ollama_base_url,
+            probe_timeout_seconds=self._settings.provider_probe_timeout_seconds,
+        )
+        lmstudio = LMStudioProvider(
+            model="",
+            base_url=self._settings.lmstudio_base_url,
+            probe_timeout_seconds=self._settings.provider_probe_timeout_seconds,
+        )
+        local_providers: list[tuple[str, OllamaProvider | LMStudioProvider]] = [
+            ("ollama", ollama),
+            ("lmstudio", lmstudio),
+        ]
+
+        results = await asyncio.gather(
+            *(p.list_models() for _, p in local_providers),
+            return_exceptions=True,
+        )
+
+        cache: dict[str, list[str] | None] = {}
+        for (name, _), result in zip(local_providers, results, strict=True):
+            if isinstance(result, BaseException):
+                cache[name] = None
+            else:
+                cache[name] = list(result)
+        return cache

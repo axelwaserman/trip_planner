@@ -237,3 +237,81 @@ class StreamEvent(BaseModel):
     tool_args: dict[str, Any] | None = Field(default=None, description="Tool arguments (for tool_call)")
     tool_result: str | None = Field(default=None, description="Tool result text (for tool_result)")
     elapsed_ms: int | None = Field(default=None, description="Execution time in ms (for tool_result)")
+
+
+# ============================================================================
+# Provider Discovery / Test / Sessions API Models (Plan 04.5-06b)
+# ============================================================================
+
+
+class ProviderRefreshEntry(BaseModel):
+    """Single provider entry in the refresh response (D-06)."""
+
+    name: str = Field(..., description="Provider name (e.g., 'ollama', 'lmstudio').")
+    models: list[str] = Field(default_factory=list, description="Discovered model ids; empty when unreachable.")
+    available: bool = Field(..., description="True when the last refresh attempt succeeded for this provider.")
+    error: str | None = Field(
+        default=None,
+        description="Wire-level error code when unreachable (e.g., 'provider_unreachable').",
+    )
+
+
+class ProviderRefreshResponse(BaseModel):
+    """Response shape for POST /api/providers/refresh (D-06)."""
+
+    providers: list[ProviderRefreshEntry] = Field(..., description="One entry per local provider class.")
+
+
+class ProviderTestRequest(BaseModel):
+    """Request payload for POST /api/providers/{provider}/test (D-14).
+
+    api_key length is bounded to 256 chars (mirrors SessionCreateRequest's
+    validator) so pathological inputs cannot exhaust memory or downstream
+    cloud APIs. Whitespace is stripped before length validation.
+    """
+
+    api_key: str = Field(..., min_length=1, description="Cloud provider API key to validate.")
+    model: str | None = Field(
+        default=None,
+        description="Optional model id; required for the Anthropic test path (researcher A8).",
+    )
+
+    @field_validator("api_key")
+    @classmethod
+    def _strip_and_bound_api_key(cls, v: str) -> str:
+        """Strip whitespace, raise on empty-after-strip, cap length at 256 chars."""
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("api_key must not be empty after whitespace stripping")
+        if len(stripped) > 256:
+            raise ValueError("api_key exceeds maximum length (256 chars)")
+        return stripped
+
+
+class ProviderTestResponse(BaseModel):
+    """Success response for POST /api/providers/{provider}/test (D-14).
+
+    Failure paths raise HTTPException with a ProbeError detail; this model
+    is only emitted on a 200 success.
+    """
+
+    status: Literal["ok"] = Field(..., description="Always 'ok' on the success path.")
+
+
+class ChatSessionInfo(BaseModel):
+    """One session entry returned by GET /api/chat/sessions (D-22, D-27)."""
+
+    session_id: str = Field(..., description="Server-generated UUID for this session.")
+    provider: str = Field(..., description="Wire-level provider name (e.g., 'ollama').")
+    model: str = Field(..., description="Per-provider model identifier.")
+    created_at: str = Field(..., description="ISO 8601 UTC timestamp.")
+    first_message_preview: str | None = Field(
+        default=None,
+        description="First HumanMessage content, truncated to 80 chars; None if session has no messages yet.",
+    )
+
+
+class ChatSessionsListResponse(BaseModel):
+    """Response shape for GET /api/chat/sessions (D-22, D-27)."""
+
+    sessions: list[ChatSessionInfo] = Field(..., description="Sessions owned by the authenticated user.")
