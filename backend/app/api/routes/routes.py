@@ -108,6 +108,38 @@ async def chat(
     )
 
 
+# Plan 04.5-06b — local providers Ollama and LM Studio share the discovery
+# cache populated by POST /api/providers/refresh and lazy-read by GET /api/providers.
+_LOCAL_PROVIDER_NAMES: tuple[str, ...] = ("ollama", "lmstudio")
+
+
+def _resolve_allowed_cloud_models(
+    *,
+    provider: str,
+    curated: dict[str, dict[str, list[str] | bool]],
+) -> list[str] | None:
+    """Allowed-model list for cloud providers (curated frozen list).
+
+    Local providers (``ollama``, ``lmstudio``) do NOT use route-level model
+    validation — a request with an unknown model passes the route layer and
+    the per-provider ``validate_config`` returns the structured
+    ``MODEL_NOT_INSTALLED`` ProbeError on probe. That structured error has
+    actionable copy + inline-code chips (``ollama pull <model>``) the frontend
+    SelectorErrorBanner renders. A route-level "Invalid model" string would
+    short-circuit the probe and lose that UX, AND would block legitimate
+    daemon-side models that aren't in any curated list (the bug this UAT
+    round-3 fix addresses).
+
+    For cloud providers there is no live probe yet (deferred to the
+    Test-connection plan), so the curated frozen list still governs —
+    typos surface as a 400 here rather than burning quota.
+    """
+    if provider in _LOCAL_PROVIDER_NAMES:
+        return None  # Probe owns this — see docstring.
+    models = curated[provider]["models"]
+    return list(models) if isinstance(models, list) else None
+
+
 @router.post("/api/chat/session", status_code=status.HTTP_201_CREATED)
 async def create_session(
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -123,6 +155,15 @@ async def create_session(
     :class:`app.llm.errors.ProbeError` surfaces as 502 (provider_unreachable)
     or 400 (everything else) — the 4.2 wire contract is preserved bit-for-bit.
 
+    Model validation note (UAT round-3): for local providers (``ollama``,
+    ``lmstudio``) we DO NOT enforce a route-level model whitelist — the
+    per-provider probe owns that decision and surfaces a structured
+    ``MODEL_NOT_INSTALLED`` ProbeError when the daemon doesn't have the
+    requested model. The previous behaviour rejected legitimate
+    daemon-installed models (e.g. ``qwen3.5:9b``) that weren't in the
+    curated frozen list. Cloud providers (``openai``, ``anthropic``) still
+    use the curated list since they have no live probe today.
+
     Args:
         request: Session creation request with optional provider/model/base_url/api_key.
         chat_service: Injected ChatService instance.
@@ -133,9 +174,9 @@ async def create_session(
     if request is None:
         request = SessionCreateRequest()
 
-    # Defense-in-depth: validate provider name + curated model list at the route
-    # boundary, before reaching the factory. Catches typos in the payload before
-    # the factory's match-default branch raises ValueError.
+    # Defense-in-depth: validate provider name at the route boundary; the
+    # model existence check is delegated to the per-provider probe for local
+    # providers (see docstring + _resolve_allowed_cloud_models).
     if request.provider:
         providers = settings.get_available_providers()
         if request.provider not in providers:
@@ -143,12 +184,16 @@ async def create_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid provider: {request.provider}. Available: {list(providers.keys())}",
             )
-        models = providers[request.provider]["models"]
-        if request.model and isinstance(models, list) and request.model not in models:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid model {request.model} for provider {request.provider}",
+
+        if request.model:
+            allowed_models = _resolve_allowed_cloud_models(
+                provider=request.provider, curated=providers
             )
+            if allowed_models is not None and request.model not in allowed_models:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid model {request.model} for provider {request.provider}",
+                )
 
     # Default fallbacks live here (moved out of ChatService — SessionLLMConfig
     # requires non-None provider/model). NOTE: a follow-up phase wires
@@ -231,9 +276,8 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-# Plan 04.5-06b — local providers Ollama and LM Studio share the discovery
-# cache populated by POST /api/providers/refresh and lazy-read by GET /api/providers.
-_LOCAL_PROVIDER_NAMES: tuple[str, ...] = ("ollama", "lmstudio")
+# (Plan 04.5-06b — _LOCAL_PROVIDER_NAMES is now declared above the
+# _resolve_allowed_models helper so the create_session route can reach it.)
 
 
 @router.get("/api/providers")

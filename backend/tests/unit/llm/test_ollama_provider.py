@@ -107,6 +107,45 @@ async def test_validate_config_returns_none_when_model_present(
     assert result is None
 
 
+def test_model_supports_reasoning_matches_configured_prefixes() -> None:
+    """Reasoning-prefix matching gates whether ``ChatOllama`` is constructed with
+    ``reasoning=True``. Models matching one of the configured prefixes get
+    thinking-token streaming; others don't (preventing the daemon's HTTP 400
+    ``"<model>" does not support thinking`` for non-thinking families like
+    mistral / llama3).
+    """
+    # Default-prefix provider (qwen3, deepseek-r1).
+    qwen = OllamaProvider(
+        model="qwen3:4b", base_url="http://x", probe_timeout_seconds=1.0
+    )
+    deepseek = OllamaProvider(
+        model="deepseek-r1:8b", base_url="http://x", probe_timeout_seconds=1.0
+    )
+    qwen35 = OllamaProvider(
+        model="qwen3.5:9b", base_url="http://x", probe_timeout_seconds=1.0
+    )
+    mistral = OllamaProvider(
+        model="mistral:7b", base_url="http://x", probe_timeout_seconds=1.0
+    )
+    llama = OllamaProvider(
+        model="llama3:8b", base_url="http://x", probe_timeout_seconds=1.0
+    )
+    assert qwen._model_supports_reasoning() is True
+    assert deepseek._model_supports_reasoning() is True
+    assert qwen35._model_supports_reasoning() is True  # qwen3.5 starts with qwen3
+    assert mistral._model_supports_reasoning() is False
+    assert llama._model_supports_reasoning() is False
+
+    # Custom-prefix provider — env-var override path.
+    custom = OllamaProvider(
+        model="hermes:7b",
+        base_url="http://x",
+        probe_timeout_seconds=1.0,
+        reasoning_model_prefixes=("hermes",),
+    )
+    assert custom._model_supports_reasoning() is True
+
+
 async def test_list_models_returns_sorted_unique_ids_from_api_tags() -> None:
     """``OllamaProvider.list_models`` returns sorted, deduped model ids from ``/api/tags``.
 

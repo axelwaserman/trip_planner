@@ -54,6 +54,19 @@ class Settings(BaseSettings):
     # pulled a new model and forgot to click Refresh" UX against thrashing localhost.
     provider_models_cache_ttl_seconds: int = 60
 
+    # Reasoning-model name prefixes for Ollama. ChatOllama(reasoning=True) only
+    # works for models that emit thinking tokens (qwen3, deepseek-r1, …). Passing
+    # reasoning=True to a model that does not support it produces an HTTP 400
+    # from the daemon ('"<model>" does not support thinking'). The OllamaProvider
+    # consults this list at bind_tools() time and only sets reasoning=True when
+    # the model name starts with one of these prefixes. Defaults cover the
+    # families that ship reasoning today; override via OLLAMA_REASONING_MODEL_PREFIXES
+    # (comma-separated) if a new family lands.
+    ollama_reasoning_model_prefixes: tuple[str, ...] = (
+        "qwen3",
+        "deepseek-r1",
+    )
+
     def model_post_init(self, __context: object) -> None:
         """Emit a warning when the JWT secret is still the insecure default."""
         if self.jwt_secret == _DEFAULT_JWT_SECRET:

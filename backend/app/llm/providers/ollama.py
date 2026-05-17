@@ -5,12 +5,15 @@ the Protocol is ``@runtime_checkable`` and satisfied via duck typing).
 
 Behaviour notes:
 
-- ``bind_tools`` constructs ``ChatOllama(..., reasoning=True)`` so qwen3 thinking
-  tokens continue to flow into ``chunk.additional_kwargs["reasoning_content"]``
-  downstream. ``app.chat.ChatService.chat_stream`` consumes that key and emits
-  ``thinking`` SSE events from it. This wiring preserves the production
-  behaviour in ``app/api/main.py:41`` where ``init_chat_model(..., reasoning=True)``
-  is invoked today.
+- ``bind_tools`` constructs ``ChatOllama(..., reasoning=<bool>)`` where
+  ``reasoning`` is decided at bind-time based on whether the configured model
+  name matches one of ``Settings.ollama_reasoning_model_prefixes``. qwen3 and
+  deepseek-r1 emit thinking tokens; mistral / llama3 / most others do not.
+  Passing ``reasoning=True`` to a non-thinking model yields HTTP 400 from the
+  daemon (``'"<model>" does not support thinking'``) — this gating prevents
+  that. ``app.chat.ChatService.chat_stream`` consumes the optional reasoning
+  field via ``chunk.additional_kwargs["reasoning_content"]`` regardless;
+  non-thinking models simply produce no thinking SSE events.
 
 - **Pitfall 7 (RESEARCH.md):** reasoning tokens are an Ollama-only concern in
   Phase 4.5. The :class:`app.llm.protocol.LLMProvider` Protocol intentionally
@@ -56,10 +59,28 @@ class OllamaProvider:
     payload-derived ``base_url`` or the ``Settings`` fallback per D-08.
     """
 
-    def __init__(self, model: str, base_url: str, probe_timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        model: str,
+        base_url: str,
+        probe_timeout_seconds: float,
+        reasoning_model_prefixes: tuple[str, ...] = ("qwen3", "deepseek-r1"),
+    ) -> None:
         self._model = model
         self._base_url = base_url
         self._probe_timeout = probe_timeout_seconds
+        self._reasoning_model_prefixes = reasoning_model_prefixes
+
+    def _model_supports_reasoning(self) -> bool:
+        """Whether the configured model emits thinking tokens.
+
+        Ollama's wire protocol surfaces ``reasoning=True`` as an unconditional
+        request to receive thinking-token output; daemons reject the request
+        with HTTP 400 when the model does not support it. We match the model
+        name (``qwen3:4b``, ``deepseek-r1:8b``, …) against the configured
+        prefix list — same approach OpenAI uses for their o-series detection.
+        """
+        return any(self._model.startswith(prefix) for prefix in self._reasoning_model_prefixes)
 
     def get_provider_name(self) -> str:
         return "ollama"
@@ -116,18 +137,23 @@ class OllamaProvider:
     def bind_tools(self, tools: Sequence[BaseTool]) -> BoundProvider:
         """Construct a tool-bound runnable that streams via ``ChatOllama``.
 
-        ``reasoning=True`` keeps qwen3 thinking tokens flowing through
-        ``chunk.additional_kwargs["reasoning_content"]`` — see module docstring
-        and Pitfall 7. The returned ``Runnable[LanguageModelInput, AIMessage]``
-        structurally satisfies :class:`BoundProvider` (it has ``ainvoke`` +
-        ``astream``); mypy can't statically verify that match because LangChain's
+        ``reasoning=`` is gated on ``_model_supports_reasoning()`` — we only
+        request thinking tokens for models whose name matches the configured
+        reasoning-prefix list (qwen3, deepseek-r1, …). Models without that
+        capability would have the daemon reject the request with HTTP 400,
+        so we just don't ask in the first place. See module docstring +
+        Pitfall 7.
+
+        The returned ``Runnable[LanguageModelInput, AIMessage]`` structurally
+        satisfies :class:`BoundProvider` (it has ``ainvoke`` + ``astream``);
+        mypy can't statically verify that match because LangChain's
         ``Runnable`` is a generic class, not a Protocol — hence the targeted
         ``type: ignore``.
         """
         llm = ChatOllama(
             model=self._model,
             base_url=self._base_url,
-            reasoning=True,  # qwen3 thinking tokens — preserves api/main.py:41 behaviour
+            reasoning=self._model_supports_reasoning(),
         )
         # mypy can't statically prove Runnable[LanguageModelInput, AIMessage]
         # matches the BoundProvider Protocol; @runtime_checkable confirms it

@@ -94,6 +94,7 @@ class LLMProviderFactory:
                     model=config.model,
                     base_url=config.base_url or self._settings.ollama_base_url,
                     probe_timeout_seconds=self._settings.provider_probe_timeout_seconds,
+                    reasoning_model_prefixes=self._settings.ollama_reasoning_model_prefixes,
                 )
             case "openai":
                 return OpenAIProvider(

@@ -137,3 +137,56 @@ def test_session_create_succeeds_when_ollama_probe_passes(
     assert "session_id" in body
     assert body["provider"] == "ollama"
     assert body["model"] == "qwen3:4b"
+
+
+def test_session_create_accepts_model_outside_curated_list_when_daemon_has_it(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UAT round-3 regression guard: a daemon-installed model NOT in the curated
+    frozen list (e.g. ``qwen3.5:9b`` after the user pulled it) must succeed.
+
+    Previous behaviour: route-level whitelist rejected with 400 "Invalid model"
+    before the probe could run, locking users out of any model not hand-listed
+    in ``Settings.get_available_providers()``. New behaviour: the route does
+    not enforce a model whitelist for local providers — the per-provider probe
+    consults ``/api/tags`` and surfaces structured ``MODEL_NOT_INSTALLED`` only
+    when the daemon actually doesn't have the model.
+    """
+    monkeypatch.setattr(
+        httpx.AsyncClient,
+        "get",
+        AsyncMock(
+            return_value=_make_tags_response(
+                [{"name": "qwen3.5:9b", "model": "qwen3.5:9b"}],
+            ),
+        ),
+    )
+
+    response = client.post(
+        "/api/chat/session",
+        headers=auth_headers,
+        json={"provider": "ollama", "model": "qwen3.5:9b"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["model"] == "qwen3.5:9b"
+
+
+def test_session_create_rejects_unknown_provider_at_route_layer(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Unknown provider name still rejected at the route boundary (defense-in-depth).
+
+    UAT round-3 only relaxed the model whitelist; the provider whitelist stays
+    enforced because a typo there would otherwise reach the factory's
+    match-default branch.
+    """
+    response = client.post(
+        "/api/chat/session",
+        headers=auth_headers,
+        json={"provider": "made-up-provider", "model": "anything"},
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert "Invalid provider" in body["detail"]
