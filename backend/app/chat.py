@@ -1,57 +1,87 @@
-"""Chat service using LangChain with tool calling."""
+"""Chat service using LangChain with tool calling.
+
+Per Phase 4.5 Plan 06, ``ChatService`` no longer holds a singleton bound LLM.
+Instead, it owns a per-app :class:`app.llm.factory.LLMProviderFactory` and a
+``self._bound_providers`` dict keyed by ``session_id``. ``create_session`` is
+``async`` because it absorbs the 4.2 provider-probe step (now per-provider via
+:meth:`app.llm.protocol.LLMProvider.validate_config`) — the sequence is
+``factory.build → validate_config → bind_tools → store``.
+
+The 4.2 default fallbacks (``provider="ollama"``, ``model="qwen3:4b"``) live
+in the route layer (``app.api.routes.routes.create_session``); the
+:class:`app.llm.factory.SessionLLMConfig` dataclass requires both fields to be
+non-``None`` at construction.
+"""
 
 import time
 import uuid
 from collections.abc import AsyncGenerator
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
+from app.llm.errors import ProbeError
+from app.llm.factory import LLMProviderFactory, SessionLLMConfig
+from app.llm.protocol import BoundProvider
 from app.models import StreamEvent
 from app.tools.flight_client import FlightAPIClient
 from app.tools.flight_search import search_flights
 
 
 class ChatService:
-    """Service for managing chat conversations with LangChain and tool calling."""
+    """Service for managing chat conversations with LangChain and tool calling.
 
-    def __init__(self, flight_client: FlightAPIClient, llm: BaseChatModel) -> None:
-        """Initialize the chat service with flight client and LLM.
+    Owns a per-app :class:`LLMProviderFactory` plus a per-session bound provider
+    cache. ``create_session`` is ``async`` and runs the provider probe inline;
+    on probe success the bound provider is stashed in ``self._bound_providers``
+    keyed by ``session_id`` and consumed by :meth:`chat_stream`.
+    """
+
+    def __init__(self, flight_client: FlightAPIClient, factory: LLMProviderFactory) -> None:
+        """Initialize the chat service with flight client and LLM factory.
 
         Args:
-            flight_client: Flight API client injected into the search_flights tool
-            llm: LangChain BaseChatModel instance (ChatOllama, ChatOpenAI, etc.)
+            flight_client: Flight API client injected into the search_flights tool.
+            factory: Per-app :class:`LLMProviderFactory`. Sessions construct
+                their own bound provider via :meth:`create_session`.
         """
+        self._factory = factory
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
         self._metadata: dict[str, dict[str, str]] = {}  # Session metadata (provider, model)
+        self._bound_providers: dict[str, BoundProvider] = {}
         self._last_activity: dict[str, float] = {}
 
         # Wire the tool's client dependency here so callers don't need to know internals
         search_flights._flight_client = flight_client  # type: ignore[attr-defined]
 
-        # Bind tools to LLM
-        self.llm = llm.bind_tools([search_flights])
-
-    def create_session(self, provider: str | None = None, model: str | None = None) -> str:
-        """Create a new chat session with optional provider/model selection.
+    async def create_session(self, config: SessionLLMConfig) -> tuple[str, ProbeError | None]:
+        """Create a new chat session: build provider, probe, bind tools, store.
 
         Args:
-            provider: LLM provider name (ollama, openai, anthropic)
-            model: Model name for the provider
+            config: Per-session LLM configuration (provider/model/base_url/api_key).
 
         Returns:
-            New session ID (UUID)
+            ``(session_id, None)`` on success; ``("", probe_error)`` when the
+            provider's ``validate_config`` returns a structured ``ProbeError``.
+            The route layer maps the error to an HTTP status (502 for
+            ``PROVIDER_UNREACHABLE``, 400 for everything else).
         """
+        provider = self._factory.build(config)
+        probe_error = await provider.validate_config()
+        if probe_error is not None:
+            return "", probe_error
+
+        bound = provider.bind_tools([search_flights])
         session_id = str(uuid.uuid4())
         self._histories[session_id] = InMemoryChatMessageHistory()
+        self._bound_providers[session_id] = bound
         self._metadata[session_id] = {
-            "provider": provider or "ollama",
-            "model": model or "qwen3:4b",
+            "provider": config.provider,
+            "model": config.model,
             "created_at": str(time.time()),
         }
         self._last_activity[session_id] = time.time()
-        return session_id
+        return session_id, None
 
     def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         """Get history for a session.
@@ -85,6 +115,7 @@ class ChatService:
         for session_id in expired:
             self._histories.pop(session_id, None)
             self._metadata.pop(session_id, None)
+            self._bound_providers.pop(session_id, None)
             self._last_activity.pop(session_id, None)
 
         return len(expired)
@@ -100,6 +131,7 @@ class ChatService:
             StreamEvent objects with simplified structure
         """
         history = self.get_session_history(session_id)
+        bound = self._bound_providers[session_id]
 
         # Build messages with history
         from langchain_core.messages import BaseMessage
@@ -114,7 +146,7 @@ class ChatService:
         tool_results = []
 
         # Stream LLM response
-        async for chunk in self.llm.astream(messages):
+        async for chunk in bound.astream(messages):
             # Check for reasoning_content (thinking)
             has_thinking = False
             if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
@@ -191,7 +223,7 @@ class ChatService:
 
                 # Stream the final response
                 accumulated_final = ""
-                async for final_chunk in self.llm.astream(messages_with_tools):
+                async for final_chunk in bound.astream(messages_with_tools):
                     if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
                         accumulated_final += final_chunk.content
                         yield StreamEvent(
