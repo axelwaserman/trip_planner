@@ -10,6 +10,7 @@ from app.api.routes import auth, routes
 from app.chat import ChatService
 from app.config import Settings
 from app.llm.factory import LLMProviderFactory
+from app.llm.log_scrubbing import ApiKeyScrubber, install_log_scrubber, uninstall_log_scrubber
 from app.tools.flight_client import MockFlightAPIClient
 from app.tools.flight_search import search_flights
 
@@ -31,6 +32,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         - Cleanup expired sessions.
     """
     # Startup
+    # D-10: install API-key scrubber FIRST so any secret accidentally captured
+    # by Settings() / factory init / lifespan-spawned tasks is redacted before
+    # it reaches a handler's formatter. Phase 8's structlog migration replaces
+    # this with a processor.
+    log_scrubber: ApiKeyScrubber = install_log_scrubber()
+
     settings = Settings()
 
     # Initialize flight client
@@ -57,6 +64,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Shutdown: cleanup expired sessions
     cleaned_up = chat_service.cleanup_expired_sessions(max_age_seconds=0)
     print(f"Cleaned up {cleaned_up} sessions on shutdown")
+
+    # D-10: best-effort filter cleanup. Failure to remove must not raise on shutdown.
+    uninstall_log_scrubber(log_scrubber)
 
 
 app = FastAPI(
