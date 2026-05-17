@@ -54,7 +54,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('session initialisation', () => {
-  it('creates a session with defaults when localStorage is empty', async () => {
+  it('creates a session with defaults when localStorage is empty (D-24 payload shape)', async () => {
     const fetchMock = mockSessionFetch()
     vi.stubGlobal('fetch', fetchMock)
 
@@ -65,14 +65,27 @@ describe('session initialisation', () => {
         '/api/chat/session',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ provider: 'ollama', model: 'qwen3:4b' }),
+          body: JSON.stringify({
+            provider: 'ollama',
+            model: 'qwen3:4b',
+            base_url: null,
+            api_key: null,
+          }),
         })
       )
     })
   })
 
-  it('creates a session using saved localStorage config', async () => {
-    localStorage.setItem('llm_provider_config', JSON.stringify({ provider: 'openai', model: 'gpt-4o' }))
+  it('reads provider_settings from localStorage and sends api_key for cloud providers (D-24)', async () => {
+    localStorage.setItem(
+      'provider_settings',
+      JSON.stringify({
+        selected: { provider: 'openai', model: 'gpt-4o' },
+        ollama: { base_url: 'http://localhost:11434', models: [] },
+        openai: { api_key: 'sk-test-12345', model: 'gpt-4o' },
+        anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
+      })
+    )
     const fetchMock = mockSessionFetch({ session_id: 'sess-2', provider: 'openai', model: 'gpt-4o' })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -82,10 +95,80 @@ describe('session initialisation', () => {
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/chat/session',
         expect.objectContaining({
-          body: JSON.stringify({ provider: 'openai', model: 'gpt-4o' }),
+          body: JSON.stringify({
+            provider: 'openai',
+            model: 'gpt-4o',
+            base_url: null,
+            api_key: 'sk-test-12345',
+          }),
         })
       )
     })
+  })
+
+  it('reads provider_settings and sends base_url for ollama (D-21)', async () => {
+    localStorage.setItem(
+      'provider_settings',
+      JSON.stringify({
+        selected: { provider: 'ollama', model: 'qwen3:4b' },
+        ollama: { base_url: 'http://localhost:11434', models: ['qwen3:4b'] },
+        openai: { api_key: '', model: 'gpt-4o-mini' },
+        anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
+      })
+    )
+    const fetchMock = mockSessionFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderHook(() => useChat())
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/chat/session',
+        expect.objectContaining({
+          body: JSON.stringify({
+            provider: 'ollama',
+            model: 'qwen3:4b',
+            base_url: 'http://localhost:11434',
+            api_key: null,
+          }),
+        })
+      )
+    })
+  })
+
+  it('migrates legacy llm_provider_config to provider_settings on first load (D-21)', async () => {
+    localStorage.setItem(
+      'llm_provider_config',
+      JSON.stringify({ provider: 'ollama', model: 'qwen3:4b' })
+    )
+    const fetchMock = mockSessionFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderHook(() => useChat())
+
+    await waitFor(() => {
+      // Migration ran: new key present, legacy key removed.
+      expect(localStorage.getItem('provider_settings')).not.toBeNull()
+      expect(localStorage.getItem('llm_provider_config')).toBeNull()
+    })
+
+    const migrated = JSON.parse(localStorage.getItem('provider_settings')!) as {
+      selected: { provider: string; model: string }
+    }
+    expect(migrated.selected).toEqual({ provider: 'ollama', model: 'qwen3:4b' })
+
+    // Session was still created using the migrated values.
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/chat/session',
+      expect.objectContaining({
+        body: JSON.stringify({
+          provider: 'ollama',
+          model: 'qwen3:4b',
+          base_url: 'http://localhost:11434',
+          api_key: null,
+        }),
+      })
+    )
   })
 
   it('adds an error message when session creation fails', async () => {
