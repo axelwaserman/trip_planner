@@ -98,6 +98,7 @@ export function ChatInterface() {
   const {
     messages,
     isLoading,
+    isAwaitingFirstChunk,
     currentProvider,
     currentModel,
     providerError,
@@ -371,7 +372,7 @@ export function ChatInterface() {
               )
             })
           )}
-          {isLoading && (
+          {isAwaitingFirstChunk && (
             <Flex justify="flex-start">
               <Box bg="white" px={4} py={3} rounded="lg" borderWidth="1px" borderColor="gray.200">
                 <Text color="gray.500">Thinking...</Text>

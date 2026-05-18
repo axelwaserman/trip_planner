@@ -17,6 +17,11 @@ import { readSSEStream } from './useSSEStream'
 interface UseChatReturn {
   messages: Message[]
   isLoading: boolean
+  // True between submitting a message and the first SSE event arriving back.
+  // ChatInterface shows the "Thinking..." placeholder only while this is
+  // true — once content/thinking/tool events start streaming the placeholder
+  // is redundant with the assistant bubble that's actively filling in.
+  isAwaitingFirstChunk: boolean
   sessionId: string | null
   currentProvider: string
   currentModel: string
@@ -166,6 +171,7 @@ async function createSession(
 export function useChat(): UseChatReturn {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isAwaitingFirstChunk, setIsAwaitingFirstChunk] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [currentProvider, setCurrentProvider] = useState('ollama')
   const [currentModel, setCurrentModel] = useState('qwen3:4b')
@@ -266,6 +272,7 @@ export function useChat(): UseChatReturn {
     setMessages([])
     setSessionId(null)
     setIsLoading(false)
+    setIsAwaitingFirstChunk(false)
 
     let cancelled = false
     void (async () => {
@@ -330,6 +337,7 @@ export function useChat(): UseChatReturn {
       if (!text.trim() || isLoading || !sessionId) return
 
       setIsLoading(true)
+      setIsAwaitingFirstChunk(true)
       setMessages((prev) => [...prev, { role: 'user', content: text }])
 
       try {
@@ -351,6 +359,13 @@ export function useChat(): UseChatReturn {
         // the synchronous SSE event loop, before React flushes any batched updates.
         let isStreamingAssistant = false
         let isStreamingThinking = false
+        let firstChunkSeen = false
+        const markFirstChunk = () => {
+          if (!firstChunkSeen) {
+            firstChunkSeen = true
+            setIsAwaitingFirstChunk(false)
+          }
+        }
 
         await readSSEStream(response.body, (event) => {
           if (event.type === 'error') {
@@ -363,6 +378,7 @@ export function useChat(): UseChatReturn {
           }
 
           if (event.type === 'thinking' && event.chunk) {
+            markFirstChunk()
             if (event.session_id) setSessionId(event.session_id)
             const chunk = event.chunk
             if (!isStreamingThinking) {
@@ -385,6 +401,7 @@ export function useChat(): UseChatReturn {
           }
 
           if (event.type === 'content' && event.chunk) {
+            markFirstChunk()
             if (event.session_id) setSessionId(event.session_id)
             const chunk = event.chunk
             if (!isStreamingAssistant) {
@@ -406,6 +423,7 @@ export function useChat(): UseChatReturn {
           }
 
           if (event.type === 'tool_call' && event.tool_name) {
+            markFirstChunk()
             if (event.session_id) setSessionId(event.session_id)
             setMessages((prev) => [
               ...prev,
@@ -465,6 +483,7 @@ export function useChat(): UseChatReturn {
         ])
       } finally {
         setIsLoading(false)
+        setIsAwaitingFirstChunk(false)
       }
     },
     [isLoading, sessionId]
@@ -473,6 +492,7 @@ export function useChat(): UseChatReturn {
   return {
     messages,
     isLoading,
+    isAwaitingFirstChunk,
     sessionId,
     currentProvider,
     currentModel,

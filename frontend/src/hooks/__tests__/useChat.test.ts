@@ -338,6 +338,43 @@ describe('sendMessage happy path', () => {
     expect(thinkingMsg?.content).toBe('Let me think...')
   })
 
+  it('isAwaitingFirstChunk is true while the SSE stream is en route and false once it resolves', async () => {
+    vi.stubGlobal('fetch', mockSessionFetch())
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    expect(result.current.isAwaitingFirstChunk).toBe(false)
+
+    const sseBody = makeSSEBody(
+      'data: {"type":"content","chunk":"Hi","session_id":"sess-1"}',
+      'data: {"type":"done","session_id":"sess-1"}'
+    )
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: sseBody }))
+
+    await act(async () => {
+      await result.current.sendMessage('test')
+    })
+
+    // Once the stream finished (and well past the first chunk), the flag
+    // is back to false. The "Thinking..." placeholder relies on this so it
+    // disappears as soon as the assistant bubble starts filling in.
+    expect(result.current.isAwaitingFirstChunk).toBe(false)
+  })
+
+  it('isAwaitingFirstChunk resets to false on stream error', async () => {
+    vi.stubGlobal('fetch', mockSessionFetch())
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+
+    await act(async () => {
+      await result.current.sendMessage('test')
+    })
+
+    expect(result.current.isAwaitingFirstChunk).toBe(false)
+  })
+
   it('creates a tool_execution message from a tool_call event and updates it with tool_result', async () => {
     vi.stubGlobal('fetch', mockSessionFetch())
     const { result } = renderHook(() => useChat())
