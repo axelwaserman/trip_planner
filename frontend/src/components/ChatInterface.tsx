@@ -8,7 +8,6 @@ import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
 import { ThinkingCard } from './ThinkingCard'
 import { SelectorErrorBanner } from './chat/SelectorErrorBanner'
-import { UserMenu } from './chat/UserMenu'
 import { useChat } from '../hooks/useChat'
 import { apiFetch } from '../lib/auth'
 
@@ -107,7 +106,6 @@ export function ChatInterface() {
     retryProvider,
   } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [username, setUsername] = useState<string>('')
   const [quickSwitchTick, setQuickSwitchTick] = useState(0)
   const [liveOllamaModels, setLiveOllamaModels] = useState<string[] | null>(null)
 
@@ -147,29 +145,6 @@ export function ChatInterface() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
-
-  useEffect(() => {
-    let cancelled = false
-    apiFetch('/api/auth/me')
-      .then((response) => {
-        if (cancelled || !response.ok) return
-        return response.json()
-      })
-      .then((payload: unknown) => {
-        if (cancelled || !payload) return
-        if (typeof payload === 'object' && payload !== null && 'username' in payload) {
-          const value = (payload as { username: unknown }).username
-          if (typeof value === 'string') setUsername(value)
-        }
-      })
-      .catch(() => {
-        // apiFetch already handles the 401 redirect; swallow other errors so the
-        // header just renders without a username rather than breaking the chat.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -308,9 +283,6 @@ export function ChatInterface() {
                 "Manage providers…" entry inside the active-model popover
                 remains as a secondary path to /settings/providers. */}
           </Flex>
-        </Flex>
-        <Flex justify="flex-end" align="center">
-          {username && <UserMenu username={username} />}
         </Flex>
         <SelectorErrorBanner error={providerError} onRetry={retryProvider} />
       </Box>
