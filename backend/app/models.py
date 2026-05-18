@@ -130,6 +130,159 @@ class Flight(BaseModel):
 
 
 # ============================================================================
+# Flight Search Result Models (Vendor-Neutral)
+# ============================================================================
+
+
+class FlightEndpoint(BaseModel):
+    """Departure or arrival endpoint for a flight segment.
+
+    Maps to Amadeus ``FlightEndPoint`` schema. Used for both departure and
+    arrival in each ``FlightSegment``.
+
+    Attributes:
+        iata_code: IATA airport code (3 letters, e.g. ``"LAX"``).
+        city: City name. Mock data uses the IATA code as a placeholder;
+            Phase 7 Amadeus client populates this from ``dictionaries.locations``.
+        terminal: Terminal name or number, e.g. ``"B"`` or ``"4"`` (optional).
+        at: Local ISO-8601 datetime with timezone offset (UTC for mock data).
+            Note: Amadeus returns naive local datetimes — the Phase 7 normalizer
+            must append a timezone offset from airport lookup.
+    """
+
+    iata_code: str = Field(..., min_length=3, max_length=3, description="IATA airport code")
+    city: str = Field(..., description="City name; mock uses IATA code as placeholder")
+    terminal: str | None = Field(default=None, description="Terminal name/number (optional)")
+    at: datetime = Field(..., description="Local ISO-8601 datetime with timezone (UTC for mock data)")
+
+
+class CarrierInfo(BaseModel):
+    """Airline carrier identification with both code and display name.
+
+    Attributes:
+        iata_code: IATA 2-letter airline code, e.g. ``"DL"``.
+        name: Display name, e.g. ``"Delta Air Lines"``. Resolved from Amadeus
+            ``dictionaries.carriers`` in the Phase 7 normalizer.
+    """
+
+    iata_code: str = Field(..., min_length=2, max_length=2, description="IATA 2-letter airline code, e.g. 'DL'")
+    name: str = Field(..., description="Display name, e.g. 'Delta Air Lines'")
+
+
+class PriceInfo(BaseModel):
+    """Price information using Decimal to avoid float precision loss.
+
+    Attributes:
+        amount: Total price as an exact Decimal. Float input (e.g. from
+            Skyscanner ``price.raw``) is coerced via ``Decimal(str(v))`` to
+            avoid ``Decimal(450.50) == Decimal('450.499...')`` noise.
+        currency: ISO 4217 currency code, defaults to ``"USD"``.
+    """
+
+    amount: Decimal = Field(..., description="Total price (Decimal to avoid float precision loss)")
+    currency: str = Field(default="USD", description="ISO 4217 currency code")
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def coerce_float_to_decimal(cls, v: Decimal | float | str) -> Decimal:
+        """Coerce float or string input to Decimal via str() to avoid precision loss.
+
+        Args:
+            v: Raw amount value (Decimal pass-through, float coerced via str).
+
+        Returns:
+            Exact Decimal representation of the amount.
+        """
+        if isinstance(v, Decimal):
+            return v
+        return Decimal(str(v))
+
+
+class FlightSegment(BaseModel):
+    """A single flight leg within a journey.
+
+    Maps to Amadeus ``Segment`` schema. A direct flight has exactly one segment;
+    a connecting itinerary has one segment per leg.
+
+    Attributes:
+        id: Segment identifier (from the carrier or generated for mock data).
+        departure: Departure endpoint with IATA code, city, terminal, and datetime.
+        arrival: Arrival endpoint with IATA code, city, terminal, and datetime.
+        carrier: Carrier IATA code and display name.
+        flight_number: Flight number as assigned by carrier, e.g. ``"DL412"``.
+        duration: ISO 8601 duration string, e.g. ``"PT5H30M"``.
+        number_of_stops: Number of technical stops (0 for direct). Must be >= 0.
+    """
+
+    id: str = Field(..., description="Segment identifier")
+    departure: FlightEndpoint = Field(..., description="Departure endpoint")
+    arrival: FlightEndpoint = Field(..., description="Arrival endpoint")
+    carrier: CarrierInfo = Field(..., description="Carrier IATA code and display name")
+    flight_number: str = Field(..., description="Flight number as assigned by carrier, e.g. 'DL412'")
+    duration: str = Field(..., description="ISO 8601 duration string, e.g. 'PT5H30M'")
+    number_of_stops: int = Field(default=0, ge=0, description="Number of technical stops (>= 0)")
+
+
+class FlightResult(BaseModel):
+    """A single bookable flight offer, normalised across all vendor schemas.
+
+    Attributes:
+        id: Unique offer identifier.
+        segments: Ordered list of flight segments (min 1). One segment for
+            direct flights; multiple for connecting itineraries.
+        total_duration: Total journey duration as ISO 8601 string, e.g. ``"PT5H30M"``.
+        price: Price information (amount and currency).
+        booking_class: Cabin class as a string (not Literal) so the schema
+            stays additively extensible without breaking changes.
+    """
+
+    id: str = Field(..., description="Unique offer identifier")
+    segments: list[FlightSegment] = Field(..., min_length=1, description="Flight segments (min 1)")
+    total_duration: str = Field(..., description="Total journey duration (ISO 8601)")
+    price: PriceInfo = Field(..., description="Price information")
+    booking_class: str = Field(
+        default="ECONOMY",
+        description="Cabin class — string not Literal so the schema stays additively extensible",
+    )
+
+
+class FlightSearchQuery(BaseModel):
+    """Echo of the search request parameters included in the result envelope.
+
+    Attributes:
+        origin: Origin airport IATA code.
+        destination: Destination airport IATA code.
+        departure_date: Departure date as ISO date string echoing the request.
+        passengers: Number of passengers requested (>= 1).
+    """
+
+    origin: str = Field(..., description="Origin airport IATA code")
+    destination: str = Field(..., description="Destination airport IATA code")
+    departure_date: str = Field(..., description="Departure date as ISO date string echoing the request")
+    passengers: int = Field(default=1, ge=1, description="Number of passengers requested")
+
+
+class FlightSearchResult(BaseModel):
+    """Canonical envelope returned by ``search_flights()``.
+
+    Serialised via ``model_dump_json()`` for the SSE ``tool_result`` event.
+    The frontend ``ToolExecutionCard`` parses this JSON to render a structured
+    flight results table.
+
+    Attributes:
+        status: Result status, defaults to ``"ok"``.
+        query: Echo of the search request parameters.
+        results: List of bookable flight offers (empty list if none found).
+        count: Number of results returned (>= 0).
+    """
+
+    status: str = Field(default="ok", description="Result status")
+    query: FlightSearchQuery = Field(..., description="Echo of the search request parameters")
+    results: list[FlightResult] = Field(..., description="List of bookable flight offers")
+    count: int = Field(..., ge=0, description="Number of results returned")
+
+
+# ============================================================================
 # Chat API Models
 # ============================================================================
 
