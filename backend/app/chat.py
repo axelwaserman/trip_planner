@@ -13,20 +13,26 @@ in the route layer (``app.api.routes.routes.create_session``); the
 non-``None`` at construction.
 """
 
+from __future__ import annotations
+
 import time
 import uuid
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.llm.errors import ProbeError
-from app.llm.factory import LLMProviderFactory, SessionLLMConfig
-from app.llm.protocol import BoundProvider
 from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo, StreamEvent
-from app.tools.flight_client import FlightAPIClient
 from app.tools.flight_search import search_flights
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from app.llm.errors import ProbeError
+    from app.llm.factory import LLMProviderFactory, SessionLLMConfig
+    from app.llm.protocol import BoundProvider
+    from app.tools.flight_client import FlightAPIClient
 
 
 class ChatService:

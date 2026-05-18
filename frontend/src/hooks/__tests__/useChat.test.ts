@@ -548,7 +548,7 @@ describe('new chat reset signal', () => {
 
   it('clears messages and creates a fresh session when ?n= changes', async () => {
     let createCallCount = 0
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async () => {
       createCallCount += 1
       return {
         ok: true,
@@ -567,11 +567,6 @@ describe('new chat reset signal', () => {
     // First mount — initial session.
     await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-1'))
     expect(createCallCount).toBe(1)
-
-    // Seed a stale message so we can prove it gets cleared on the reset.
-    await act(async () => {
-      result.current.chat.sendMessage // touch — exists
-    })
 
     // Bump the new-chat token (mirrors Sidebar.handleNewChat).
     await act(async () => {
@@ -640,7 +635,7 @@ describe('resume session signal', () => {
   }
 
   it('fetches /api/chat/sessions/:id and replays messages on ?session=<id>', async () => {
-    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string) => {
       if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-resumed')) {
         return {
           ok: true,
@@ -686,7 +681,7 @@ describe('resume session signal', () => {
   })
 
   it('falls through to a fresh session when ?session=<id> 404s (stale link)', async () => {
-    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string) => {
       if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-gone')) {
         return { ok: false, status: 404, json: async () => ({}), body: null }
       }
