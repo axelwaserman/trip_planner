@@ -4,6 +4,7 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.chat import ChatService
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
@@ -118,3 +119,86 @@ class TestCleanupExpiredSessions:
         removed = service.cleanup_expired_sessions(max_age_seconds=3600)
 
         assert removed == 2
+
+
+class TestChatStreamPersistence:
+    """Background-streaming requirement: the user message must be persisted
+    upfront and the accumulated AI response in a `try/finally` so a switch-
+    conversations / disconnect mid-stream still leaves the history complete
+    when the user navigates back.
+    """
+
+    async def _make_service_with_streamed_chunks(
+        self, chunks: list[AIMessage]
+    ) -> tuple[ChatService, str]:
+        """Build a service whose bound provider streams the given chunks."""
+        flight_client = MagicMock(spec=FlightAPIClient)
+        bound = MagicMock(spec=BoundProvider)
+
+        async def fake_astream(_messages: object) -> object:
+            for c in chunks:
+                yield c
+
+        bound.astream = fake_astream
+        provider = MagicMock(spec=LLMProvider)
+        provider.validate_config = AsyncMock(return_value=None)
+        provider.bind_tools = MagicMock(return_value=bound)
+        factory = MagicMock(spec=LLMProviderFactory)
+        factory.build = MagicMock(return_value=provider)
+        service = ChatService(flight_client=flight_client, factory=factory)
+        session_id, _ = await service.create_session(_default_config(), user_id="testuser")
+        return service, session_id
+
+    async def test_user_message_persists_at_stream_start(self) -> None:
+        """The user turn must land in history BEFORE the LLM streams anything."""
+        # First chunk yields content; we'll inspect history after only the
+        # FIRST chunk has flowed (before the stream completes).
+        service, session_id = await self._make_service_with_streamed_chunks(
+            [AIMessage(content="response")]
+        )
+
+        history = service.get_session_history(session_id)
+        # Pre-stream: history is empty.
+        assert len(history.messages) == 0
+
+        gen = service.chat_stream("Plan a trip", session_id=session_id)
+        # Pull the first event — chat_stream yields after persisting the user
+        # message via history.add_user_message at the top.
+        await gen.__anext__()
+
+        assert any(
+            isinstance(m, HumanMessage) and m.content == "Plan a trip"
+            for m in history.messages
+        )
+
+    async def test_partial_stream_persists_what_was_accumulated(self) -> None:
+        """A stream that's partially consumed before being closed (e.g. client
+        switched conversations) must still flush accumulated_content to
+        history via the try/finally so the resumed view sees a complete
+        turn rather than dropping the user message entirely.
+        """
+        service, session_id = await self._make_service_with_streamed_chunks(
+            [
+                AIMessage(content="partial-1 "),
+                AIMessage(content="partial-2"),
+            ]
+        )
+
+        history = service.get_session_history(session_id)
+        gen = service.chat_stream("hi", session_id=session_id)
+
+        # Consume only the first event then close — simulates client
+        # disconnect mid-stream.
+        await gen.__anext__()
+        await gen.aclose()
+
+        # User turn persisted.
+        assert any(
+            isinstance(m, HumanMessage) and m.content == "hi" for m in history.messages
+        )
+        # AI turn persisted (with whatever was accumulated up to the close).
+        ai_messages = [m for m in history.messages if isinstance(m, AIMessage)]
+        assert len(ai_messages) == 1
+        # Content is whatever was accumulated through the FIRST chunk (the
+        # only one consumed before aclose() ran the generator's finally).
+        assert ai_messages[0].content == "partial-1 "

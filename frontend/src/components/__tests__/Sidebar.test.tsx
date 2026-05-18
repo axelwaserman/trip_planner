@@ -20,6 +20,10 @@ import { ChakraProvider } from '@chakra-ui/react'
 import { system } from '../../theme'
 import { Sidebar } from '../Sidebar'
 import type { ChatSession } from '../../hooks/useSessions'
+import {
+  __resetForTests as resetChatStore,
+  setSession,
+} from '../../lib/chatSessionStore'
 
 // Mocked module exports for useSessions — each test sets the desired shape
 // before rendering.
@@ -79,6 +83,7 @@ describe('Sidebar', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+    resetChatStore()
   })
 
   it('renders RECENT CHATS eyebrow + helper text + Settings link', () => {
@@ -226,6 +231,44 @@ describe('Sidebar', () => {
     renderSidebar({ activeSessionId: 'sess-just-created' })
 
     expect(refetch).toHaveBeenCalled()
+  })
+
+  it('renders a Generating… badge on rows whose session is in flight', () => {
+    useSessionsMock.mockReturnValue({
+      sessions: [
+        {
+          session_id: 'sess-streaming',
+          created_at: '2026-05-17T00:00:00Z',
+          provider: 'ollama',
+          model: 'qwen3:4b',
+          first_message_preview: 'Live one',
+        },
+        {
+          session_id: 'sess-idle',
+          created_at: '2026-05-17T00:00:00Z',
+          provider: 'ollama',
+          model: 'qwen3:4b',
+          first_message_preview: 'Quiet one',
+        },
+      ],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    // Mark sess-streaming as in-flight in the store.
+    setSession('sess-streaming', () => ({
+      messages: [],
+      isAwaitingFirstChunk: false,
+      isStreaming: true,
+    }))
+
+    renderSidebar()
+
+    // The row is identified by its preview text; the streaming row carries
+    // a "Generating…" sub-line, the idle row carries the provider · model.
+    expect(screen.getByText(/Generating…/)).toBeInTheDocument()
+    expect(screen.getByText('ollama · qwen3:4b')).toBeInTheDocument()
   })
 
   it('does not refetch when the active session is already in the list', () => {

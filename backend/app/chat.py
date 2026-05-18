@@ -217,111 +217,121 @@ class ChatService:
         history_messages: list[BaseMessage] = list(history.messages)
         messages: list[BaseMessage] = [*history_messages, HumanMessage(content=message)]
 
+        # Persist the user turn upfront so a switch-conversations / disconnect
+        # mid-stream still leaves the history complete on resume. The previous
+        # behaviour appended user + assistant only at end-of-stream — if the
+        # client disconnected (e.g. switched to a different chat in the
+        # Sidebar), the history's view of "what just happened" was empty.
+        history.add_user_message(message)
+
         # Track state
         tool_was_called = False
         accumulated_content = ""
         tool_call_message = None
         tool_results = []
 
-        # Stream LLM response
-        async for chunk in bound.astream(messages):
-            # Check for reasoning_content (thinking)
-            has_thinking = False
-            if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
-                reasoning = chunk.additional_kwargs.get("reasoning_content")
-                if reasoning:
-                    has_thinking = True
-                    yield StreamEvent(
-                        chunk=reasoning,
-                        session_id=session_id,
-                        type="thinking",
-                    )
-
-            # Process content (only if not thinking)
-            if not has_thinking and hasattr(chunk, "content") and chunk.content:
-                content = chunk.content
-                if isinstance(content, str) and content.strip():
-                    accumulated_content += content
-                    yield StreamEvent(
-                        chunk=content,
-                        session_id=session_id,
-                        type="content",
-                    )
-
-            # Check for tool calls
-            if isinstance(chunk, AIMessage) and chunk.tool_calls:
-                tool_was_called = True
-                tool_call_message = chunk
-
-                from langchain_core.messages import ToolMessage
-
-                tool_messages: list[ToolMessage] = []
-                for tool_call in chunk.tool_calls:
-                    if tool_call["name"] == "search_flights":
-                        # Emit tool_call event
-                        tool_start_time = time.time()
+        try:
+            # Stream LLM response
+            async for chunk in bound.astream(messages):
+                # Check for reasoning_content (thinking)
+                has_thinking = False
+                if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
+                    reasoning = chunk.additional_kwargs.get("reasoning_content")
+                    if reasoning:
+                        has_thinking = True
                         yield StreamEvent(
-                            chunk="",
+                            chunk=reasoning,
                             session_id=session_id,
-                            type="tool_call",
-                            tool_name=tool_call["name"],
-                            tool_args=tool_call["args"],
+                            type="thinking",
                         )
 
-                        # Execute the tool
-                        tool_result = await search_flights.ainvoke(tool_call["args"])
-                        tool_end_time = time.time()
-                        elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
-
-                        # Emit tool_result event
+                # Process content (only if not thinking)
+                if not has_thinking and hasattr(chunk, "content") and chunk.content:
+                    content = chunk.content
+                    if isinstance(content, str) and content.strip():
+                        accumulated_content += content
                         yield StreamEvent(
-                            chunk="",
-                            session_id=session_id,
-                            type="tool_result",
-                            tool_name=tool_call["name"],
-                            tool_result=str(tool_result),
-                            elapsed_ms=elapsed_ms,
-                        )
-
-                        tool_messages.append(
-                            ToolMessage(
-                                content=str(tool_result),
-                                tool_call_id=tool_call.get("id", ""),
-                            )
-                        )
-
-                tool_results = tool_messages
-
-                # Get final response after tool execution
-                messages_with_tools: list[BaseMessage] = [
-                    *messages,
-                    chunk,
-                    *tool_messages,
-                ]
-
-                # Stream the final response
-                accumulated_final = ""
-                async for final_chunk in bound.astream(messages_with_tools):
-                    if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
-                        accumulated_final += final_chunk.content
-                        yield StreamEvent(
-                            chunk=final_chunk.content,
+                            chunk=content,
                             session_id=session_id,
                             type="content",
                         )
 
-                accumulated_content = accumulated_final
-                break
+                # Check for tool calls
+                if isinstance(chunk, AIMessage) and chunk.tool_calls:
+                    tool_was_called = True
+                    tool_call_message = chunk
 
-        # Add messages to history
-        history.add_user_message(message)
+                    from langchain_core.messages import ToolMessage
 
-        if tool_was_called and tool_call_message and tool_results:
-            history.add_message(tool_call_message)
-            for tool_msg in tool_results:
-                history.add_message(tool_msg)
+                    tool_messages: list[ToolMessage] = []
+                    for tool_call in chunk.tool_calls:
+                        if tool_call["name"] == "search_flights":
+                            # Emit tool_call event
+                            tool_start_time = time.time()
+                            yield StreamEvent(
+                                chunk="",
+                                session_id=session_id,
+                                type="tool_call",
+                                tool_name=tool_call["name"],
+                                tool_args=tool_call["args"],
+                            )
 
-        history.add_ai_message(accumulated_content)
+                            # Execute the tool
+                            tool_result = await search_flights.ainvoke(tool_call["args"])
+                            tool_end_time = time.time()
+                            elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
+
+                            # Emit tool_result event
+                            yield StreamEvent(
+                                chunk="",
+                                session_id=session_id,
+                                type="tool_result",
+                                tool_name=tool_call["name"],
+                                tool_result=str(tool_result),
+                                elapsed_ms=elapsed_ms,
+                            )
+
+                            tool_messages.append(
+                                ToolMessage(
+                                    content=str(tool_result),
+                                    tool_call_id=tool_call.get("id", ""),
+                                )
+                            )
+
+                    tool_results = tool_messages
+
+                    # Get final response after tool execution
+                    messages_with_tools: list[BaseMessage] = [
+                        *messages,
+                        chunk,
+                        *tool_messages,
+                    ]
+
+                    # Stream the final response
+                    accumulated_final = ""
+                    async for final_chunk in bound.astream(messages_with_tools):
+                        if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
+                            accumulated_final += final_chunk.content
+                            yield StreamEvent(
+                                chunk=final_chunk.content,
+                                session_id=session_id,
+                                type="content",
+                            )
+
+                    accumulated_content = accumulated_final
+                    break
+        finally:
+            # Always persist whatever was accumulated, even on partial streams
+            # (client disconnect, GeneratorExit on cancellation, etc.). Empty
+            # accumulated_content is intentional: the route surfaced nothing
+            # and resuming the session shows that turn as "user said X, no
+            # response" rather than dropping the user message entirely.
+            if tool_was_called and tool_call_message and tool_results:
+                history.add_message(tool_call_message)
+                for tool_msg in tool_results:
+                    history.add_message(tool_msg)
+
+            history.add_ai_message(accumulated_content)
 
         # Ensure at least one content event
         if not accumulated_content:

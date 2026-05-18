@@ -21,10 +21,14 @@
  * 260px persistent column.
  */
 
-import { useEffect } from 'react'
+import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { Box, Button, Flex, Heading, Stack, Text } from '@chakra-ui/react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquarePlus, Settings as SettingsIcon } from 'lucide-react'
+import {
+  getStreamingSessionIds,
+  subscribe as subscribeToStore,
+} from '../lib/chatSessionStore'
 import { useSessions } from '../hooks/useSessions'
 import { UserMenu } from './chat/UserMenu'
 
@@ -44,6 +48,13 @@ export function Sidebar({
   const navigate = useNavigate()
   const location = useLocation()
   const { sessions, error, refetch } = useSessions()
+  // Live "this row is generating" set, sourced from the same store useChat
+  // writes to. Background streams (user switched away mid-response) keep
+  // their flag on so the Sidebar dot stays visible until the stream ends.
+  const streamingSessionIds = useSyncExternalStore(
+    subscribeToStore,
+    useCallback(() => getStreamingSessionIds(), [])
+  )
 
   const settingsActive = location.pathname === '/settings/providers'
 
@@ -151,6 +162,7 @@ export function Sidebar({
           <Stack gap="0">
             {sessions.map((s) => {
               const isActive = activeSessionId === s.session_id
+              const isStreaming = streamingSessionIds.has(s.session_id)
               const preview =
                 s.first_message_preview && s.first_message_preview.trim().length > 0
                   ? s.first_message_preview
@@ -172,17 +184,30 @@ export function Sidebar({
                   cursor="pointer"
                   _hover={{ bg: 'accent.muted' }}
                 >
-                  <Text
-                    fontSize="14px"
-                    color="fg.primary"
-                    overflow="hidden"
-                    textOverflow="ellipsis"
-                    whiteSpace="nowrap"
-                  >
-                    {preview}
-                  </Text>
-                  <Text fontSize="13px" color="fg.muted" mt="0.5">
-                    {s.provider} · {s.model}
+                  <Flex align="center" gap="2" minW="0">
+                    {isStreaming && (
+                      <Box
+                        as="span"
+                        aria-label="Generating"
+                        flexShrink="0"
+                        w="6px"
+                        h="6px"
+                        borderRadius="full"
+                        bg="accent.solid"
+                      />
+                    )}
+                    <Text
+                      fontSize="14px"
+                      color="fg.primary"
+                      overflow="hidden"
+                      textOverflow="ellipsis"
+                      whiteSpace="nowrap"
+                    >
+                      {preview}
+                    </Text>
+                  </Flex>
+                  <Text fontSize="13px" color={isStreaming ? 'accent.solid' : 'fg.muted'} mt="0.5">
+                    {isStreaming ? 'Generating…' : `${s.provider} · ${s.model}`}
                   </Text>
                 </Box>
               )

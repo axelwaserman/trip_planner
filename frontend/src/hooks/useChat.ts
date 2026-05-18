@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { Message, MessageType } from '../types/chat'
 import { apiFetch } from '../lib/auth'
+import {
+  getSnapshot as getSessionSnapshot,
+  setSession,
+  subscribe as subscribeToStore,
+} from '../lib/chatSessionStore'
 import {
   mapProbeError,
   type BackendProbeError,
@@ -169,13 +174,32 @@ async function createSession(
 }
 
 export function useChat(): UseChatReturn {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [isAwaitingFirstChunk, setIsAwaitingFirstChunk] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [currentProvider, setCurrentProvider] = useState('ollama')
   const [currentModel, setCurrentModel] = useState('qwen3:4b')
   const [providerError, setProviderError] = useState<ProviderErrorView | null>(null)
+  // Session-init failure surfaces here when the create call returned a
+  // non-probe failure (no session_id to key the store entry on). Cleared
+  // every time we successfully initialize a session.
+  const [initFailureMessage, setInitFailureMessage] = useState<string | null>(null)
+
+  // Per-session state lives in chatSessionStore so a switch from conv A → B
+  // mid-stream doesn't drop A's accumulator and the Sidebar can surface
+  // "this row is generating" indicators from the same source. The hook only
+  // reads the slice for the currently-active session_id.
+  const sessionSnapshot = useSyncExternalStore(
+    subscribeToStore,
+    useCallback(() => getSessionSnapshot(sessionId), [sessionId])
+  )
+  // When session init failed before a session_id existed, expose the inline
+  // error message via the same `messages` array consumers already render.
+  const messages: Message[] = sessionId
+    ? sessionSnapshot.messages
+    : initFailureMessage
+      ? [{ role: 'assistant', content: initFailureMessage }]
+      : []
+  const isLoading = sessionSnapshot.isStreaming
+  const isAwaitingFirstChunk = sessionSnapshot.isAwaitingFirstChunk
 
   // The Sidebar bumps `?n=<timestamp>` whenever the user clicks "New chat".
   // This is the only signal useChat watches to know it should clear messages
@@ -205,6 +229,7 @@ export function useChat(): UseChatReturn {
   const initSession = useCallback(
     async (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => {
       setProviderError(null)
+      setInitFailureMessage(null)
       setCurrentProvider(provider)
       setCurrentModel(model)
 
@@ -213,6 +238,14 @@ export function useChat(): UseChatReturn {
 
         if (result.ok) {
           ownedSessionIdRef.current = result.data.session_id
+          // Seed the store with an empty state for the new session so
+          // useSyncExternalStore returns a stable empty snapshot rather
+          // than briefly showing whatever the previous session held.
+          setSession(result.data.session_id, () => ({
+            messages: [],
+            isAwaitingFirstChunk: false,
+            isStreaming: false,
+          }))
           setSessionId(result.data.session_id)
           setCurrentProvider(result.data.provider)
           setCurrentModel(result.data.model)
@@ -231,12 +264,9 @@ export function useChat(): UseChatReturn {
           return
         }
 
-        setMessages([
-          {
-            role: 'assistant',
-            content: '❌ Failed to initialize chat session. Please refresh the page.',
-          },
-        ])
+        // Failed init: surface the error inline (no session_id to key the
+        // store on). Cleared on the next successful initSession.
+        setInitFailureMessage('❌ Failed to initialize chat session. Please refresh the page.')
       } catch {
         // apiFetch's 401 handler already redirected; nothing to do here.
       }
@@ -262,12 +292,23 @@ export function useChat(): UseChatReturn {
       setSessionId(body.session_id)
       setCurrentProvider(body.provider)
       setCurrentModel(body.model)
-      setMessages(
-        body.messages.map((msg) => ({
-          role: msg.role as MessageType,
-          content: msg.content,
-        }))
-      )
+      setInitFailureMessage(null)
+      // Seed the store with the persisted history. Don't overwrite an
+      // already-streaming session — picking conv A from the Sidebar while
+      // its previous response is still streaming should keep the live
+      // accumulator visible, not replace it with the partial server-side
+      // history. The "isStreaming" flag is the canonical guard.
+      setSession(body.session_id, (prev) => {
+        if (prev.isStreaming) return prev
+        return {
+          messages: body.messages.map((msg) => ({
+            role: msg.role as MessageType,
+            content: msg.content,
+          })),
+          isAwaitingFirstChunk: false,
+          isStreaming: false,
+        }
+      })
       return true
     } catch {
       return false
@@ -296,10 +337,14 @@ export function useChat(): UseChatReturn {
       return
     }
 
-    setMessages([])
+    // Drop the local sessionId so the snapshot reads as empty until the
+    // resume / create finishes. The store entry for the OLD session is
+    // intentionally NOT cleared — it might still be streaming in the
+    // background and we want the user to see its progress when they
+    // navigate back. The store keeps each session's snapshot for the
+    // lifetime of the page (or until the user reloads).
     setSessionId(null)
-    setIsLoading(false)
-    setIsAwaitingFirstChunk(false)
+    setInitFailureMessage(null)
 
     let cancelled = false
     void (async () => {
@@ -327,8 +372,10 @@ export function useChat(): UseChatReturn {
 
   const handleProviderChange = useCallback(
     (provider: string, model: string) => {
-      setMessages([])
       setProviderError(null)
+      // initSession will seed a fresh empty store entry for the new session
+      // id; the previous session's entry stays put so a background stream
+      // there can keep updating the Sidebar indicator.
       // Re-read provider_settings so a fresh paste of api_key / base_url on the
       // settings page is picked up at session-create time (D-21 + D-08).
       const settings = loadProviderSettings() ?? DEFAULT_PROVIDER_SETTINGS
@@ -361,17 +408,141 @@ export function useChat(): UseChatReturn {
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (!text.trim() || isLoading || !sessionId) return
+      if (!text.trim() || !sessionId) return
+      // Per-session re-entrancy: if this session is already streaming,
+      // refuse a second submission. Other sessions can stream concurrently.
+      if (getSessionSnapshot(sessionId).isStreaming) return
 
-      setIsLoading(true)
-      setIsAwaitingFirstChunk(true)
-      setMessages((prev) => [...prev, { role: 'user', content: text }])
+      // Capture the submit-time session id. Every store write inside the
+      // SSE loop targets THIS id, even if the user navigates away and the
+      // hook's `sessionId` state moves on. That's how a switch from conv A
+      // → B mid-stream keeps A's accumulator filling in the background and
+      // why a Sidebar indicator on A's row stays accurate.
+      const submitSessionId = sessionId
+
+      setSession(submitSessionId, (prev) => ({
+        messages: [...prev.messages, { role: 'user', content: text }],
+        isAwaitingFirstChunk: true,
+        isStreaming: true,
+      }))
+
+      // Track stream state outside React — these are only read/written
+      // during the synchronous SSE event loop.
+      let isStreamingAssistant = false
+      let isStreamingThinking = false
+      let firstChunkSeen = false
+      const markFirstChunk = () => {
+        if (firstChunkSeen) return
+        firstChunkSeen = true
+        setSession(submitSessionId, (prev) => ({
+          ...prev,
+          isAwaitingFirstChunk: false,
+        }))
+      }
+
+      const appendThinkingChunk = (chunk: string) => {
+        setSession(submitSessionId, (prev) => {
+          if (!isStreamingThinking) {
+            return {
+              ...prev,
+              messages: [...prev.messages, { role: 'thinking' as MessageType, content: chunk }],
+            }
+          }
+          // Append to the last thinking message (walk back to find it).
+          for (let i = prev.messages.length - 1; i >= 0; i--) {
+            if (prev.messages[i].role === 'thinking') {
+              return {
+                ...prev,
+                messages: prev.messages.map((msg, idx) =>
+                  idx === i ? { ...msg, content: msg.content + chunk } : msg
+                ),
+              }
+            }
+          }
+          return prev
+        })
+      }
+
+      const appendContentChunk = (chunk: string) => {
+        setSession(submitSessionId, (prev) => {
+          if (!isStreamingAssistant) {
+            return {
+              ...prev,
+              messages: [...prev.messages, { role: 'assistant' as MessageType, content: chunk }],
+            }
+          }
+          for (let i = prev.messages.length - 1; i >= 0; i--) {
+            if (prev.messages[i].role === 'assistant') {
+              return {
+                ...prev,
+                messages: prev.messages.map((msg, idx) =>
+                  idx === i ? { ...msg, content: msg.content + chunk } : msg
+                ),
+              }
+            }
+          }
+          return prev
+        })
+      }
+
+      const appendToolCall = (toolName: string, toolArgs: Record<string, unknown>) => {
+        setSession(submitSessionId, (prev) => ({
+          ...prev,
+          messages: [
+            ...prev.messages,
+            {
+              role: 'tool_execution' as MessageType,
+              content: '',
+              toolExecution: {
+                callMetadata: {
+                  tool_name: toolName,
+                  arguments: toolArgs,
+                  started_at: Date.now(),
+                  status: 'executing',
+                },
+              },
+            },
+          ],
+        }))
+      }
+
+      const updateToolResult = (toolResult: string, elapsedMs: number) => {
+        setSession(submitSessionId, (prev) => {
+          let lastToolIndex = -1
+          for (let i = prev.messages.length - 1; i >= 0; i--) {
+            if (prev.messages[i].role === 'tool_execution') {
+              lastToolIndex = i
+              break
+            }
+          }
+          if (lastToolIndex === -1) return prev
+          return {
+            ...prev,
+            messages: prev.messages.map((msg, i) =>
+              i === lastToolIndex && msg.toolExecution
+                ? {
+                    ...msg,
+                    toolExecution: {
+                      ...msg.toolExecution,
+                      resultMetadata: {
+                        summary: toolResult,
+                        full_result: toolResult,
+                        status: 'completed',
+                        elapsed_ms: elapsedMs,
+                      },
+                    },
+                  }
+                : msg
+            ),
+          }
+        })
+      }
 
       try {
         const response = await apiFetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, session_id: sessionId }),
+          body: JSON.stringify({ message: text, session_id: submitSessionId }),
         })
 
         if (!response.ok) {
@@ -382,138 +553,56 @@ export function useChat(): UseChatReturn {
           throw new Error('No response body')
         }
 
-        // Track stream state outside React — these are only read/written during
-        // the synchronous SSE event loop, before React flushes any batched updates.
-        let isStreamingAssistant = false
-        let isStreamingThinking = false
-        let firstChunkSeen = false
-        const markFirstChunk = () => {
-          if (!firstChunkSeen) {
-            firstChunkSeen = true
-            setIsAwaitingFirstChunk(false)
-          }
-        }
-
         await readSSEStream(response.body, (event) => {
           if (event.type === 'error') {
             throw new Error(event.error ?? 'Stream error')
           }
 
-          if (event.type === 'done') {
-            if (event.session_id) setSessionId(event.session_id)
-            return
-          }
+          if (event.type === 'done') return
 
           if (event.type === 'thinking' && event.chunk) {
             markFirstChunk()
-            if (event.session_id) setSessionId(event.session_id)
-            const chunk = event.chunk
-            if (!isStreamingThinking) {
-              isStreamingThinking = true
-              setMessages((prev) => [...prev, { role: 'thinking' as MessageType, content: chunk }])
-            } else {
-              setMessages((prev) => {
-                const lastIdx = prev.length - 1
-                // Walk backwards to find the last thinking message
-                for (let i = lastIdx; i >= 0; i--) {
-                  if (prev[i].role === 'thinking') {
-                    return prev.map((msg, idx) =>
-                      idx === i ? { ...msg, content: msg.content + chunk } : msg
-                    )
-                  }
-                }
-                return prev
-              })
-            }
+            appendThinkingChunk(event.chunk)
+            isStreamingThinking = true
+            return
           }
 
           if (event.type === 'content' && event.chunk) {
             markFirstChunk()
-            if (event.session_id) setSessionId(event.session_id)
-            const chunk = event.chunk
-            if (!isStreamingAssistant) {
-              isStreamingAssistant = true
-              setMessages((prev) => [...prev, { role: 'assistant' as MessageType, content: chunk }])
-            } else {
-              setMessages((prev) => {
-                // Walk backwards to find the last assistant message
-                for (let i = prev.length - 1; i >= 0; i--) {
-                  if (prev[i].role === 'assistant') {
-                    return prev.map((msg, idx) =>
-                      idx === i ? { ...msg, content: msg.content + chunk } : msg
-                    )
-                  }
-                }
-                return prev
-              })
-            }
+            appendContentChunk(event.chunk)
+            isStreamingAssistant = true
+            return
           }
 
           if (event.type === 'tool_call' && event.tool_name) {
             markFirstChunk()
-            if (event.session_id) setSessionId(event.session_id)
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: 'tool_execution' as MessageType,
-                content: '',
-                toolExecution: {
-                  callMetadata: {
-                    tool_name: event.tool_name!,
-                    arguments: event.tool_args ?? {},
-                    started_at: Date.now(),
-                    status: 'executing',
-                  },
-                },
-              },
-            ])
+            appendToolCall(event.tool_name, event.tool_args ?? {})
+            return
           }
 
           if (event.type === 'tool_result' && event.tool_name) {
-            if (event.session_id) setSessionId(event.session_id)
-            setMessages((prev) => {
-              let lastToolIndex = -1
-              for (let i = prev.length - 1; i >= 0; i--) {
-                if (prev[i].role === 'tool_execution') {
-                  lastToolIndex = i
-                  break
-                }
-              }
-
-              if (lastToolIndex === -1) return prev
-
-              return prev.map((msg, i) =>
-                i === lastToolIndex && msg.toolExecution
-                  ? {
-                      ...msg,
-                      toolExecution: {
-                        ...msg.toolExecution,
-                        resultMetadata: {
-                          summary: event.tool_result ?? '',
-                          full_result: event.tool_result ?? '',
-                          status: 'completed',
-                          elapsed_ms: event.elapsed_ms ?? 0,
-                        },
-                      },
-                    }
-                  : msg
-              )
-            })
-            // Reset for the next assistant response after tool execution
+            updateToolResult(event.tool_result ?? '', event.elapsed_ms ?? 0)
+            // Allow a fresh assistant bubble for the post-tool response.
             isStreamingAssistant = false
           }
         })
       } catch {
-        setMessages((prev) => [
+        setSession(submitSessionId, (prev) => ({
           ...prev,
-          { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },
-        ])
+          messages: [
+            ...prev.messages,
+            { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },
+          ],
+        }))
       } finally {
-        setIsLoading(false)
-        setIsAwaitingFirstChunk(false)
+        setSession(submitSessionId, (prev) => ({
+          ...prev,
+          isStreaming: false,
+          isAwaitingFirstChunk: false,
+        }))
       }
     },
-    [isLoading, sessionId]
+    [sessionId]
   )
 
   return {

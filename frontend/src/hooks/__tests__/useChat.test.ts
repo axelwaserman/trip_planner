@@ -3,6 +3,7 @@ import type { RenderHookOptions } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { __resetForTests as resetChatStore } from '../../lib/chatSessionStore'
 import { useChat } from '../useChat'
 
 // useChat reads `useSearchParams()` to observe Sidebar's `?n=<token>` New
@@ -67,6 +68,10 @@ beforeEach(() => {
   localStorageMock.clear()
   Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true })
   vi.clearAllMocks()
+  // chatSessionStore is module-level — without an explicit reset, snapshots
+  // from one test leak into the next (e.g. a session that was streaming in
+  // test N still reads as streaming in test N+1).
+  resetChatStore()
 })
 
 afterEach(() => {
@@ -701,5 +706,149 @@ describe('resume session signal', () => {
     await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-fresh'))
     // No replayed history.
     expect(result.current.chat.messages).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Background streaming (chatSessionStore)
+// ---------------------------------------------------------------------------
+
+describe('background streaming', () => {
+  it('writes stream chunks to the submit-time session even after the URL switches', async () => {
+    // Build a manually-controlled SSE body so the test can interleave a
+    // mid-stream session switch.
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
+    const sseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controllerRef = controller
+      },
+    })
+    const encoder = new TextEncoder()
+
+    // Single dispatcher serves every endpoint the test exercises:
+    //   POST /api/chat/session    → create initial sess-a
+    //   GET  /api/chat/sessions/sess-b → empty history (resume target)
+    //   POST /api/chat            → the manually-controlled SSE stream
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-b')) {
+        return {
+          ok: true,
+          json: async () => ({
+            session_id: 'sess-b',
+            provider: 'ollama',
+            model: 'qwen3:4b',
+            messages: [],
+          }),
+          body: null,
+        }
+      }
+      if (url === '/api/chat/session' && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({ session_id: 'sess-a', provider: 'ollama', model: 'qwen3:4b' }),
+          body: null,
+        }
+      }
+      if (url === '/api/chat' && init?.method === 'POST') {
+        return { ok: true, body: sseBody }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function useChatWithNavigate() {
+      const navigate = useNavigate()
+      const chat = useChat()
+      return { chat, navigate }
+    }
+
+    const { result } = renderHook(() => useChatWithNavigate())
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-a'))
+    const submitSessionId = 'sess-a'
+
+    // Kick off the send. Don't await — we need to interleave events.
+    let sendPromise: Promise<void> | undefined
+    await act(async () => {
+      sendPromise = result.current.chat.sendMessage('hello from sess-a')
+    })
+
+    // First content chunk lands while sess-a is the active session.
+    await act(async () => {
+      controllerRef!.enqueue(
+        encoder.encode('data: {"type":"content","chunk":"first ","session_id":"sess-a"}\n')
+      )
+      // Yield to React.
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    // Now switch to sess-b mid-stream.
+    await act(async () => {
+      result.current.navigate('/app?session=sess-b')
+    })
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-b'))
+    // sess-b has empty history — current view shows no streamed content.
+    expect(
+      result.current.chat.messages.some((m) => m.role === 'assistant')
+    ).toBe(false)
+
+    // Second content chunk arrives — must land in sess-a's store entry,
+    // not sess-b's.
+    await act(async () => {
+      controllerRef!.enqueue(
+        encoder.encode('data: {"type":"content","chunk":"second","session_id":"sess-a"}\n')
+      )
+      controllerRef!.enqueue(
+        encoder.encode('data: {"type":"done","session_id":"sess-a"}\n')
+      )
+      controllerRef!.close()
+    })
+    await sendPromise
+
+    // Re-mount or read the store directly to confirm sess-a's accumulator
+    // contains BOTH chunks even though the active view was on sess-b for
+    // the second one.
+    const { getSnapshot } = await import('../../lib/chatSessionStore')
+    const sessAState = getSnapshot(submitSessionId)
+    const assistantMsg = sessAState.messages.find((m) => m.role === 'assistant')
+    expect(assistantMsg?.content).toBe('first second')
+    // Stream finished: isStreaming back to false.
+    expect(sessAState.isStreaming).toBe(false)
+  })
+
+  it('isStreaming flips true while a stream is in-flight and false on completion', async () => {
+    const fetchMock = mockSessionFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    // Slow stream so we can observe the flag mid-flight.
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
+    const sseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controllerRef = controller
+      },
+    })
+    const encoder = new TextEncoder()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: sseBody }))
+
+    let sendPromise: Promise<void> | undefined
+    await act(async () => {
+      sendPromise = result.current.sendMessage('test')
+    })
+
+    // sendMessage set isStreaming → true synchronously via setSession.
+    await waitFor(() => expect(result.current.isLoading).toBe(true))
+
+    // Drain + close.
+    await act(async () => {
+      controllerRef!.enqueue(
+        encoder.encode('data: {"type":"content","chunk":"ok","session_id":"sess-1"}\n')
+      )
+      controllerRef!.enqueue(encoder.encode('data: {"type":"done","session_id":"sess-1"}\n'))
+      controllerRef!.close()
+      await sendPromise
+    })
+
+    expect(result.current.isLoading).toBe(false)
   })
 })
