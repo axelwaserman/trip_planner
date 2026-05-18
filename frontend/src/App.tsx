@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Box, Grid, IconButton, useBreakpointValue } from '@chakra-ui/react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 import { ChatInterface } from './components/ChatInterface'
 import { Sidebar } from './components/Sidebar'
@@ -26,6 +26,8 @@ function AppShell({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string>('')
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
   const isMobile = useBreakpointValue({ base: true, lg: false })
+  const [searchParams] = useSearchParams()
+  const activeSessionId = searchParams.get('session') ?? undefined
 
   useEffect(() => {
     let cancelled = false
@@ -58,7 +60,7 @@ function AppShell({ children }: { children: ReactNode }) {
         {/* Desktop persistent sidebar */}
         {!isMobile && (
           <Box>
-            <Sidebar username={username} />
+            <Sidebar username={username} activeSessionId={activeSessionId} />
           </Box>
         )}
         <Box minW="0">{children}</Box>
@@ -94,6 +96,7 @@ function AppShell({ children }: { children: ReactNode }) {
         >
           <Sidebar
             username={username}
+            activeSessionId={activeSessionId}
             onNavigate={() => setIsMenuOpen(false)}
           />
           <Box

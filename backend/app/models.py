@@ -331,3 +331,34 @@ class ChatSessionsListResponse(BaseModel):
     """Response shape for GET /api/chat/sessions (D-22, D-27)."""
 
     sessions: list[ChatSessionInfo] = Field(..., description="Sessions owned by the authenticated user.")
+
+
+class ChatHistoryMessage(BaseModel):
+    """One message in a session's chat history.
+
+    Used by GET /api/chat/sessions/{id} so the frontend can re-render a
+    previously-active session when the user clicks it in the Sidebar. Only
+    user/assistant turns are surfaced — tool execution traces and reasoning
+    chunks are stream-only artefacts that don't round-trip cleanly.
+    """
+
+    role: Literal["user", "assistant"] = Field(..., description="Message author.")
+    content: str = Field(..., description="Message text (Markdown allowed for assistant).")
+
+
+class ChatSessionHistoryResponse(BaseModel):
+    """Response shape for GET /api/chat/sessions/{session_id}.
+
+    Returned only when the authenticated user owns the requested session.
+    Non-owners and missing sessions both surface as 404 to avoid leaking
+    session existence (mirrors the per-user-partition pattern from
+    GET /api/chat/sessions and DELETE /api/chat/session/{id}).
+    """
+
+    session_id: str = Field(..., description="Echoed session UUID.")
+    provider: str = Field(..., description="Provider the session is bound to.")
+    model: str = Field(..., description="Model the session is bound to.")
+    messages: list[ChatHistoryMessage] = Field(
+        default_factory=list,
+        description="User/assistant turns in chronological order.",
+    )

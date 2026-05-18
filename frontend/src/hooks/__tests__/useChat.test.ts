@@ -9,15 +9,21 @@ import { useChat } from '../useChat'
 // chat signal, so every renderHook call needs a Router context. Wrap the
 // upstream renderHook so each test stays single-line. createElement avoids
 // JSX in this `.ts` file.
-function MemoryRouterWrapper({ children }: { children: ReactNode }) {
-  return createElement(MemoryRouter, { initialEntries: ['/app'] }, children)
+function makeMemoryRouterWrapper(initialEntries: string[] = ['/app']) {
+  return function MemoryRouterWrapper({ children }: { children: ReactNode }) {
+    return createElement(MemoryRouter, { initialEntries }, children)
+  }
 }
 
 function renderHook<TResult, TProps>(
   callback: (props: TProps) => TResult,
-  options?: Omit<RenderHookOptions<TProps>, 'wrapper'>
+  options?: Omit<RenderHookOptions<TProps>, 'wrapper'> & { initialEntries?: string[] }
 ) {
-  return rtlRenderHook(callback, { wrapper: MemoryRouterWrapper, ...options })
+  const { initialEntries, ...rest } = options ?? {}
+  return rtlRenderHook(callback, {
+    wrapper: makeMemoryRouterWrapper(initialEntries),
+    ...rest,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -560,5 +566,86 @@ describe('new chat reset signal', () => {
       base_url: 'http://localhost:11434',
       api_key: null,
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Resume session (`?session=<id>`)
+// ---------------------------------------------------------------------------
+
+describe('resume session signal', () => {
+  function useChatWithNavigate() {
+    const navigate = useNavigate()
+    const chat = useChat()
+    return { chat, navigate }
+  }
+
+  it('fetches /api/chat/sessions/:id and replays messages on ?session=<id>', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-resumed')) {
+        return {
+          ok: true,
+          json: async () => ({
+            session_id: 'sess-resumed',
+            provider: 'ollama',
+            model: 'qwen3:8b',
+            messages: [
+              { role: 'user', content: 'hi from earlier' },
+              { role: 'assistant', content: 'hello again' },
+            ],
+          }),
+          body: null,
+        }
+      }
+      // Fallback: any /api/chat/session POST just returns a fresh session —
+      // the resume path should NOT hit this on success.
+      return {
+        ok: true,
+        json: async () => ({ session_id: 'sess-fresh', provider: 'ollama', model: 'qwen3:4b' }),
+        body: null,
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChatWithNavigate(), {
+      initialEntries: ['/app?session=sess-resumed'],
+    })
+
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-resumed'))
+    expect(result.current.chat.currentProvider).toBe('ollama')
+    expect(result.current.chat.currentModel).toBe('qwen3:8b')
+    expect(result.current.chat.messages).toEqual([
+      { role: 'user', content: 'hi from earlier' },
+      { role: 'assistant', content: 'hello again' },
+    ])
+
+    // Resume must NOT POST /api/chat/session — only the GET call should happen.
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => url === '/api/chat/session' && (init as RequestInit | undefined)?.method === 'POST'
+    )
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it('falls through to a fresh session when ?session=<id> 404s (stale link)', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-gone')) {
+        return { ok: false, status: 404, json: async () => ({}), body: null }
+      }
+      return {
+        ok: true,
+        json: async () => ({ session_id: 'sess-fresh', provider: 'ollama', model: 'qwen3:4b' }),
+        body: null,
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChatWithNavigate(), {
+      initialEntries: ['/app?session=sess-gone'],
+    })
+
+    // Resume failed → fresh session created. session_id ends up as the fresh one.
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-fresh'))
+    // No replayed history.
+    expect(result.current.chat.messages).toEqual([])
   })
 })

@@ -175,8 +175,17 @@ export function useChat(): UseChatReturn {
   // This is the only signal useChat watches to know it should clear messages
   // and create a fresh session — purely URL-driven so the hook stays oblivious
   // to where the click came from. Mount-time init runs with `n === null`.
+  //
+  // `?session=<id>` is the resume signal: the Sidebar's recent-chats list
+  // navigates to /app?session=<id> and useChat fetches the history for that
+  // session, replays it into messages, and adopts the provider/model the
+  // session was bound to (rather than POSTing /api/chat/session). Both
+  // params are mutually exclusive in practice — Sidebar emits one or the
+  // other — but the resume path takes precedence if both are present so
+  // an accidental ?n=...&session=... wouldn't silently start a new chat.
   const [searchParams] = useSearchParams()
   const newChatToken = searchParams.get('n')
+  const resumeSessionId = searchParams.get('session')
 
   const initSession = useCallback(
     async (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => {
@@ -212,26 +221,75 @@ export function useChat(): UseChatReturn {
     []
   )
 
+  const resumeSession = useCallback(async (id: string): Promise<boolean> => {
+    setProviderError(null)
+    try {
+      const response = await apiFetch(`/api/chat/sessions/${encodeURIComponent(id)}`)
+      if (!response.ok) {
+        // 404 (not yours / missing), 401 (apiFetch already redirected), etc.
+        return false
+      }
+      const body = (await response.json()) as {
+        session_id: string
+        provider: string
+        model: string
+        messages: Array<{ role: 'user' | 'assistant'; content: string }>
+      }
+      setSessionId(body.session_id)
+      setCurrentProvider(body.provider)
+      setCurrentModel(body.model)
+      setMessages(
+        body.messages.map((msg) => ({
+          role: msg.role as MessageType,
+          content: msg.content,
+        }))
+      )
+      return true
+    } catch {
+      return false
+    }
+  }, [])
+
   useEffect(() => {
     // D-21: read provider_settings (new key). If absent, one-shot migrate from
     // the legacy 'llm_provider_config' key (Phase 4.1/4.2). If neither exists
     // (cold first run), use ollama/qwen3:4b with null base_url + api_key so
     // the backend factory falls back to its env-var precedence (D-08).
     //
-    // Re-runs whenever `?n=<token>` changes — that's the Sidebar's "New chat"
-    // signal, which clears messages and initSession-s a fresh session keeping
-    // the user's currently-selected provider/model (read from settings here).
+    // Re-runs whenever `?n=<token>` or `?session=<id>` changes:
+    //   - ?session=<id> → fetch history, replay messages, adopt the session's
+    //     bound provider/model (no new POST /api/chat/session). Falls through
+    //     to the new-chat path on 404 so a stale Sidebar link can't soft-lock
+    //     the chat.
+    //   - ?n=<token>    → clear messages and POST /api/chat/session with the
+    //     user's currently-selected provider/model (Sidebar's "New chat").
     setMessages([])
     setSessionId(null)
     setIsLoading(false)
-    const settings = loadProviderSettings()
-    if (settings === null) {
-      void initSession('ollama', 'qwen3:4b', null, null)
-      return
+
+    let cancelled = false
+    void (async () => {
+      if (resumeSessionId) {
+        const ok = await resumeSession(resumeSessionId)
+        if (cancelled) return
+        if (ok) return
+        // 404 / cross-user → fall through to a fresh session below.
+      }
+
+      if (cancelled) return
+      const settings = loadProviderSettings()
+      if (settings === null) {
+        void initSession('ollama', 'qwen3:4b', null, null)
+        return
+      }
+      const selection = resolveSelection(settings)
+      void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
+    })()
+
+    return () => {
+      cancelled = true
     }
-    const selection = resolveSelection(settings)
-    void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
-  }, [initSession, newChatToken])
+  }, [initSession, resumeSession, newChatToken, resumeSessionId])
 
   const handleProviderChange = useCallback(
     (provider: string, model: string) => {

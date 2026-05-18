@@ -24,7 +24,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.llm.errors import ProbeError
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.llm.protocol import BoundProvider
-from app.models import ChatSessionInfo, StreamEvent
+from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo, StreamEvent
 from app.tools.flight_client import FlightAPIClient
 from app.tools.flight_search import search_flights
 
@@ -124,6 +124,42 @@ class ChatService:
         # Newest first — the sidebar is reverse-chronological.
         results.sort(key=lambda info: info.created_at, reverse=True)
         return results
+
+    def get_history_for_user(
+        self, session_id: str, user_id: str
+    ) -> ChatSessionHistoryResponse | None:
+        """Return the session's user/assistant history, if owned by ``user_id``.
+
+        Returns ``None`` when the session doesn't exist OR when ``user_id``
+        is not the owner. Both paths collapse to the same return so the route
+        layer can map both to ``404 Not Found`` — leaking ``403 vs 404``
+        would be a session-existence oracle (same threat-model rationale as
+        ``DELETE /api/chat/session/{id}``).
+
+        Only ``HumanMessage`` and ``AIMessage`` entries are surfaced; tool
+        execution traces and reasoning chunks are stream-only artefacts and
+        don't round-trip cleanly through the chat history's serialised form.
+        """
+        metadata = self._metadata.get(session_id)
+        if metadata is None or metadata.get("user_id") != user_id:
+            return None
+        history = self._histories.get(session_id)
+        messages: list[ChatHistoryMessage] = []
+        if history is not None:
+            for msg in history.messages:
+                if isinstance(msg, HumanMessage):
+                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    messages.append(ChatHistoryMessage(role="user", content=content))
+                elif isinstance(msg, AIMessage):
+                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    if content:  # Skip empty AIMessages emitted only for tool calls.
+                        messages.append(ChatHistoryMessage(role="assistant", content=content))
+        return ChatSessionHistoryResponse(
+            session_id=session_id,
+            provider=metadata["provider"],
+            model=metadata["model"],
+            messages=messages,
+        )
 
     def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         """Get history for a session.

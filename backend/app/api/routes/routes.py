@@ -16,6 +16,7 @@ from app.llm.errors import ProbeError, ProbeErrorCode
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.models import (
     ChatRequest,
+    ChatSessionHistoryResponse,
     ChatSessionsListResponse,
     ProviderInfo,
     ProviderRefreshEntry,
@@ -552,3 +553,28 @@ async def list_chat_sessions(
     """
     sessions = chat_service.list_sessions_for_user(current_user.username)
     return ChatSessionsListResponse(sessions=sessions)
+
+
+@router.get(
+    "/api/chat/sessions/{session_id}",
+    response_model=ChatSessionHistoryResponse,
+)
+async def get_chat_session_history(
+    session_id: str,
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> ChatSessionHistoryResponse:
+    """Return the message history for a session the authenticated user owns.
+
+    Used by the Sidebar's "RECENT CHATS" list — clicking a row navigates to
+    ``/app?session=<id>`` and the frontend hits this endpoint to seed the
+    chat with the prior turns plus the provider/model the session was bound
+    to. Both "missing session" and "not your session" collapse to ``404``
+    (same shape as missing) so existence isn't leaked across users — same
+    pattern as ``DELETE /api/chat/session/{id}`` and the per-user partition
+    on ``GET /api/chat/sessions``.
+    """
+    history = chat_service.get_history_for_user(session_id, user_id=current_user.username)
+    if history is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return history
