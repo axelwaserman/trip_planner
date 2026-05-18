@@ -307,8 +307,7 @@ def test_skyscanner_price_decimal_precision() -> None:
 
     # Assert — Decimal("450.50") exactly, not Decimal('450.4999...')
     assert result.price.amount == Decimal("450.50"), (
-        f"Expected Decimal('450.50'), got {result.price.amount!r} — "
-        "float-to-Decimal coercion via str() must be applied"
+        f"Expected Decimal('450.50'), got {result.price.amount!r} — float-to-Decimal coercion via str() must be applied"
     )
 
 
