@@ -79,6 +79,63 @@ def test_scrub_short_sk_prefix_does_not_match() -> None:
     assert _scrub("debug sk-abc was here") == "debug sk-abc was here"
 
 
+# CR-04 regression: production OpenAI keys carry a hyphen-separated prefix
+# (``sk-proj-``, ``sk-svcacct-``, ``sk-admin-``, ``sk-user-``). The previous
+# bare-``sk-`` regex required 20+ alphanumerics IMMEDIATELY after ``sk-`` and
+# so matched zero characters of these formats — leaking the entire key into
+# any log line that happened to include it. These tests pin the new pattern.
+
+
+def test_scrub_redacts_openai_project_scoped_key() -> None:
+    redacted = _scrub("key=sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123")
+    assert redacted == "key=sk-[REDACTED]"
+    assert "AbCdEfGhIjKlMnOpQrStUvWxYz0123" not in redacted
+    assert "proj" not in redacted
+
+
+def test_scrub_redacts_openai_service_account_key() -> None:
+    redacted = _scrub("key=sk-svcacct-AbCdEfGhIjKlMnOpQrStUvWxYz0123")
+    assert redacted == "key=sk-[REDACTED]"
+    assert "AbCdEfGhIjKlMnOpQrStUvWxYz0123" not in redacted
+    assert "svcacct" not in redacted
+
+
+def test_scrub_redacts_openai_admin_key() -> None:
+    redacted = _scrub("key=sk-admin-AbCdEfGhIjKlMnOpQrStUvWxYz0123")
+    assert redacted == "key=sk-[REDACTED]"
+    assert "admin" not in redacted
+
+
+def test_scrub_redacts_openai_user_key() -> None:
+    redacted = _scrub("key=sk-user-AbCdEfGhIjKlMnOpQrStUvWxYz0123")
+    assert redacted == "key=sk-[REDACTED]"
+    assert "user" not in redacted
+
+
+def test_scrub_anthropic_wins_when_an_openai_proj_lookalike_appears_after() -> None:
+    # Sequence: anthropic key first, OpenAI project-scoped key second. The
+    # anthropic regex runs first and consumes only its own match; the bare-
+    # ``sk-`` regex must then catch the OpenAI project-scoped key without
+    # leaving leakage from either.
+    text = (
+        "k1=sk-ant-api03-thequickbrownfox1234567890 "
+        "k2=sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123"
+    )
+    redacted = _scrub(text)
+    assert "thequickbrownfox" not in redacted
+    assert "AbCdEfGhIjKlMnOpQrStUvWxYz0123" not in redacted
+    assert "sk-ant-[REDACTED]" in redacted
+    assert "sk-[REDACTED]" in redacted
+
+
+def test_scrub_does_not_double_redact_anthropic_key_via_bare_sk_rule() -> None:
+    # After the Anthropic rule replaces the key with ``sk-ant-[REDACTED]``,
+    # the bare-``sk-`` rule must NOT match that placeholder (the brackets
+    # prevent the body class from matching, so the placeholder is stable).
+    redacted = _scrub("token=sk-ant-api03-abcdefghij1234567890")
+    assert redacted == "token=sk-ant-[REDACTED]"
+
+
 def test_secret_patterns_shape_is_three_pairs() -> None:
     assert len(SECRET_PATTERNS) == 3
 

@@ -24,9 +24,19 @@ from typing import Any
 # Order matters: ``sk-ant-`` MUST match before bare ``sk-``, else the OpenAI
 # regex would cannibalize Anthropic keys. Patterns are part of the contract
 # (per CLAUDE.md) — module-level constant, not a tunable threshold.
+#
+# CR-04: the bare ``sk-`` pattern previously required 20+ alphanumerics
+# IMMEDIATELY after ``sk-`` and so could not match production OpenAI key
+# shapes that embed a ``-``-separated prefix (e.g., ``sk-proj-...``,
+# ``sk-svcacct-...``, ``sk-admin-...``, ``sk-user-...``). We now allow zero
+# or more lowercase ``[a-z]+-`` prefix sections before the long body so all
+# documented OpenAI key shapes — past, present, and forward-compatible — get
+# redacted. The Anthropic rule still runs first, so Anthropic keys remain
+# scrubbed via the more specific ``sk-ant-`` rule and never fall through to
+# the bare-``sk-`` rule.
 SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "sk-ant-[REDACTED]"),
-    (re.compile(r"sk-[A-Za-z0-9]{20,}"), "sk-[REDACTED]"),
+    (re.compile(r"sk-(?:[a-z]+-)*[A-Za-z0-9_-]{20,}"), "sk-[REDACTED]"),
     (re.compile(r'("[A-Za-z0-9_]*api_key"\s*:\s*)"[^"]+"'), r'\1"[REDACTED]"'),
 )
 
