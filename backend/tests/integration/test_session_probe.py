@@ -190,3 +190,71 @@ def test_session_create_rejects_unknown_provider_at_route_layer(
     assert response.status_code == 400
     body = response.json()
     assert "Invalid provider" in body["detail"]
+
+
+def _make_lmstudio_models_response(model_ids: list[str]) -> MagicMock:
+    """Return a MagicMock that mimics httpx.Response for LM Studio's /models."""
+    response = MagicMock()
+    response.raise_for_status = MagicMock(return_value=None)
+    response.json = MagicMock(
+        return_value={
+            "object": "list",
+            "data": [{"id": mid, "object": "model"} for mid in model_ids],
+        }
+    )
+    return response
+
+
+def test_session_create_accepts_lmstudio_provider_at_route_layer(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for AR-01: ``provider="lmstudio"`` must pass the route validator.
+
+    Before AR-01's fix, ``Settings.get_available_providers()`` only listed
+    ``ollama``/``openai``/``anthropic`` — every ``POST /api/chat/session`` with
+    ``provider="lmstudio"`` returned HTTP 400 ``"Invalid provider: lmstudio"``
+    before the factory was ever reached, making the entire LM Studio
+    implementation unreachable from the frontend. This test asserts the
+    provider name is now accepted: with a mocked LM Studio daemon the call
+    proceeds to the probe and returns 201.
+    """
+    monkeypatch.setattr(
+        httpx.AsyncClient,
+        "get",
+        AsyncMock(
+            return_value=_make_lmstudio_models_response(["qwen2.5-coder-7b"]),
+        ),
+    )
+
+    response = client.post(
+        "/api/chat/session",
+        headers=auth_headers,
+        json={
+            "provider": "lmstudio",
+            "model": "qwen2.5-coder-7b",
+            "base_url": "http://localhost:1234/v1",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["provider"] == "lmstudio"
+    assert body["model"] == "qwen2.5-coder-7b"
+    assert "session_id" in body
+
+
+def test_get_available_providers_lists_all_factory_dispatch_arms() -> None:
+    """Regression for AR-01: every provider the factory builds must be listed.
+
+    The factory has match arms for ``ollama``, ``lmstudio``, ``openai``, and
+    ``anthropic``. ``Settings.get_available_providers()`` is the route-layer
+    whitelist; if any factory arm is missing here the route returns 400
+    before the factory is reached, silently making that provider unreachable.
+    This test fails if a future contributor adds a factory arm without also
+    registering it on ``Settings``.
+    """
+    from app.config import Settings
+
+    expected_providers = {"ollama", "lmstudio", "openai", "anthropic"}
+    actual_providers = set(Settings().get_available_providers().keys())
+    assert actual_providers == expected_providers

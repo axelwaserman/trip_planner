@@ -104,6 +104,16 @@ class Settings(BaseSettings):
                     "deepseek-r1:8b",
                 ],
             },
+            "lmstudio": {
+                # Local OpenAI-compatible daemon. Model existence is owned by
+                # LMStudioProvider.validate_config (route layer skips the
+                # whitelist check for local providers per
+                # _resolve_allowed_cloud_models). The empty curated list keeps
+                # the route validator's defense-in-depth check satisfied
+                # without forcing a frozen model set.
+                "available": True,
+                "models": [],
+            },
             "openai": {
                 "available": bool(self.openai_api_key),
                 "models": [
