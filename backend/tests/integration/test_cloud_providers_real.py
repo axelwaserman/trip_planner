@@ -53,9 +53,7 @@ async def test_openai_provider_real_chat_turn() -> None:
 
     # Act
     bound = provider.bind_tools([])
-    result = await bound.ainvoke(
-        [HumanMessage(content="Reply with just the single word: pong")]
-    )
+    result = await bound.ainvoke([HumanMessage(content="Reply with just the single word: pong")])
 
     # Assert: tolerate punctuation; the model often returns "pong" or "pong."
     assert isinstance(result.content, str)
@@ -85,9 +83,7 @@ async def test_anthropic_provider_real_chat_turn() -> None:
 
     # Act
     bound = provider.bind_tools([])
-    result = await bound.ainvoke(
-        [HumanMessage(content="Reply with just the single word: pong")]
-    )
+    result = await bound.ainvoke([HumanMessage(content="Reply with just the single word: pong")])
 
     # Assert: tolerant of str-or-list content shape per langchain_anthropic 1.4.3
     assert "pong" in str(result.content).lower()

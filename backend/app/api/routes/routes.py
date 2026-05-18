@@ -121,9 +121,7 @@ async def chat(
             # exception server-side (the ApiKeyScrubber redacts any key-
             # shaped substrings before the formatter runs) and emit a
             # static, generic message to the client.
-            logger.exception(
-                "chat_stream failed for session %s", request.session_id
-            )
+            logger.exception("chat_stream failed for session %s", request.session_id)
             error_event = StreamEvent(
                 chunk="Sorry, something went wrong. Please try again.",
                 session_id=request.session_id,
@@ -220,9 +218,7 @@ async def create_session(
             )
 
         if request.model:
-            allowed_models = _resolve_allowed_cloud_models(
-                provider=request.provider, curated=providers
-            )
+            allowed_models = _resolve_allowed_cloud_models(provider=request.provider, curated=providers)
             if allowed_models is not None and request.model not in allowed_models:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

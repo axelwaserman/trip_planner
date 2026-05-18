@@ -114,10 +114,7 @@ def test_scrub_anthropic_wins_when_an_openai_proj_lookalike_appears_after() -> N
     # anthropic regex runs first and consumes only its own match; the bare-
     # ``sk-`` regex must then catch the OpenAI project-scoped key without
     # leaving leakage from either.
-    text = (
-        "k1=sk-ant-api03-thequickbrownfox1234567890 "
-        "k2=sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123"
-    )
+    text = "k1=sk-ant-api03-thequickbrownfox1234567890 k2=sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123"
     redacted = _scrub(text)
     assert "thequickbrownfox" not in redacted
     assert "AbCdEfGhIjKlMnOpQrStUvWxYz0123" not in redacted

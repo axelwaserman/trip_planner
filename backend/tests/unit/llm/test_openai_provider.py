@@ -15,7 +15,6 @@ API keys appear in fixtures only as the literal strings ``"sk-test"`` /
 T-04.5-04-02 (disposition: mitigate).
 """
 
-
 from app.llm.errors import ProbeErrorCode
 from app.llm.providers.openai import OpenAIProvider
 

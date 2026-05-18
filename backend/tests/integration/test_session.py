@@ -88,9 +88,7 @@ class TestDeleteSession:
         # Session must still exist after the rejected attempt.
         assert session_id in chat_service._metadata
 
-    def test_delete_nonexistent_session_returns_404(
-        self, client: TestClient, auth_headers: dict[str, str]
-    ) -> None:
+    def test_delete_nonexistent_session_returns_404(self, client: TestClient, auth_headers: dict[str, str]) -> None:
         response = client.delete("/api/chat/session/does-not-exist", headers=auth_headers)
 
         assert response.status_code == 404
@@ -104,9 +102,7 @@ class TestDeleteSession:
 
         assert response.status_code == 404
 
-    def test_user_cannot_delete_another_users_session(
-        self, client: TestClient, two_users: None
-    ) -> None:
+    def test_user_cannot_delete_another_users_session(self, client: TestClient, two_users: None) -> None:
         """Regression for CR-01: a non-owner must NOT be able to delete the session.
 
         Alice creates a session; Bob tries to delete it with his own valid
@@ -126,9 +122,7 @@ class TestDeleteSession:
 
         # Bob tries to delete alice's session — must fail with 404 (not 204,
         # not 403) so existence is not leaked.
-        delete_response = client.delete(
-            f"/api/chat/session/{alice_session_id}", headers=bob_headers
-        )
+        delete_response = client.delete(f"/api/chat/session/{alice_session_id}", headers=bob_headers)
         assert delete_response.status_code == 404
 
         # Session still exists and is still owned by alice.
@@ -136,9 +130,7 @@ class TestDeleteSession:
         assert chat_service._metadata[alice_session_id]["user_id"] == "alice"
 
         # Alice can still delete her own session.
-        owner_delete = client.delete(
-            f"/api/chat/session/{alice_session_id}", headers=alice_headers
-        )
+        owner_delete = client.delete(f"/api/chat/session/{alice_session_id}", headers=alice_headers)
         assert owner_delete.status_code == 204
         assert alice_session_id not in chat_service._metadata
 
@@ -159,9 +151,7 @@ class TestChatInvalidSession:
         )
         assert response.status_code == 404
 
-    def test_user_cannot_post_to_another_users_session(
-        self, client: TestClient, two_users: None
-    ) -> None:
+    def test_user_cannot_post_to_another_users_session(self, client: TestClient, two_users: None) -> None:
         """Regression for CR-02: a non-owner cannot POST to /api/chat.
 
         Alice creates a session; Bob (with his own valid token) tries to

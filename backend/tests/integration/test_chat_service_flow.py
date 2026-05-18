@@ -83,9 +83,7 @@ async def test_chat_stream_retains_history_across_turns() -> None:
     assert isinstance(msgs[3], AIMessage)
 
 
-async def test_post_chat_streams_tool_events_via_mock_llm(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+async def test_post_chat_streams_tool_events_via_mock_llm(client: TestClient, auth_headers: dict[str, str]) -> None:
     """HTTP layer: POST /api/chat with MockLLM injected produces tool event SSE stream."""
     # Arrange — replace app.state.chat_service BEFORE the POST
     service = make_chat_service_with_mock_llm(MockLLMStream.single_tool_call())

@@ -26,7 +26,6 @@ duck-typed surfaces. The ``BoundProvider`` Protocol exists separately because
 NOT a ``BaseChatModel`` (verified against installed ``langchain-core`` 1.x).
 """
 
-
 from app.llm.protocol import BoundProvider, LLMProvider
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.ollama import OllamaProvider
@@ -35,9 +34,7 @@ from app.llm.providers.openai import OpenAIProvider
 
 def test_ollama_provider_satisfies_llm_provider_protocol() -> None:
     """``isinstance(OllamaProvider(...), LLMProvider)`` is True."""
-    provider = OllamaProvider(
-        model="qwen3:4b", base_url="http://localhost:11434", probe_timeout_seconds=1.5
-    )
+    provider = OllamaProvider(model="qwen3:4b", base_url="http://localhost:11434", probe_timeout_seconds=1.5)
     assert isinstance(provider, LLMProvider)
 
 
@@ -49,9 +46,7 @@ def test_openai_provider_satisfies_llm_provider_protocol() -> None:
 
 def test_anthropic_provider_satisfies_llm_provider_protocol() -> None:
     """``isinstance(AnthropicProvider(...), LLMProvider)`` is True."""
-    provider = AnthropicProvider(
-        model="claude-3-5-sonnet-20241022", api_key="sk-ant-test"
-    )
+    provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key="sk-ant-test")
     assert isinstance(provider, LLMProvider)
 
 
@@ -62,13 +57,9 @@ def test_raw_providers_do_not_satisfy_bound_provider_protocol() -> None:
     BoundProvider Protocol requires ``ainvoke`` + ``astream``. The structural
     isinstance check fails because the raw classes have neither.
     """
-    ollama = OllamaProvider(
-        model="qwen3:4b", base_url="http://localhost:11434", probe_timeout_seconds=1.5
-    )
+    ollama = OllamaProvider(model="qwen3:4b", base_url="http://localhost:11434", probe_timeout_seconds=1.5)
     openai = OpenAIProvider(model="gpt-4o-mini", api_key="sk-test")
-    anthropic = AnthropicProvider(
-        model="claude-3-5-sonnet-20241022", api_key="sk-ant-test"
-    )
+    anthropic = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key="sk-ant-test")
     assert not isinstance(ollama, BoundProvider)
     assert not isinstance(openai, BoundProvider)
     assert not isinstance(anthropic, BoundProvider)

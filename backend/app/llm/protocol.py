@@ -57,9 +57,7 @@ class BoundProvider(Protocol):
 
     async def ainvoke(self, input: list[BaseMessage], **kwargs: Any) -> AIMessage: ...
 
-    def astream(
-        self, input: list[BaseMessage], **kwargs: Any
-    ) -> AsyncIterator[AIMessageChunk]: ...
+    def astream(self, input: list[BaseMessage], **kwargs: Any) -> AsyncIterator[AIMessageChunk]: ...
 
 
 @runtime_checkable

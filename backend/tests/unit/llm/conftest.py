@@ -40,9 +40,7 @@ def mock_ollama_tags_response() -> Callable[[list[str]], MagicMock]:
     def _build(model_names: list[str]) -> MagicMock:
         response = MagicMock(spec=httpx.Response)
         response.status_code = 200
-        response.json.return_value = {
-            "models": [{"name": name, "model": name} for name in model_names]
-        }
+        response.json.return_value = {"models": [{"name": name, "model": name} for name in model_names]}
         response.raise_for_status = MagicMock()
         return response
 

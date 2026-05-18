@@ -74,9 +74,7 @@ def test_chat_endpoint_streams_response(client: TestClient, auth_headers: dict[s
         assert "An error occurred" not in response.text
 
 
-def test_chat_endpoint_does_not_leak_exception_text_to_client(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_chat_endpoint_does_not_leak_exception_text_to_client(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Regression for CR-05: upstream exceptions must not leak into the SSE wire.
 
     Patch chat_stream to raise an exception whose ``str()`` contains
@@ -98,9 +96,7 @@ def test_chat_endpoint_does_not_leak_exception_text_to_client(
         # before raising so the iterator can be advanced into the body.
         if False:
             yield StreamEvent(type="content", chunk="never", session_id=session_id)
-        raise RuntimeError(
-            f"upstream call to {sensitive_url} failed with key {sensitive_key}"
-        )
+        raise RuntimeError(f"upstream call to {sensitive_url} failed with key {sensitive_key}")
 
     with patch("app.chat.ChatService.chat_stream", side_effect=boom):
         response = client.post(
@@ -122,11 +118,7 @@ def test_chat_endpoint_does_not_leak_exception_text_to_client(
     assert "An error occurred:" not in body
 
     # The SSE event must still be a well-formed StreamEvent of type=content.
-    data_lines = [
-        line[len("data: ") :]
-        for line in body.strip().split("\n")
-        if line.startswith("data: ")
-    ]
+    data_lines = [line[len("data: ") :] for line in body.strip().split("\n") if line.startswith("data: ")]
     assert len(data_lines) >= 1
     parsed = json.loads(data_lines[-1])
     assert parsed["type"] == "content"

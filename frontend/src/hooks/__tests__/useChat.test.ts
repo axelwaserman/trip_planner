@@ -635,7 +635,7 @@ describe('resume session signal', () => {
   }
 
   it('fetches /api/chat/sessions/:id and replays messages on ?session=<id>', async () => {
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-resumed')) {
         return {
           ok: true,
@@ -681,7 +681,7 @@ describe('resume session signal', () => {
   })
 
   it('falls through to a fresh session when ?session=<id> 404s (stale link)', async () => {
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-gone')) {
         return { ok: false, status: 404, json: async () => ({}), body: null }
       }

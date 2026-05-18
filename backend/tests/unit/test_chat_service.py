@@ -128,9 +128,7 @@ class TestChatStreamPersistence:
     when the user navigates back.
     """
 
-    async def _make_service_with_streamed_chunks(
-        self, chunks: list[AIMessage]
-    ) -> tuple[ChatService, str]:
+    async def _make_service_with_streamed_chunks(self, chunks: list[AIMessage]) -> tuple[ChatService, str]:
         """Build a service whose bound provider streams the given chunks."""
         flight_client = MagicMock(spec=FlightAPIClient)
         bound = MagicMock(spec=BoundProvider)
@@ -153,9 +151,7 @@ class TestChatStreamPersistence:
         """The user turn must land in history BEFORE the LLM streams anything."""
         # First chunk yields content; we'll inspect history after only the
         # FIRST chunk has flowed (before the stream completes).
-        service, session_id = await self._make_service_with_streamed_chunks(
-            [AIMessage(content="response")]
-        )
+        service, session_id = await self._make_service_with_streamed_chunks([AIMessage(content="response")])
 
         history = service.get_session_history(session_id)
         # Pre-stream: history is empty.
@@ -166,10 +162,7 @@ class TestChatStreamPersistence:
         # message via history.add_user_message at the top.
         await gen.__anext__()
 
-        assert any(
-            isinstance(m, HumanMessage) and m.content == "Plan a trip"
-            for m in history.messages
-        )
+        assert any(isinstance(m, HumanMessage) and m.content == "Plan a trip" for m in history.messages)
 
     async def test_partial_stream_persists_what_was_accumulated(self) -> None:
         """A stream that's partially consumed before being closed (e.g. client
@@ -193,9 +186,7 @@ class TestChatStreamPersistence:
         await gen.aclose()
 
         # User turn persisted.
-        assert any(
-            isinstance(m, HumanMessage) and m.content == "hi" for m in history.messages
-        )
+        assert any(isinstance(m, HumanMessage) and m.content == "hi" for m in history.messages)
         # AI turn persisted (with whatever was accumulated up to the close).
         ai_messages = [m for m in history.messages if isinstance(m, AIMessage)]
         assert len(ai_messages) == 1

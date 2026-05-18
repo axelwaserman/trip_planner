@@ -61,9 +61,7 @@ class ChatService:
         # Wire the tool's client dependency here so callers don't need to know internals
         search_flights._flight_client = flight_client  # type: ignore[attr-defined]
 
-    async def create_session(
-        self, config: SessionLLMConfig, user_id: str
-    ) -> tuple[str, ProbeError | None]:
+    async def create_session(self, config: SessionLLMConfig, user_id: str) -> tuple[str, ProbeError | None]:
         """Create a new chat session: build provider, probe, bind tools, store.
 
         Args:
@@ -131,9 +129,7 @@ class ChatService:
         results.sort(key=lambda info: info.created_at, reverse=True)
         return results
 
-    def get_history_for_user(
-        self, session_id: str, user_id: str
-    ) -> ChatSessionHistoryResponse | None:
+    def get_history_for_user(self, session_id: str, user_id: str) -> ChatSessionHistoryResponse | None:
         """Return the session's user/assistant history, if owned by ``user_id``.
 
         Returns ``None`` when the session doesn't exist OR when ``user_id``
@@ -316,7 +312,11 @@ class ChatService:
                     # Stream the final response
                     accumulated_final = ""
                     async for final_chunk in bound.astream(messages_with_tools):
-                        if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
+                        if (
+                            hasattr(final_chunk, "content")
+                            and isinstance(final_chunk.content, str)
+                            and final_chunk.content
+                        ):
                             accumulated_final += final_chunk.content
                             yield StreamEvent(
                                 chunk=final_chunk.content,

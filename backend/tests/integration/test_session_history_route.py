@@ -114,9 +114,7 @@ def test_get_history_returns_user_and_assistant_turns_in_order(
     ]
 
 
-def test_get_history_returns_404_when_user_does_not_own_session(
-    client: TestClient, two_users: None
-) -> None:
+def test_get_history_returns_404_when_user_does_not_own_session(client: TestClient, two_users: None) -> None:
     """Bob must not see Alice's history. 404 on miss preserves the existence
     oracle threat-model parity with DELETE /api/chat/session/{id}.
     """
@@ -132,15 +130,11 @@ def test_get_history_returns_404_when_user_does_not_own_session(
     history.add_message(HumanMessage(content="alice's secret trip plan"))
 
     # Bob must NOT see alice's history.
-    bob_response = client.get(
-        f"/api/chat/sessions/{alice_session_id}", headers=bob_headers
-    )
+    bob_response = client.get(f"/api/chat/sessions/{alice_session_id}", headers=bob_headers)
     assert bob_response.status_code == 404
 
     # Alice still can.
-    alice_response = client.get(
-        f"/api/chat/sessions/{alice_session_id}", headers=alice_headers
-    )
+    alice_response = client.get(f"/api/chat/sessions/{alice_session_id}", headers=alice_headers)
     assert alice_response.status_code == 200
     assert alice_response.json()["messages"] == [
         {"role": "user", "content": "alice's secret trip plan"},

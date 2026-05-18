@@ -112,21 +112,11 @@ def test_model_supports_reasoning_matches_configured_prefixes() -> None:
     mistral / llama3).
     """
     # Default-prefix provider (qwen3, deepseek-r1).
-    qwen = OllamaProvider(
-        model="qwen3:4b", base_url="http://x", probe_timeout_seconds=1.0
-    )
-    deepseek = OllamaProvider(
-        model="deepseek-r1:8b", base_url="http://x", probe_timeout_seconds=1.0
-    )
-    qwen35 = OllamaProvider(
-        model="qwen3.5:9b", base_url="http://x", probe_timeout_seconds=1.0
-    )
-    mistral = OllamaProvider(
-        model="mistral:7b", base_url="http://x", probe_timeout_seconds=1.0
-    )
-    llama = OllamaProvider(
-        model="llama3:8b", base_url="http://x", probe_timeout_seconds=1.0
-    )
+    qwen = OllamaProvider(model="qwen3:4b", base_url="http://x", probe_timeout_seconds=1.0)
+    deepseek = OllamaProvider(model="deepseek-r1:8b", base_url="http://x", probe_timeout_seconds=1.0)
+    qwen35 = OllamaProvider(model="qwen3.5:9b", base_url="http://x", probe_timeout_seconds=1.0)
+    mistral = OllamaProvider(model="mistral:7b", base_url="http://x", probe_timeout_seconds=1.0)
+    llama = OllamaProvider(model="llama3:8b", base_url="http://x", probe_timeout_seconds=1.0)
     assert qwen._model_supports_reasoning() is True
     assert deepseek._model_supports_reasoning() is True
     assert qwen35._model_supports_reasoning() is True  # qwen3.5 starts with qwen3
