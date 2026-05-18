@@ -1,57 +1,167 @@
-"""Chat service using LangChain with tool calling."""
+"""Chat service using LangChain with tool calling.
+
+Per Phase 4.5 Plan 06, ``ChatService`` no longer holds a singleton bound LLM.
+Instead, it owns a per-app :class:`app.llm.factory.LLMProviderFactory` and a
+``self._bound_providers`` dict keyed by ``session_id``. ``create_session`` is
+``async`` because it absorbs the 4.2 provider-probe step (now per-provider via
+:meth:`app.llm.protocol.LLMProvider.validate_config`) — the sequence is
+``factory.build → validate_config → bind_tools → store``.
+
+The 4.2 default fallbacks (``provider="ollama"``, ``model="qwen3:4b"``) live
+in the route layer (``app.api.routes.routes.create_session``); the
+:class:`app.llm.factory.SessionLLMConfig` dataclass requires both fields to be
+non-``None`` at construction.
+"""
+
+from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.models import StreamEvent
-from app.tools.flight_client import FlightAPIClient
+from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo, StreamEvent
 from app.tools.flight_search import search_flights
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from app.llm.errors import ProbeError
+    from app.llm.factory import LLMProviderFactory, SessionLLMConfig
+    from app.llm.protocol import BoundProvider
+    from app.tools.flight_client import FlightAPIClient
 
 
 class ChatService:
-    """Service for managing chat conversations with LangChain and tool calling."""
+    """Service for managing chat conversations with LangChain and tool calling.
 
-    def __init__(self, flight_client: FlightAPIClient, llm: BaseChatModel) -> None:
-        """Initialize the chat service with flight client and LLM.
+    Owns a per-app :class:`LLMProviderFactory` plus a per-session bound provider
+    cache. ``create_session`` is ``async`` and runs the provider probe inline;
+    on probe success the bound provider is stashed in ``self._bound_providers``
+    keyed by ``session_id`` and consumed by :meth:`chat_stream`.
+    """
+
+    def __init__(self, flight_client: FlightAPIClient, factory: LLMProviderFactory) -> None:
+        """Initialize the chat service with flight client and LLM factory.
 
         Args:
-            flight_client: Flight API client injected into the search_flights tool
-            llm: LangChain BaseChatModel instance (ChatOllama, ChatOpenAI, etc.)
+            flight_client: Flight API client injected into the search_flights tool.
+            factory: Per-app :class:`LLMProviderFactory`. Sessions construct
+                their own bound provider via :meth:`create_session`.
         """
+        self._factory = factory
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
         self._metadata: dict[str, dict[str, str]] = {}  # Session metadata (provider, model)
+        self._bound_providers: dict[str, BoundProvider] = {}
         self._last_activity: dict[str, float] = {}
 
         # Wire the tool's client dependency here so callers don't need to know internals
         search_flights._flight_client = flight_client  # type: ignore[attr-defined]
 
-        # Bind tools to LLM
-        self.llm = llm.bind_tools([search_flights])
-
-    def create_session(self, provider: str | None = None, model: str | None = None) -> str:
-        """Create a new chat session with optional provider/model selection.
+    async def create_session(self, config: SessionLLMConfig, user_id: str) -> tuple[str, ProbeError | None]:
+        """Create a new chat session: build provider, probe, bind tools, store.
 
         Args:
-            provider: LLM provider name (ollama, openai, anthropic)
-            model: Model name for the provider
+            config: Per-session LLM configuration (provider/model/base_url/api_key).
+            user_id: Authenticated username — used as the session-partition key
+                (D-22, D-27; RESEARCH.md Open Question 5 RESOLVED). Required.
 
         Returns:
-            New session ID (UUID)
+            ``(session_id, None)`` on success; ``("", probe_error)`` when the
+            provider's ``validate_config`` returns a structured ``ProbeError``.
+            The route layer maps the error to an HTTP status (502 for
+            ``PROVIDER_UNREACHABLE``, 400 for everything else).
         """
+        provider = self._factory.build(config)
+        probe_error = await provider.validate_config()
+        if probe_error is not None:
+            return "", probe_error
+
+        bound = provider.bind_tools([search_flights])
         session_id = str(uuid.uuid4())
         self._histories[session_id] = InMemoryChatMessageHistory()
+        self._bound_providers[session_id] = bound
         self._metadata[session_id] = {
-            "provider": provider or "ollama",
-            "model": model or "qwen3:4b",
-            "created_at": str(time.time()),
+            "provider": config.provider,
+            "model": config.model,
+            "user_id": user_id,
+            "created_at": datetime.now(UTC).isoformat(),
         }
         self._last_activity[session_id] = time.time()
-        return session_id
+        return session_id, None
+
+    def list_sessions_for_user(self, user_id: str) -> list[ChatSessionInfo]:
+        """Return ``ChatSessionInfo`` records for sessions owned by ``user_id``.
+
+        Sessions are partitioned by ``_metadata[session_id]["user_id"]``
+        (D-22, D-27; RESEARCH.md Open Question 5 RESOLVED — partition now,
+        not at the Phase 5 PG migration). ``first_message_preview`` is the
+        first ``HumanMessage`` content truncated to 80 chars, or ``None``
+        when the history is empty. Results are sorted newest-first by
+        ``created_at`` so the sidebar's reverse-chronological order is the
+        natural default.
+        """
+        results: list[ChatSessionInfo] = []
+        for session_id, metadata in self._metadata.items():
+            if metadata.get("user_id") != user_id:
+                continue
+            history = self._histories.get(session_id)
+            preview: str | None = None
+            if history is not None:
+                for msg in history.messages:
+                    if isinstance(msg, HumanMessage):
+                        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                        preview = content[:80]
+                        break
+            results.append(
+                ChatSessionInfo(
+                    session_id=session_id,
+                    provider=metadata["provider"],
+                    model=metadata["model"],
+                    created_at=metadata["created_at"],
+                    first_message_preview=preview,
+                )
+            )
+        # Newest first — the sidebar is reverse-chronological.
+        results.sort(key=lambda info: info.created_at, reverse=True)
+        return results
+
+    def get_history_for_user(self, session_id: str, user_id: str) -> ChatSessionHistoryResponse | None:
+        """Return the session's user/assistant history, if owned by ``user_id``.
+
+        Returns ``None`` when the session doesn't exist OR when ``user_id``
+        is not the owner. Both paths collapse to the same return so the route
+        layer can map both to ``404 Not Found`` — leaking ``403 vs 404``
+        would be a session-existence oracle (same threat-model rationale as
+        ``DELETE /api/chat/session/{id}``).
+
+        Only ``HumanMessage`` and ``AIMessage`` entries are surfaced; tool
+        execution traces and reasoning chunks are stream-only artefacts and
+        don't round-trip cleanly through the chat history's serialised form.
+        """
+        metadata = self._metadata.get(session_id)
+        if metadata is None or metadata.get("user_id") != user_id:
+            return None
+        history = self._histories.get(session_id)
+        messages: list[ChatHistoryMessage] = []
+        if history is not None:
+            for msg in history.messages:
+                if isinstance(msg, HumanMessage):
+                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    messages.append(ChatHistoryMessage(role="user", content=content))
+                elif isinstance(msg, AIMessage):
+                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    if content:  # Skip empty AIMessages emitted only for tool calls.
+                        messages.append(ChatHistoryMessage(role="assistant", content=content))
+        return ChatSessionHistoryResponse(
+            session_id=session_id,
+            provider=metadata["provider"],
+            model=metadata["model"],
+            messages=messages,
+        )
 
     def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         """Get history for a session.
@@ -85,6 +195,7 @@ class ChatService:
         for session_id in expired:
             self._histories.pop(session_id, None)
             self._metadata.pop(session_id, None)
+            self._bound_providers.pop(session_id, None)
             self._last_activity.pop(session_id, None)
 
         return len(expired)
@@ -100,6 +211,7 @@ class ChatService:
             StreamEvent objects with simplified structure
         """
         history = self.get_session_history(session_id)
+        bound = self._bound_providers[session_id]
 
         # Build messages with history
         from langchain_core.messages import BaseMessage
@@ -107,111 +219,125 @@ class ChatService:
         history_messages: list[BaseMessage] = list(history.messages)
         messages: list[BaseMessage] = [*history_messages, HumanMessage(content=message)]
 
+        # Persist the user turn upfront so a switch-conversations / disconnect
+        # mid-stream still leaves the history complete on resume. The previous
+        # behaviour appended user + assistant only at end-of-stream — if the
+        # client disconnected (e.g. switched to a different chat in the
+        # Sidebar), the history's view of "what just happened" was empty.
+        history.add_user_message(message)
+
         # Track state
         tool_was_called = False
         accumulated_content = ""
         tool_call_message = None
         tool_results = []
 
-        # Stream LLM response
-        async for chunk in self.llm.astream(messages):
-            # Check for reasoning_content (thinking)
-            has_thinking = False
-            if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
-                reasoning = chunk.additional_kwargs.get("reasoning_content")
-                if reasoning:
-                    has_thinking = True
-                    yield StreamEvent(
-                        chunk=reasoning,
-                        session_id=session_id,
-                        type="thinking",
-                    )
-
-            # Process content (only if not thinking)
-            if not has_thinking and hasattr(chunk, "content") and chunk.content:
-                content = chunk.content
-                if isinstance(content, str) and content.strip():
-                    accumulated_content += content
-                    yield StreamEvent(
-                        chunk=content,
-                        session_id=session_id,
-                        type="content",
-                    )
-
-            # Check for tool calls
-            if isinstance(chunk, AIMessage) and chunk.tool_calls:
-                tool_was_called = True
-                tool_call_message = chunk
-
-                from langchain_core.messages import ToolMessage
-
-                tool_messages: list[ToolMessage] = []
-                for tool_call in chunk.tool_calls:
-                    if tool_call["name"] == "search_flights":
-                        # Emit tool_call event
-                        tool_start_time = time.time()
+        try:
+            # Stream LLM response
+            async for chunk in bound.astream(messages):
+                # Check for reasoning_content (thinking)
+                has_thinking = False
+                if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
+                    reasoning = chunk.additional_kwargs.get("reasoning_content")
+                    if reasoning:
+                        has_thinking = True
                         yield StreamEvent(
-                            chunk="",
+                            chunk=reasoning,
                             session_id=session_id,
-                            type="tool_call",
-                            tool_name=tool_call["name"],
-                            tool_args=tool_call["args"],
+                            type="thinking",
                         )
 
-                        # Execute the tool
-                        tool_result = await search_flights.ainvoke(tool_call["args"])
-                        tool_end_time = time.time()
-                        elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
-
-                        # Emit tool_result event
+                # Process content (only if not thinking)
+                if not has_thinking and hasattr(chunk, "content") and chunk.content:
+                    content = chunk.content
+                    if isinstance(content, str) and content.strip():
+                        accumulated_content += content
                         yield StreamEvent(
-                            chunk="",
-                            session_id=session_id,
-                            type="tool_result",
-                            tool_name=tool_call["name"],
-                            tool_result=str(tool_result),
-                            elapsed_ms=elapsed_ms,
-                        )
-
-                        tool_messages.append(
-                            ToolMessage(
-                                content=str(tool_result),
-                                tool_call_id=tool_call.get("id", ""),
-                            )
-                        )
-
-                tool_results = tool_messages
-
-                # Get final response after tool execution
-                messages_with_tools: list[BaseMessage] = [
-                    *messages,
-                    chunk,
-                    *tool_messages,
-                ]
-
-                # Stream the final response
-                accumulated_final = ""
-                async for final_chunk in self.llm.astream(messages_with_tools):
-                    if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
-                        accumulated_final += final_chunk.content
-                        yield StreamEvent(
-                            chunk=final_chunk.content,
+                            chunk=content,
                             session_id=session_id,
                             type="content",
                         )
 
-                accumulated_content = accumulated_final
-                break
+                # Check for tool calls
+                if isinstance(chunk, AIMessage) and chunk.tool_calls:
+                    tool_was_called = True
+                    tool_call_message = chunk
 
-        # Add messages to history
-        history.add_user_message(message)
+                    from langchain_core.messages import ToolMessage
 
-        if tool_was_called and tool_call_message and tool_results:
-            history.add_message(tool_call_message)
-            for tool_msg in tool_results:
-                history.add_message(tool_msg)
+                    tool_messages: list[ToolMessage] = []
+                    for tool_call in chunk.tool_calls:
+                        if tool_call["name"] == "search_flights":
+                            # Emit tool_call event
+                            tool_start_time = time.time()
+                            yield StreamEvent(
+                                chunk="",
+                                session_id=session_id,
+                                type="tool_call",
+                                tool_name=tool_call["name"],
+                                tool_args=tool_call["args"],
+                            )
 
-        history.add_ai_message(accumulated_content)
+                            # Execute the tool
+                            tool_result = await search_flights.ainvoke(tool_call["args"])
+                            tool_end_time = time.time()
+                            elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
+
+                            # Emit tool_result event
+                            yield StreamEvent(
+                                chunk="",
+                                session_id=session_id,
+                                type="tool_result",
+                                tool_name=tool_call["name"],
+                                tool_result=str(tool_result),
+                                elapsed_ms=elapsed_ms,
+                            )
+
+                            tool_messages.append(
+                                ToolMessage(
+                                    content=str(tool_result),
+                                    tool_call_id=tool_call.get("id", ""),
+                                )
+                            )
+
+                    tool_results = tool_messages
+
+                    # Get final response after tool execution
+                    messages_with_tools: list[BaseMessage] = [
+                        *messages,
+                        chunk,
+                        *tool_messages,
+                    ]
+
+                    # Stream the final response
+                    accumulated_final = ""
+                    async for final_chunk in bound.astream(messages_with_tools):
+                        if (
+                            hasattr(final_chunk, "content")
+                            and isinstance(final_chunk.content, str)
+                            and final_chunk.content
+                        ):
+                            accumulated_final += final_chunk.content
+                            yield StreamEvent(
+                                chunk=final_chunk.content,
+                                session_id=session_id,
+                                type="content",
+                            )
+
+                    accumulated_content = accumulated_final
+                    break
+        finally:
+            # Always persist whatever was accumulated, even on partial streams
+            # (client disconnect, GeneratorExit on cancellation, etc.). Empty
+            # accumulated_content is intentional: the route surfaced nothing
+            # and resuming the session shows that turn as "user said X, no
+            # response" rather than dropping the user message entirely.
+            if tool_was_called and tool_call_message and tool_results:
+                history.add_message(tool_call_message)
+                for tool_msg in tool_results:
+                    history.add_message(tool_msg)
+
+            history.add_ai_message(accumulated_content)
 
         # Ensure at least one content event
         if not accumulated_content:

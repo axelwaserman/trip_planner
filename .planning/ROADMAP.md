@@ -26,7 +26,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [ ] **Phase 4.2: Unbreak the App** — React `/login` route + protected routing (REQ-login-page); fix model selector wiring (REQ-llm-provider-ui-fix). Quick-and-dirty: keep `AUTH_USERS` env-seed; PG-seeded users land in Phase 5.
 - [x] **Phase 4.3: CI Reset + Lint/DI Migration** — drop the nightly schedule; lint + unit + integration on every PR push, required for merge; E2E retained only for auth flow + real travel API, gated on credentials. Also: ruff line length 100 → 120 across the codebase, and FastAPI routes migrated from bare `Depends()` to `Annotated[T, Depends(...)]`. (completed 2026-05-16)
 - [x] **Phase 4.4: Mock Chat in Tests** — `MockLLMStream` fixture replaces Ollama-bound chat tests; `slow` marker removed; doc unit/integration/e2e roles by purpose. (completed 2026-05-17)
-- [ ] **Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)** — `LLMProvider` Protocol + factory; dynamic Ollama model discovery from host; real OpenAI + Anthropic providers via API key (env or session payload); per-session injection.
+- [x] **Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)** — `LLMProvider` Protocol + factory; dynamic Ollama model discovery from host; real OpenAI + Anthropic + LM Studio providers via API key (env or session payload); per-session injection. (completed 2026-05-18)
 - [x] **Phase 4.6: Vendor-Neutral Tool JSON** — `search_flights()` JSON shape designed against Amadeus / Skyscanner / Google Flights field maps; `ToolExecutionCard` renders tables/lists/nested objects. (completed 2026-05-18)
 - [ ] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts.
 - [ ] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`.
@@ -140,12 +140,28 @@ Plans:
 **Requirements**: REQ-llm-provider-abstraction
 **Rework risk**: The Protocol surface (`ainvoke`, `astream`, `bind_tools`) mirrors LangChain's `BaseChatModel`; Phase 6's PydanticAI migration is `Agent`-shaped and will retire `bind_tools` from the Protocol. Either accept the rework or revisit whether to swap Phase 6 forward of Phase 5.
 **Success Criteria** (what must be TRUE):
-  1. `LLMProvider` Protocol exists with `ainvoke`, `astream`, `bind_tools`, `get_provider_name`, `validate_config`.
-  2. `OllamaProvider` discovers models dynamically via Ollama's `GET /api/tags` against `OLLAMA_BASE_URL`; no model list is hard-coded.
-  3. `OpenAIProvider` and `AnthropicProvider` are real implementations that accept API keys from env vars or session creation payload — not stubs.
+  1. `LLMProvider` Protocol exists with `bind_tools`, `get_provider_name`, `validate_config`, `list_models`; `BoundProvider` Protocol exists with `ainvoke`, `astream`. The two-Protocol shape is required because LangChain's `bind_tools` returns a `Runnable[..., AIMessage]`, not a `BaseChatModel` (RESEARCH.md Pitfall 1).
+  2. `OllamaProvider` discovers models dynamically via Ollama's `GET /api/tags` against `OLLAMA_BASE_URL`; no model list is hard-coded. Discovery is surfaced end-to-end (refresh endpoint or session-create caching) so the UI dropdown reflects live daemon state.
+  3. `OpenAIProvider`, `AnthropicProvider`, and `LMStudioProvider` are real implementations. Cloud providers accept API keys from env vars or session creation payload; LM Studio uses the OpenAI-compatible surface against a local `base_url` with the `"lm-studio"` sentinel `api_key`.
   4. `LLMProviderFactory` builds a provider from session-scoped config; `ChatService` accepts a provider via DI rather than a bare `BaseChatModel`.
-  5. `validate_config` surfaces missing API keys as clear 400 errors at session creation; the UI displays the error.
+  5. `validate_config` surfaces missing/invalid API keys and unreachable providers as clear 400/502 errors at session creation; the UI displays each `LLMProviderErrorCode` with the F1–F5 copy from UI-SPEC.
   6. Happy-path acceptance test exists for each real cloud provider, gated on the corresponding API key being present in the test environment (skipped in default PR CI).
+  7. `POST /api/providers/refresh` re-runs Ollama/LM Studio discovery on demand; `POST /api/providers/{provider}/test` validates a key/base_url against the live provider; `GET /api/chat/sessions` returns the authenticated user's session ids. All three endpoints are auth-protected.
+  8. Sidebar component lists the user's active chat sessions and provides a "+ New chat" entry point and a Settings link; chat history is partitioned per authenticated user.
+  9. A minimal log scrubber redacts `api_key` JSON fields and `sk-…` / `sk-ant-…` substring patterns from logs in 4.5; processor-based scrubbing is deferred to Phase 8.
+**Plans**: 11 plans across 6 waves
+Plans:
+- [x] 04.5-01-PLAN.md — Wave 0: deps + test scaffolds (langchain-openai/anthropic; backend/tests/unit/llm/ stubs; tests/integration/test_cloud_providers_real.py skipif)
+- [x] 04.5-02-PLAN.md — Wave 1: Protocol + errors + factory skeleton + SessionCreateRequest validators (app/llm/{protocol,errors,factory}.py; SSRF + key-length guards)
+- [x] 04.5-02b-PLAN.md — Wave 1: minimal API-key log scrubber per D-10 (app/llm/log_scrubbing.py + lifespan wiring; sequenced after Plan 06 for the wiring task)
+- [x] 04.5-03-PLAN.md — Wave 2: OllamaProvider implementation + dynamic /api/tags discovery
+- [x] 04.5-04-PLAN.md — Wave 2: OpenAIProvider implementation (real cloud via langchain_openai)
+- [x] 04.5-05-PLAN.md — Wave 2: AnthropicProvider implementation (real cloud via langchain_anthropic; Pitfall 2 guard)
+- [x] 04.5-06-PLAN.md — Wave 3: LLMProviderFactory.build + ChatService rewire (async create_session, per-session bound providers) + lifespan rewire + POST /api/chat/session payload extension
+- [x] 04.5-06b-PLAN.md — Wave 4: supplemental — POST /api/providers/refresh, POST /api/providers/{provider}/test, GET /api/chat/sessions; per-user session partitioning
+- [x] 04.5-07-PLAN.md — Wave 4: providerErrors.ts F5 + useChat extended payload + provider_settings localStorage migration
+- [x] 04.5-08-PLAN.md — Wave 4: ProviderCard + SettingsProviders page + ChatInterface badge + /settings/providers route + manual UAT
+- [x] 04.5-09-PLAN.md — Wave 5: real cloud acceptance tests (gated) + delete app/services/provider_probe.py
 **UI hint**: yes
 
 ### Phase 4.6: Vendor-Neutral Tool JSON
@@ -256,7 +272,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.2. Unbreak the App | v1 | 0 / TBD | Not started | - |
 | 4.3. CI Reset | v1 | 7/7 | Complete   | 2026-05-16 |
 | 4.4. Mock Chat in Tests | v1 | 2/2 | Complete   | 2026-05-17 |
-| 4.5. LLM Provider Abstraction (real) | v1 | 0 / TBD | Not started | - |
+| 4.5. LLM Provider Abstraction (real) | v1 | 13/13 | Complete   | 2026-05-18 |
 | 4.6. Vendor-Neutral Tool JSON | v1 | 2/2 | Complete   | 2026-05-18 |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / TBD | Not started | - |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / TBD | Not started | - |

@@ -19,5 +19,21 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Permit underscore-prefixed names for unused but signature-required
+      // callback args (matches TypeScript's `_` convention). Without this,
+      // mock functions whose shape must mirror an external API (e.g. fetch
+      // (url, init)) can't drop unused params without breaking call-site
+      // tuple destructures.
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+    },
   },
 ])

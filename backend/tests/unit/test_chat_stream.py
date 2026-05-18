@@ -1,18 +1,17 @@
 """Unit tests for ChatService.chat_stream() with deterministic MockLLM."""
 
-from app.chat import ChatService
-from app.tools.flight_client import MockFlightAPIClient
-from tests.fixtures.llm import MockLLM, MockLLMStream
+from tests.fixtures.llm import (
+    MockLLMStream,
+    default_session_config,
+    make_chat_service_with_mock_llm,
+)
 
 
 async def test_chat_stream_emits_content_events_for_greeting() -> None:
     """Content-only mock stream produces only 'content' type events and correct history."""
     # Arrange
-    service = ChatService(
-        flight_client=MockFlightAPIClient(seed=42),
-        llm=MockLLM(streams=MockLLMStream.greeting()),
-    )
-    session_id = service.create_session()
+    service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
+    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
     # Act
     events = [e async for e in service.chat_stream("Hello", session_id)]

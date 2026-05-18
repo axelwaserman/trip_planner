@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:4b"  # Fallback if not specified
 
+    # LM Studio Configuration (D-28)
+    # OpenAI-compatible local server. Default port 1234 with /v1 prefix; no API key in v1 (D-17).
+    lmstudio_base_url: str = "http://localhost:1234/v1"
+
     # OpenAI Configuration (optional)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
@@ -44,6 +48,24 @@ class Settings(BaseSettings):
     # Provider probe (RESEARCH.md Pitfall 3, Assumption A2). 1.5 s caps the worst
     # case for a misconfigured Ollama daemon; localhost hits are typically 50–200 ms.
     provider_probe_timeout_seconds: float = 1.5
+
+    # Provider model discovery cache (D-05 + D-06). TTL gates how aggressively the
+    # /api/providers/refresh button re-hits local daemons; 60s balances "user
+    # pulled a new model and forgot to click Refresh" UX against thrashing localhost.
+    provider_models_cache_ttl_seconds: int = 60
+
+    # Reasoning-model name prefixes for Ollama. ChatOllama(reasoning=True) only
+    # works for models that emit thinking tokens (qwen3, deepseek-r1, …). Passing
+    # reasoning=True to a model that does not support it produces an HTTP 400
+    # from the daemon ('"<model>" does not support thinking'). The OllamaProvider
+    # consults this list at bind_tools() time and only sets reasoning=True when
+    # the model name starts with one of these prefixes. Defaults cover the
+    # families that ship reasoning today; override via OLLAMA_REASONING_MODEL_PREFIXES
+    # (comma-separated) if a new family lands.
+    ollama_reasoning_model_prefixes: tuple[str, ...] = (
+        "qwen3",
+        "deepseek-r1",
+    )
 
     def model_post_init(self, __context: object) -> None:
         """Emit a warning when the JWT secret is still the insecure default."""
@@ -81,6 +103,16 @@ class Settings(BaseSettings):
                     "mistral:7b",
                     "deepseek-r1:8b",
                 ],
+            },
+            "lmstudio": {
+                # Local OpenAI-compatible daemon. Model existence is owned by
+                # LMStudioProvider.validate_config (route layer skips the
+                # whitelist check for local providers per
+                # _resolve_allowed_cloud_models). The empty curated list keeps
+                # the route validator's defense-in-depth check satisfied
+                # without forcing a frozen model set.
+                "available": True,
+                "models": [],
             },
             "openai": {
                 "available": bool(self.openai_api_key),

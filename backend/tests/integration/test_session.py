@@ -1,6 +1,6 @@
 """Integration tests for session create/delete routes."""
 
-import json
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +14,46 @@ def client() -> TestClient:
         yield c
 
 
+@pytest.fixture
+def two_users() -> Generator[None]:
+    """Seed the in-memory ``_users_db`` with alice + bob for the cross-user test.
+
+    Mirrors the pattern used in ``test_session_partitioning.py``: AUTH_USERS is
+    read at import time so we mutate ``_users_db`` directly to issue tokens for
+    distinct users without rerunning ``load_users_from_env``. Cleanup pops the
+    seeded users so sibling test modules see the original AUTH_USERS dict.
+    """
+    from pwdlib import PasswordHash
+    from pwdlib.hashers.argon2 import Argon2Hasher
+
+    from app.api.routes import auth as auth_module
+
+    hasher = PasswordHash([Argon2Hasher()])
+    auth_module._users_db["alice"] = auth_module.UserInDB(
+        username="alice",
+        hashed_password=hasher.hash("alicepass"),
+        disabled=False,
+    )
+    auth_module._users_db["bob"] = auth_module.UserInDB(
+        username="bob",
+        hashed_password=hasher.hash("bobpass"),
+        disabled=False,
+    )
+    yield
+    auth_module._users_db.pop("alice", None)
+    auth_module._users_db.pop("bob", None)
+
+
+def _login(client: TestClient, username: str, password: str) -> dict[str, str]:
+    response = client.post(
+        "/api/auth/token",
+        data={"username": username, "password": password},
+    )
+    assert response.status_code == 200, response.text
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 class TestDeleteSession:
     def test_delete_removes_session_from_all_dicts(self, client: TestClient, auth_headers: dict[str, str]) -> None:
         session_response = client.post("/api/chat/session", headers=auth_headers)
@@ -25,15 +65,31 @@ class TestDeleteSession:
         assert session_id in chat_service._metadata
         assert session_id in chat_service._last_activity
 
-        delete_response = client.delete(f"/api/chat/session/{session_id}")
+        delete_response = client.delete(f"/api/chat/session/{session_id}", headers=auth_headers)
 
         assert delete_response.status_code == 204
         assert session_id not in chat_service._histories
         assert session_id not in chat_service._metadata
         assert session_id not in chat_service._last_activity
 
-    def test_delete_nonexistent_session_returns_404(self, client: TestClient) -> None:
-        response = client.delete("/api/chat/session/does-not-exist")
+    def test_delete_without_auth_returns_401(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+        """Regression for CR-01: unauthenticated DELETE must NOT delete a session."""
+        session_response = client.post("/api/chat/session", headers=auth_headers)
+        assert session_response.status_code == 201
+        session_id = session_response.json()["session_id"]
+
+        chat_service = client.app.state.chat_service
+        assert session_id in chat_service._metadata
+
+        # No auth header — must be rejected by the auth dependency.
+        delete_response = client.delete(f"/api/chat/session/{session_id}")
+        assert delete_response.status_code == 401
+
+        # Session must still exist after the rejected attempt.
+        assert session_id in chat_service._metadata
+
+    def test_delete_nonexistent_session_returns_404(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+        response = client.delete("/api/chat/session/does-not-exist", headers=auth_headers)
 
         assert response.status_code == 404
 
@@ -41,26 +97,87 @@ class TestDeleteSession:
         session_response = client.post("/api/chat/session", headers=auth_headers)
         session_id = session_response.json()["session_id"]
 
-        client.delete(f"/api/chat/session/{session_id}")
-        response = client.delete(f"/api/chat/session/{session_id}")
+        client.delete(f"/api/chat/session/{session_id}", headers=auth_headers)
+        response = client.delete(f"/api/chat/session/{session_id}", headers=auth_headers)
 
         assert response.status_code == 404
 
+    def test_user_cannot_delete_another_users_session(self, client: TestClient, two_users: None) -> None:
+        """Regression for CR-01: a non-owner must NOT be able to delete the session.
+
+        Alice creates a session; Bob tries to delete it with his own valid
+        token. The response MUST be 404 (same shape as missing) and the
+        session MUST still exist in ChatService state.
+        """
+        del two_users  # marker — fixture seeded the alice/bob users.
+        alice_headers = _login(client, "alice", "alicepass")
+        bob_headers = _login(client, "bob", "bobpass")
+
+        session_response = client.post("/api/chat/session", headers=alice_headers)
+        assert session_response.status_code == 201
+        alice_session_id = session_response.json()["session_id"]
+
+        chat_service = client.app.state.chat_service
+        assert alice_session_id in chat_service._metadata
+
+        # Bob tries to delete alice's session — must fail with 404 (not 204,
+        # not 403) so existence is not leaked.
+        delete_response = client.delete(f"/api/chat/session/{alice_session_id}", headers=bob_headers)
+        assert delete_response.status_code == 404
+
+        # Session still exists and is still owned by alice.
+        assert alice_session_id in chat_service._metadata
+        assert chat_service._metadata[alice_session_id]["user_id"] == "alice"
+
+        # Alice can still delete her own session.
+        owner_delete = client.delete(f"/api/chat/session/{alice_session_id}", headers=alice_headers)
+        assert owner_delete.status_code == 204
+        assert alice_session_id not in chat_service._metadata
+
 
 class TestChatInvalidSession:
-    def test_invalid_session_streams_empty_error_event(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+    def test_invalid_session_returns_404(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+        """Per CR-02 the route raises 404 at the boundary for missing sessions.
+
+        The previous behaviour emitted an empty SSE event with status 200; we
+        now reject before opening the stream because (a) the same 404 shape
+        is used for not-owner and (b) emitting nothing-but-an-empty-chunk is
+        indistinguishable from an empty success on the client side.
+        """
         response = client.post(
             "/api/chat",
             json={"message": "Hello", "session_id": "nonexistent-session-id"},
             headers=auth_headers,
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
+    def test_user_cannot_post_to_another_users_session(self, client: TestClient, two_users: None) -> None:
+        """Regression for CR-02: a non-owner cannot POST to /api/chat.
 
-        data_lines = [line for line in response.text.strip().split("\n") if line.startswith("data: ")]
-        assert len(data_lines) >= 1
+        Alice creates a session; Bob (with his own valid token) tries to
+        POST a message to Alice's session_id. The response MUST be 404 (not
+        200, not 403) so existence is not leaked, and Alice's session
+        history MUST NOT have any new entries.
+        """
+        del two_users  # marker — fixture seeded the alice/bob users.
+        alice_headers = _login(client, "alice", "alicepass")
+        bob_headers = _login(client, "bob", "bobpass")
 
-        event = json.loads(data_lines[0][len("data: ") :])
-        assert event["type"] == "content"
-        assert event["chunk"] == ""
-        assert event["session_id"] == "nonexistent-session-id"
+        session_response = client.post("/api/chat/session", headers=alice_headers)
+        assert session_response.status_code == 201
+        alice_session_id = session_response.json()["session_id"]
+
+        chat_service = client.app.state.chat_service
+        original_history_len = len(chat_service._histories[alice_session_id].messages)
+
+        # Bob tries to post a message to alice's session.
+        response = client.post(
+            "/api/chat",
+            json={"message": "I'm bob, hijacking alice's chat", "session_id": alice_session_id},
+            headers=bob_headers,
+        )
+        assert response.status_code == 404
+
+        # Alice's history must NOT have been mutated by bob's attempt.
+        new_history_len = len(chat_service._histories[alice_session_id].messages)
+        assert new_history_len == original_history_len
