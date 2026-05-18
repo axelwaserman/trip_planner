@@ -62,12 +62,16 @@ describe('SettingsProviders', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders only the Ollama card (no OpenAI / Anthropic / LM Studio)', () => {
+  it('renders the Ollama and LM Studio cards (cloud cards still deferred)', () => {
+    // Plan 08b: LM Studio joins the page as the second local card. OpenAI /
+    // Anthropic remain deferred until a real Test-connection probe lands —
+    // the orchestrator note for this plan calls out the `Test connection`
+    // surface as out of scope while the cloud cards are not rendered.
     renderWithProviders()
     expect(screen.getByRole('heading', { name: 'Ollama', level: 2 })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /LM Studio/i, level: 2 })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /OpenAI/i, level: 2 })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /Anthropic/i, level: 2 })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /LM Studio/i, level: 2 })).not.toBeInTheDocument()
   })
 
   it('renders the Providers display heading and SETTINGS eyebrow', () => {
@@ -85,8 +89,11 @@ describe('SettingsProviders', () => {
     const setItemSpy = vi.spyOn(localStorage, 'setItem')
     renderWithProviders()
 
-    const button = screen.getByRole('button', { name: /Use this provider/i })
-    fireEvent.click(button)
+    // Plan 08b: two cards now render — the Ollama card's Save button is the
+    // first match; pick it explicitly so the test stays stable as more
+    // providers come back.
+    const buttons = screen.getAllByRole('button', { name: /Use this provider/i })
+    fireEvent.click(buttons[0])
 
     const calls = setItemSpy.mock.calls.filter((call) => call[0] === 'provider_settings')
     expect(calls.length).toBeGreaterThan(0)
@@ -98,8 +105,8 @@ describe('SettingsProviders', () => {
   it('clicking Use this provider navigates to /app', () => {
     renderWithProviders()
 
-    const button = screen.getByRole('button', { name: /Use this provider/i })
-    fireEvent.click(button)
+    const buttons = screen.getAllByRole('button', { name: /Use this provider/i })
+    fireEvent.click(buttons[0])
 
     expect(screen.getByText('Chat surface')).toBeInTheDocument()
   })
@@ -114,17 +121,55 @@ describe('SettingsProviders', () => {
     })
   })
 
-  it('reads existing provider_settings from localStorage on mount (Base URL field is populated)', () => {
+  it('reads existing provider_settings from localStorage on mount (Ollama Base URL field is populated)', () => {
     const existing = {
       selected: { provider: 'ollama', model: 'qwen3:4b' },
-      ollama: { base_url: 'http://localhost:9999', models: [] },
+      ollama: { base_url: 'http://localhost:9999', model: 'qwen3:4b', models: [] },
       openai: { api_key: '', model: 'gpt-4o-mini' },
       anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
     }
     localStorage.setItem('provider_settings', JSON.stringify(existing))
 
     renderWithProviders()
-    const baseUrlInput = screen.getByLabelText('Base URL') as HTMLInputElement
-    expect(baseUrlInput.value).toBe('http://localhost:9999')
+    // Two Base URL fields now render (Ollama + LM Studio). The Ollama input
+    // is the first; assert by index so the test stays stable.
+    const baseUrlInputs = screen.getAllByLabelText('Base URL') as HTMLInputElement[]
+    expect(baseUrlInputs[0].value).toBe('http://localhost:9999')
+  })
+
+  it('back-fills the missing lmstudio entry when existing user data lacks it (Plan 08b migration)', () => {
+    // Simulate a Plan 08-era localStorage state that predates the lmstudio
+    // entry. The shared loadProviderSettings helper deep-merges with defaults
+    // so the lmstudio entry is restored without losing existing user data.
+    const existing = {
+      selected: { provider: 'ollama', model: 'qwen3:4b' },
+      ollama: { base_url: 'http://localhost:11434', model: 'qwen3:4b', models: [] },
+      openai: { api_key: 'sk-existing', model: 'gpt-4o-mini' },
+      anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
+    }
+    localStorage.setItem('provider_settings', JSON.stringify(existing))
+
+    renderWithProviders()
+
+    const persisted = JSON.parse(localStorage.getItem('provider_settings') ?? '{}')
+    expect(persisted.lmstudio).toBeDefined()
+    expect(persisted.lmstudio.base_url).toBe('http://localhost:1234/v1')
+    expect(persisted.openai.api_key).toBe('sk-existing')
+  })
+
+  it('LM Studio card does NOT render an API Key field', () => {
+    renderWithProviders()
+    // The LM Studio card has a Base URL field but no API Key field. We assert
+    // the heading exists and the page-wide API Key label query returns nothing.
+    expect(screen.getByRole('heading', { name: /LM Studio/i, level: 2 })).toBeInTheDocument()
+    expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument()
+  })
+
+  it('Refresh models button is rendered for both Ollama and LM Studio cards', () => {
+    renderWithProviders()
+    // Each local card surfaces a "Refresh models" button consuming POST
+    // /api/providers/refresh (Plan 06b output, wired by useProviderRefresh).
+    const refreshButtons = screen.getAllByRole('button', { name: /Refresh models/i })
+    expect(refreshButtons.length).toBe(2)
   })
 })
