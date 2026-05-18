@@ -86,12 +86,17 @@ def test_session_create_returns_400_when_cloud_key_missing(
 ) -> None:
     """OPENAI_API_KEY absent → probe returns 400 missing_api_key.
 
-    The probe is the authority for the missing-key signal — the route no longer
-    short-circuits on ``available=False``.
+    The factory reads from ``Settings.openai_api_key`` at build time and
+    constructs an OpenAIProvider with ``api_key=None``; the provider's
+    :meth:`OpenAIProvider.validate_config` returns the structured
+    ``MISSING_API_KEY`` error inside :meth:`ChatService.create_session`.
     """
-    from app.services import provider_probe as probe_module
-
-    monkeypatch.setattr(probe_module.settings, "openai_api_key", None, raising=False)
+    # Patch the module-level settings instance the route layer reads from.
+    monkeypatch.setattr("app.config.settings.openai_api_key", None, raising=False)
+    # Also clear it on the ChatService's factory's settings instance — the
+    # lifespan-scoped factory captured a Settings() object at app construction.
+    factory = client.app.state.llm_factory
+    monkeypatch.setattr(factory._settings, "openai_api_key", None, raising=False)
 
     response = client.post(
         "/api/chat/session",
@@ -130,3 +135,124 @@ def test_session_create_succeeds_when_ollama_probe_passes(
     assert "session_id" in body
     assert body["provider"] == "ollama"
     assert body["model"] == "qwen3:4b"
+
+
+def test_session_create_accepts_model_outside_curated_list_when_daemon_has_it(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UAT round-3 regression guard: a daemon-installed model NOT in the curated
+    frozen list (e.g. ``qwen3.5:9b`` after the user pulled it) must succeed.
+
+    Previous behaviour: route-level whitelist rejected with 400 "Invalid model"
+    before the probe could run, locking users out of any model not hand-listed
+    in ``Settings.get_available_providers()``. New behaviour: the route does
+    not enforce a model whitelist for local providers — the per-provider probe
+    consults ``/api/tags`` and surfaces structured ``MODEL_NOT_INSTALLED`` only
+    when the daemon actually doesn't have the model.
+    """
+    monkeypatch.setattr(
+        httpx.AsyncClient,
+        "get",
+        AsyncMock(
+            return_value=_make_tags_response(
+                [{"name": "qwen3.5:9b", "model": "qwen3.5:9b"}],
+            ),
+        ),
+    )
+
+    response = client.post(
+        "/api/chat/session",
+        headers=auth_headers,
+        json={"provider": "ollama", "model": "qwen3.5:9b"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["model"] == "qwen3.5:9b"
+
+
+def test_session_create_rejects_unknown_provider_at_route_layer(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """Unknown provider name still rejected at the route boundary (defense-in-depth).
+
+    UAT round-3 only relaxed the model whitelist; the provider whitelist stays
+    enforced because a typo there would otherwise reach the factory's
+    match-default branch.
+    """
+    response = client.post(
+        "/api/chat/session",
+        headers=auth_headers,
+        json={"provider": "made-up-provider", "model": "anything"},
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert "Invalid provider" in body["detail"]
+
+
+def _make_lmstudio_models_response(model_ids: list[str]) -> MagicMock:
+    """Return a MagicMock that mimics httpx.Response for LM Studio's /models."""
+    response = MagicMock()
+    response.raise_for_status = MagicMock(return_value=None)
+    response.json = MagicMock(
+        return_value={
+            "object": "list",
+            "data": [{"id": mid, "object": "model"} for mid in model_ids],
+        }
+    )
+    return response
+
+
+def test_session_create_accepts_lmstudio_provider_at_route_layer(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for AR-01: ``provider="lmstudio"`` must pass the route validator.
+
+    Before AR-01's fix, ``Settings.get_available_providers()`` only listed
+    ``ollama``/``openai``/``anthropic`` — every ``POST /api/chat/session`` with
+    ``provider="lmstudio"`` returned HTTP 400 ``"Invalid provider: lmstudio"``
+    before the factory was ever reached, making the entire LM Studio
+    implementation unreachable from the frontend. This test asserts the
+    provider name is now accepted: with a mocked LM Studio daemon the call
+    proceeds to the probe and returns 201.
+    """
+    monkeypatch.setattr(
+        httpx.AsyncClient,
+        "get",
+        AsyncMock(
+            return_value=_make_lmstudio_models_response(["qwen2.5-coder-7b"]),
+        ),
+    )
+
+    response = client.post(
+        "/api/chat/session",
+        headers=auth_headers,
+        json={
+            "provider": "lmstudio",
+            "model": "qwen2.5-coder-7b",
+            "base_url": "http://localhost:1234/v1",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["provider"] == "lmstudio"
+    assert body["model"] == "qwen2.5-coder-7b"
+    assert "session_id" in body
+
+
+def test_get_available_providers_lists_all_factory_dispatch_arms() -> None:
+    """Regression for AR-01: every provider the factory builds must be listed.
+
+    The factory has match arms for ``ollama``, ``lmstudio``, ``openai``, and
+    ``anthropic``. ``Settings.get_available_providers()`` is the route-layer
+    whitelist; if any factory arm is missing here the route returns 400
+    before the factory is reached, silently making that provider unreachable.
+    This test fails if a future contributor adds a factory arm without also
+    registering it on ``Settings``.
+    """
+    from app.config import Settings
+
+    expected_providers = {"ollama", "lmstudio", "openai", "anthropic"}
+    actual_providers = set(Settings().get_available_providers().keys())
+    assert actual_providers == expected_providers

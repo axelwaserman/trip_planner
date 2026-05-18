@@ -7,10 +7,12 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.api.main import app
-from app.chat import ChatService
 from app.models import FlightSearchResult
-from app.tools.flight_client import MockFlightAPIClient
-from tests.fixtures.llm import MockLLM, MockLLMStream
+from tests.fixtures.llm import (
+    MockLLMStream,
+    default_session_config,
+    make_chat_service_with_mock_llm,
+)
 
 
 @pytest.fixture
@@ -23,11 +25,8 @@ def client() -> Generator[TestClient]:
 async def test_chat_stream_emits_tool_events_for_flight_query() -> None:
     """Single tool-call stream produces tool_call, tool_result, and content events."""
     # Arrange
-    service = ChatService(
-        flight_client=MockFlightAPIClient(seed=42),
-        llm=MockLLM(streams=MockLLMStream.single_tool_call()),
-    )
-    session_id = service.create_session()
+    service = make_chat_service_with_mock_llm(MockLLMStream.single_tool_call())
+    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
     # Act
     events = [e async for e in service.chat_stream("Find flights LAX to JFK", session_id)]
@@ -62,16 +61,13 @@ async def test_chat_stream_emits_tool_events_for_flight_query() -> None:
 async def test_chat_stream_retains_history_across_turns() -> None:
     """Two sequential chat_stream() calls in one session produce 4 history messages."""
     # Arrange — one MockLLM with two inner stream lists (one per turn)
-    service = ChatService(
-        flight_client=MockFlightAPIClient(seed=42),
-        llm=MockLLM(
-            streams=[
-                *MockLLMStream.greeting(),  # first turn: one inner list of Content chunks
-                *MockLLMStream.multi_turn(),  # second turn: one inner list of Content chunks
-            ]
-        ),
+    service = make_chat_service_with_mock_llm(
+        [
+            *MockLLMStream.greeting(),  # first turn: one inner list of Content chunks
+            *MockLLMStream.multi_turn(),  # second turn: one inner list of Content chunks
+        ]
     )
-    session_id = service.create_session()
+    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
     # Act — drain both turns fully
     _ = [e async for e in service.chat_stream("Hello", session_id)]
@@ -87,14 +83,12 @@ async def test_chat_stream_retains_history_across_turns() -> None:
     assert isinstance(msgs[3], AIMessage)
 
 
-def test_post_chat_streams_tool_events_via_mock_llm(client: TestClient, auth_headers: dict[str, str]) -> None:
+async def test_post_chat_streams_tool_events_via_mock_llm(client: TestClient, auth_headers: dict[str, str]) -> None:
     """HTTP layer: POST /api/chat with MockLLM injected produces tool event SSE stream."""
     # Arrange — replace app.state.chat_service BEFORE the POST
-    client.app.state.chat_service = ChatService(  # type: ignore[attr-defined]
-        flight_client=MockFlightAPIClient(seed=42),
-        llm=MockLLM(streams=MockLLMStream.single_tool_call()),
-    )
-    session_id = client.app.state.chat_service.create_session()  # type: ignore[attr-defined]
+    service = make_chat_service_with_mock_llm(MockLLMStream.single_tool_call())
+    client.app.state.chat_service = service  # type: ignore[attr-defined]
+    session_id, _ = await service.create_session(default_session_config(), user_id="admin")
 
     # Act
     response = client.post(

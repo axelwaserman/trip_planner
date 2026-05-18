@@ -1,6 +1,31 @@
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook as rtlRenderHook, waitFor } from '@testing-library/react'
+import type { RenderHookOptions } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { __resetForTests as resetChatStore } from '../../lib/chatSessionStore'
 import { useChat } from '../useChat'
+
+// useChat reads `useSearchParams()` to observe Sidebar's `?n=<token>` New
+// chat signal, so every renderHook call needs a Router context. Wrap the
+// upstream renderHook so each test stays single-line. createElement avoids
+// JSX in this `.ts` file.
+function makeMemoryRouterWrapper(initialEntries: string[] = ['/app']) {
+  return function MemoryRouterWrapper({ children }: { children: ReactNode }) {
+    return createElement(MemoryRouter, { initialEntries }, children)
+  }
+}
+
+function renderHook<TResult, TProps>(
+  callback: (props: TProps) => TResult,
+  options?: Omit<RenderHookOptions<TProps>, 'wrapper'> & { initialEntries?: string[] }
+) {
+  const { initialEntries, ...rest } = options ?? {}
+  return rtlRenderHook(callback, {
+    wrapper: makeMemoryRouterWrapper(initialEntries),
+    ...rest,
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -43,6 +68,10 @@ beforeEach(() => {
   localStorageMock.clear()
   Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true })
   vi.clearAllMocks()
+  // chatSessionStore is module-level — without an explicit reset, snapshots
+  // from one test leak into the next (e.g. a session that was streaming in
+  // test N still reads as streaming in test N+1).
+  resetChatStore()
 })
 
 afterEach(() => {
@@ -54,7 +83,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('session initialisation', () => {
-  it('creates a session with defaults when localStorage is empty', async () => {
+  it('creates a session with defaults when localStorage is empty (D-24 payload shape)', async () => {
     const fetchMock = mockSessionFetch()
     vi.stubGlobal('fetch', fetchMock)
 
@@ -65,14 +94,27 @@ describe('session initialisation', () => {
         '/api/chat/session',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ provider: 'ollama', model: 'qwen3:4b' }),
+          body: JSON.stringify({
+            provider: 'ollama',
+            model: 'qwen3:4b',
+            base_url: null,
+            api_key: null,
+          }),
         })
       )
     })
   })
 
-  it('creates a session using saved localStorage config', async () => {
-    localStorage.setItem('llm_provider_config', JSON.stringify({ provider: 'openai', model: 'gpt-4o' }))
+  it('reads provider_settings from localStorage and sends api_key for cloud providers (D-24)', async () => {
+    localStorage.setItem(
+      'provider_settings',
+      JSON.stringify({
+        selected: { provider: 'openai', model: 'gpt-4o' },
+        ollama: { base_url: 'http://localhost:11434', models: [] },
+        openai: { api_key: 'sk-test-12345', model: 'gpt-4o' },
+        anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
+      })
+    )
     const fetchMock = mockSessionFetch({ session_id: 'sess-2', provider: 'openai', model: 'gpt-4o' })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -82,10 +124,80 @@ describe('session initialisation', () => {
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/chat/session',
         expect.objectContaining({
-          body: JSON.stringify({ provider: 'openai', model: 'gpt-4o' }),
+          body: JSON.stringify({
+            provider: 'openai',
+            model: 'gpt-4o',
+            base_url: null,
+            api_key: 'sk-test-12345',
+          }),
         })
       )
     })
+  })
+
+  it('reads provider_settings and sends base_url for ollama (D-21)', async () => {
+    localStorage.setItem(
+      'provider_settings',
+      JSON.stringify({
+        selected: { provider: 'ollama', model: 'qwen3:4b' },
+        ollama: { base_url: 'http://localhost:11434', models: ['qwen3:4b'] },
+        openai: { api_key: '', model: 'gpt-4o-mini' },
+        anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
+      })
+    )
+    const fetchMock = mockSessionFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderHook(() => useChat())
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/chat/session',
+        expect.objectContaining({
+          body: JSON.stringify({
+            provider: 'ollama',
+            model: 'qwen3:4b',
+            base_url: 'http://localhost:11434',
+            api_key: null,
+          }),
+        })
+      )
+    })
+  })
+
+  it('migrates legacy llm_provider_config to provider_settings on first load (D-21)', async () => {
+    localStorage.setItem(
+      'llm_provider_config',
+      JSON.stringify({ provider: 'ollama', model: 'qwen3:4b' })
+    )
+    const fetchMock = mockSessionFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderHook(() => useChat())
+
+    await waitFor(() => {
+      // Migration ran: new key present, legacy key removed.
+      expect(localStorage.getItem('provider_settings')).not.toBeNull()
+      expect(localStorage.getItem('llm_provider_config')).toBeNull()
+    })
+
+    const migrated = JSON.parse(localStorage.getItem('provider_settings')!) as {
+      selected: { provider: string; model: string }
+    }
+    expect(migrated.selected).toEqual({ provider: 'ollama', model: 'qwen3:4b' })
+
+    // Session was still created using the migrated values.
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/chat/session',
+      expect.objectContaining({
+        body: JSON.stringify({
+          provider: 'ollama',
+          model: 'qwen3:4b',
+          base_url: 'http://localhost:11434',
+          api_key: null,
+        }),
+      })
+    )
   })
 
   it('adds an error message when session creation fails', async () => {
@@ -231,6 +343,60 @@ describe('sendMessage happy path', () => {
     expect(thinkingMsg?.content).toBe('Let me think...')
   })
 
+  it('isAwaitingFirstChunk is true while the SSE stream is en route and false once it resolves', async () => {
+    vi.stubGlobal('fetch', mockSessionFetch())
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    expect(result.current.isAwaitingFirstChunk).toBe(false)
+
+    const sseBody = makeSSEBody(
+      'data: {"type":"content","chunk":"Hi","session_id":"sess-1"}',
+      'data: {"type":"done","session_id":"sess-1"}'
+    )
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: sseBody }))
+
+    await act(async () => {
+      await result.current.sendMessage('test')
+    })
+
+    // Once the stream finished (and well past the first chunk), the flag
+    // is back to false. The "Thinking..." placeholder relies on this so it
+    // disappears as soon as the assistant bubble starts filling in.
+    expect(result.current.isAwaitingFirstChunk).toBe(false)
+  })
+
+  it('replaces the URL with ?session=<new_id> after a successful create', async () => {
+    vi.stubGlobal('fetch', mockSessionFetch({ session_id: 'sess-new', provider: 'ollama', model: 'qwen3:4b' }))
+
+    function useChatWithLocation() {
+      const chat = useChat()
+      const location = useLocation()
+      return { chat, location }
+    }
+
+    const { result } = renderHook(() => useChatWithLocation())
+
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-new'))
+    // URL must now name the session — Sidebar's activeSessionId reads from
+    // ?session= and highlights the row, and the URL is shareable.
+    await waitFor(() => expect(result.current.location.search).toBe('?session=sess-new'))
+  })
+
+  it('isAwaitingFirstChunk resets to false on stream error', async () => {
+    vi.stubGlobal('fetch', mockSessionFetch())
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+
+    await act(async () => {
+      await result.current.sendMessage('test')
+    })
+
+    expect(result.current.isAwaitingFirstChunk).toBe(false)
+  })
+
   it('creates a tool_execution message from a tool_call event and updates it with tool_result', async () => {
     vi.stubGlobal('fetch', mockSessionFetch())
     const { result } = renderHook(() => useChat())
@@ -363,5 +529,321 @@ describe('sendMessage error handling', () => {
     const thinkingMessages = result.current.messages.filter((m) => m.role === 'thinking')
     expect(thinkingMessages).toHaveLength(1)
     expect(thinkingMessages[0].content).toBe('Part1 Part2')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// New chat reset (Sidebar `?n=<token>` signal)
+// ---------------------------------------------------------------------------
+
+describe('new chat reset signal', () => {
+  // Compose useChat + useNavigate so the test can bump `?n=<token>` and
+  // observe the hook reacting. Minimal wrapper — the real Sidebar does the
+  // same via navigate(`/app?n=${Date.now()}`).
+  function useChatWithNavigate() {
+    const navigate = useNavigate()
+    const chat = useChat()
+    return { chat, navigate }
+  }
+
+  it('clears messages and creates a fresh session when ?n= changes', async () => {
+    let createCallCount = 0
+    const fetchMock = vi.fn(async () => {
+      createCallCount += 1
+      return {
+        ok: true,
+        json: async () => ({
+          session_id: `sess-${createCallCount}`,
+          provider: 'ollama',
+          model: 'qwen3:4b',
+        }),
+        body: null,
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChatWithNavigate())
+
+    // First mount — initial session.
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-1'))
+    expect(createCallCount).toBe(1)
+
+    // Bump the new-chat token (mirrors Sidebar.handleNewChat).
+    await act(async () => {
+      result.current.navigate('/app?n=12345')
+    })
+
+    // Effect re-runs → setMessages([]) + setSessionId(null) + a new POST.
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-2'))
+    expect(createCallCount).toBe(2)
+    expect(result.current.chat.messages).toEqual([])
+  })
+
+  it('reuses the currently-selected provider/model when resetting', async () => {
+    localStorage.setItem(
+      'provider_settings',
+      JSON.stringify({
+        selected: { provider: 'ollama', model: 'mistral:7b' },
+        ollama: { base_url: 'http://localhost:11434', models: ['mistral:7b'] },
+        lmstudio: { base_url: 'http://localhost:1234/v1', models: [] },
+        openai: { api_key: '', model: 'gpt-4o-mini' },
+        anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
+      })
+    )
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ session_id: 'sess-x', provider: 'ollama', model: 'mistral:7b' }),
+      body: null,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChatWithNavigate())
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-x'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      result.current.navigate('/app?n=99999')
+    })
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    // Both calls must have used the user-selected mistral:7b — not the
+    // factory default qwen3:4b — proving the reset re-reads provider_settings.
+    const [, secondCall] = fetchMock.mock.calls
+    const secondBody = JSON.parse((secondCall[1] as RequestInit).body as string) as {
+      provider: string
+      model: string
+    }
+    expect(secondBody).toEqual({
+      provider: 'ollama',
+      model: 'mistral:7b',
+      base_url: 'http://localhost:11434',
+      api_key: null,
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Resume session (`?session=<id>`)
+// ---------------------------------------------------------------------------
+
+describe('resume session signal', () => {
+  function useChatWithNavigate() {
+    const navigate = useNavigate()
+    const chat = useChat()
+    return { chat, navigate }
+  }
+
+  it('fetches /api/chat/sessions/:id and replays messages on ?session=<id>', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-resumed')) {
+        return {
+          ok: true,
+          json: async () => ({
+            session_id: 'sess-resumed',
+            provider: 'ollama',
+            model: 'qwen3:8b',
+            messages: [
+              { role: 'user', content: 'hi from earlier' },
+              { role: 'assistant', content: 'hello again' },
+            ],
+          }),
+          body: null,
+        }
+      }
+      // Fallback: any /api/chat/session POST just returns a fresh session —
+      // the resume path should NOT hit this on success.
+      return {
+        ok: true,
+        json: async () => ({ session_id: 'sess-fresh', provider: 'ollama', model: 'qwen3:4b' }),
+        body: null,
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChatWithNavigate(), {
+      initialEntries: ['/app?session=sess-resumed'],
+    })
+
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-resumed'))
+    expect(result.current.chat.currentProvider).toBe('ollama')
+    expect(result.current.chat.currentModel).toBe('qwen3:8b')
+    expect(result.current.chat.messages).toEqual([
+      { role: 'user', content: 'hi from earlier' },
+      { role: 'assistant', content: 'hello again' },
+    ])
+
+    // Resume must NOT POST /api/chat/session — only the GET call should happen.
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => url === '/api/chat/session' && (init as RequestInit | undefined)?.method === 'POST'
+    )
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it('falls through to a fresh session when ?session=<id> 404s (stale link)', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-gone')) {
+        return { ok: false, status: 404, json: async () => ({}), body: null }
+      }
+      return {
+        ok: true,
+        json: async () => ({ session_id: 'sess-fresh', provider: 'ollama', model: 'qwen3:4b' }),
+        body: null,
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChatWithNavigate(), {
+      initialEntries: ['/app?session=sess-gone'],
+    })
+
+    // Resume failed → fresh session created. session_id ends up as the fresh one.
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-fresh'))
+    // No replayed history.
+    expect(result.current.chat.messages).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Background streaming (chatSessionStore)
+// ---------------------------------------------------------------------------
+
+describe('background streaming', () => {
+  it('writes stream chunks to the submit-time session even after the URL switches', async () => {
+    // Build a manually-controlled SSE body so the test can interleave a
+    // mid-stream session switch.
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
+    const sseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controllerRef = controller
+      },
+    })
+    const encoder = new TextEncoder()
+
+    // Single dispatcher serves every endpoint the test exercises:
+    //   POST /api/chat/session    → create initial sess-a
+    //   GET  /api/chat/sessions/sess-b → empty history (resume target)
+    //   POST /api/chat            → the manually-controlled SSE stream
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.startsWith('/api/chat/sessions/sess-b')) {
+        return {
+          ok: true,
+          json: async () => ({
+            session_id: 'sess-b',
+            provider: 'ollama',
+            model: 'qwen3:4b',
+            messages: [],
+          }),
+          body: null,
+        }
+      }
+      if (url === '/api/chat/session' && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({ session_id: 'sess-a', provider: 'ollama', model: 'qwen3:4b' }),
+          body: null,
+        }
+      }
+      if (url === '/api/chat' && init?.method === 'POST') {
+        return { ok: true, body: sseBody }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function useChatWithNavigate() {
+      const navigate = useNavigate()
+      const chat = useChat()
+      return { chat, navigate }
+    }
+
+    const { result } = renderHook(() => useChatWithNavigate())
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-a'))
+    const submitSessionId = 'sess-a'
+
+    // Kick off the send. Don't await — we need to interleave events.
+    let sendPromise: Promise<void> | undefined
+    await act(async () => {
+      sendPromise = result.current.chat.sendMessage('hello from sess-a')
+    })
+
+    // First content chunk lands while sess-a is the active session.
+    await act(async () => {
+      controllerRef!.enqueue(
+        encoder.encode('data: {"type":"content","chunk":"first ","session_id":"sess-a"}\n')
+      )
+      // Yield to React.
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    // Now switch to sess-b mid-stream.
+    await act(async () => {
+      result.current.navigate('/app?session=sess-b')
+    })
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-b'))
+    // sess-b has empty history — current view shows no streamed content.
+    expect(
+      result.current.chat.messages.some((m) => m.role === 'assistant')
+    ).toBe(false)
+
+    // Second content chunk arrives — must land in sess-a's store entry,
+    // not sess-b's.
+    await act(async () => {
+      controllerRef!.enqueue(
+        encoder.encode('data: {"type":"content","chunk":"second","session_id":"sess-a"}\n')
+      )
+      controllerRef!.enqueue(
+        encoder.encode('data: {"type":"done","session_id":"sess-a"}\n')
+      )
+      controllerRef!.close()
+    })
+    await sendPromise
+
+    // Re-mount or read the store directly to confirm sess-a's accumulator
+    // contains BOTH chunks even though the active view was on sess-b for
+    // the second one.
+    const { getSnapshot } = await import('../../lib/chatSessionStore')
+    const sessAState = getSnapshot(submitSessionId)
+    const assistantMsg = sessAState.messages.find((m) => m.role === 'assistant')
+    expect(assistantMsg?.content).toBe('first second')
+    // Stream finished: isStreaming back to false.
+    expect(sessAState.isStreaming).toBe(false)
+  })
+
+  it('isStreaming flips true while a stream is in-flight and false on completion', async () => {
+    const fetchMock = mockSessionFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    // Slow stream so we can observe the flag mid-flight.
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
+    const sseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controllerRef = controller
+      },
+    })
+    const encoder = new TextEncoder()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: sseBody }))
+
+    let sendPromise: Promise<void> | undefined
+    await act(async () => {
+      sendPromise = result.current.sendMessage('test')
+    })
+
+    // sendMessage set isStreaming → true synchronously via setSession.
+    await waitFor(() => expect(result.current.isLoading).toBe(true))
+
+    // Drain + close.
+    await act(async () => {
+      controllerRef!.enqueue(
+        encoder.encode('data: {"type":"content","chunk":"ok","session_id":"sess-1"}\n')
+      )
+      controllerRef!.enqueue(encoder.encode('data: {"type":"done","session_id":"sess-1"}\n'))
+      controllerRef!.close()
+      await sendPromise
+    })
+
+    expect(result.current.isLoading).toBe(false)
   })
 })
