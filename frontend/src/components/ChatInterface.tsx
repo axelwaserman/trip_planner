@@ -1,8 +1,8 @@
-import { Box, Button, Flex, IconButton, Input, Menu, Portal, Stack, Text } from '@chakra-ui/react'
+import { Box, Button, Flex, Input, Menu, Portal, Stack, Text } from '@chakra-ui/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, Cpu, Settings as SettingsIcon } from 'lucide-react'
+import { ChevronDown, Cpu } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
@@ -303,18 +303,10 @@ export function ChatInterface() {
                 </Menu.Positioner>
               </Portal>
             </Menu.Root>
-            {/* Settings nav — D-19. Plan 08b removes this in favor of a
-                Sidebar entry; here only because 08 ships before Sidebar exists. */}
-            <Link to="/settings/providers" aria-label="Open settings">
-              <IconButton
-                aria-label="Settings"
-                variant="ghost"
-                size="sm"
-                type="button"
-              >
-                <SettingsIcon size={20} />
-              </IconButton>
-            </Link>
+            {/* Plan 08b: the standalone Settings IconButton was removed —
+                the app-shell Sidebar is now the single nav surface. The
+                "Manage providers…" entry inside the active-model popover
+                remains as a secondary path to /settings/providers. */}
           </Flex>
         </Flex>
         <Flex justify="flex-end" align="center">
