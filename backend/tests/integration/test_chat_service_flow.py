@@ -59,7 +59,6 @@ async def test_chat_stream_emits_tool_events_for_flight_query() -> None:
     assert parsed.query.origin == "LAX"
 
 
-
 async def test_chat_stream_retains_history_across_turns() -> None:
     """Two sequential chat_stream() calls in one session produce 4 history messages."""
     # Arrange — one MockLLM with two inner stream lists (one per turn)

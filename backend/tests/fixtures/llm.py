@@ -82,7 +82,7 @@ class MockLLM(BaseChatModel):
         """Required by BaseChatModel abstract interface; unused in streaming tests."""
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=""))])
 
-    async def _astream(  # noqa: async generator satisfies AsyncIterator
+    async def _astream(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
