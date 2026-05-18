@@ -181,7 +181,10 @@ Plans:
   1. Submitting an invalid `FlightQuery` (`origin == destination`, `departure_date < today`) or constructing a `Flight` with `arrival <= departure` is rejected at the model boundary with a clear 422. The existing `validate_dates` validator is preserved (additive, not replacement).
   2. `backend/tests/fixtures/flights.py::create_mock_flight()` and `backend/tests/utils/sse.py::parse_sse_events()` exist; existing tests consume them; no test redefines a mock-flight factory inline.
   3. Orphaned `frontend/src/components/ToolCallCard.tsx` and `ToolResultCard.tsx` are deleted (superseded by `ToolExecutionCard`); the frontend builds without dead-import warnings.
-**Plans**: TBD
+**Plans**: 2 plans across 2 waves
+Plans:
+- [ ] 04.8-01-PLAN.md — Wave 1: Add Pydantic validators (origin!=destination, departure>=today, arrival>departure) + tests
+- [ ] 04.8-02-PLAN.md — Wave 2: Extract create_mock_flight() + parse_sse_events(), refactor consumers, delete frontend orphans
 
 ### Phase 5: Postgres + Redis + docker-compose
 **Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
@@ -252,7 +255,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.5. LLM Provider Abstraction (real) | v1 | 0 / TBD | Not started | - |
 | 4.6. Vendor-Neutral Tool JSON | v1 | 0 / TBD | Not started | - |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / TBD | Not started | - |
-| 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / TBD | Not started | - |
+| 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / 2 | Planned | - |
 | 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 6. PydanticAI Migration | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
