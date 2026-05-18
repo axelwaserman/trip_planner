@@ -23,23 +23,19 @@ external service; ``e2e/`` is reserved for full-stack auth-flow + travel-API
 tests gated on a CI-available secret.
 
 The gate uses **function-level** ``@pytest.mark.skipif`` decorators (NOT a
-module-level skipif) so that running with only ``OPENAI_API_KEY`` set still
-runs the OpenAI test (and skips Anthropic), and vice versa. The
+module-level skipif) so running with only ``OPENAI_API_KEY`` set still runs
+the OpenAI test (and skips Anthropic), and vice versa. The
 ``pytest.mark.integration`` marker IS module-level — per
 ``backend/pyproject.toml`` ``[tool.pytest.ini_options].markers``.
-
-Per the canonical pattern in
-.planning/phases/04.5-llm-provider-abstraction-real-cloud-dynamic-ollama/04.5-RESEARCH.md
-§"Code Examples — Pytest Skip Pattern for Real Cloud Acceptance Tests".
-
-Wave 0 stub: each test body is ``pytest.skip("Wave 5 implements ...")``. Wave 5
-(after the four provider classes land in Wave 2) replaces the stub body with a
-real one-token chat assertion.
 """
 
 import os
 
 import pytest
+from langchain_core.messages import HumanMessage
+
+from app.llm.providers.anthropic import AnthropicProvider
+from app.llm.providers.openai import OpenAIProvider
 
 pytestmark = pytest.mark.integration
 
@@ -49,20 +45,23 @@ pytestmark = pytest.mark.integration
     reason="OPENAI_API_KEY not set — skipping real OpenAI cloud test.",
 )
 async def test_openai_provider_real_chat_turn() -> None:
-    """One real chat turn against OpenAI to prove ``OpenAIProvider`` wires end-to-end.
+    """End-to-end smoke test against api.openai.com.
 
-    Wave 5 implementation will use the structure from RESEARCH.md::
-
-        from langchain_core.messages import HumanMessage
-        from app.llm.providers.openai import OpenAIProvider
-
-        provider = OpenAIProvider(model="gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"])
-        assert await provider.validate_config() is None
-        bound = provider.bind_tools([])
-        result = await bound.ainvoke([HumanMessage(content="Reply with the single word 'pong'.")])
-        assert "pong" in result.content.lower()
+    Gated on OPENAI_API_KEY. Costs ~1-3 tokens per run.
     """
-    pytest.skip("Wave 5 implements real OpenAI acceptance")
+    # Arrange
+    provider = OpenAIProvider(model="gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"])
+    assert await provider.validate_config() is None
+
+    # Act
+    bound = provider.bind_tools([])
+    result = await bound.ainvoke(
+        [HumanMessage(content="Reply with just the single word: pong")]
+    )
+
+    # Assert: tolerate punctuation; the model often returns "pong" or "pong."
+    assert isinstance(result.content, str)
+    assert "pong" in result.content.lower()
 
 
 @pytest.mark.skipif(
@@ -70,20 +69,27 @@ async def test_openai_provider_real_chat_turn() -> None:
     reason="ANTHROPIC_API_KEY not set — skipping real Anthropic cloud test.",
 )
 async def test_anthropic_provider_real_chat_turn() -> None:
-    """One real chat turn against Anthropic to prove ``AnthropicProvider`` wires end-to-end.
+    """End-to-end smoke test against api.anthropic.com.
 
-    Wave 5 implementation will use the structure from RESEARCH.md::
+    Gated on ANTHROPIC_API_KEY. Costs a small handful of tokens per run; uses
+    claude-3-5-haiku for the cheapest tier.
 
-        from langchain_core.messages import HumanMessage
-        from app.llm.providers.anthropic import AnthropicProvider
-
-        provider = AnthropicProvider(
-            model="claude-3-5-haiku-20241022",
-            api_key=os.environ["ANTHROPIC_API_KEY"],
-        )
-        assert await provider.validate_config() is None
-        bound = provider.bind_tools([])
-        result = await bound.ainvoke([HumanMessage(content="Reply with the single word 'pong'.")])
-        assert "pong" in result.content.lower()
+    ``langchain_anthropic 1.4.3`` returns ``AIMessage.content`` as a list of
+    content blocks for some configurations; coerce via ``str(...)`` for a
+    tolerant assertion against either shape.
     """
-    pytest.skip("Wave 5 implements real Anthropic acceptance")
+    # Arrange
+    provider = AnthropicProvider(
+        model="claude-3-5-haiku-20241022",
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+    )
+    assert await provider.validate_config() is None
+
+    # Act
+    bound = provider.bind_tools([])
+    result = await bound.ainvoke(
+        [HumanMessage(content="Reply with just the single word: pong")]
+    )
+
+    # Assert: tolerant of str-or-list content shape per langchain_anthropic 1.4.3
+    assert "pong" in str(result.content).lower()
