@@ -15,7 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ChakraProvider } from '@chakra-ui/react'
 import { system } from '../../theme'
 import { Sidebar } from '../Sidebar'
@@ -121,7 +121,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('ollama · qwen3:4b')).toBeInTheDocument()
   })
 
-  it('clicking the New chat button navigates to /app', () => {
+  it('clicking the New chat button navigates to /app with a fresh ?n= token', () => {
     renderSidebar({ initialPath: '/settings/providers' })
     expect(screen.getByTestId('route-marker').textContent).toBe('settings-route')
 
@@ -129,6 +129,39 @@ describe('Sidebar', () => {
     fireEvent.click(newChatButton)
 
     expect(screen.getByTestId('route-marker').textContent).toBe('app-route')
+  })
+
+  it('clicking New chat from /app bumps a fresh ?n= token (useChat reset signal)', () => {
+    // Subscribe to MemoryRouter's location so we can assert the search query
+    // after the click — that's the wire signal useChat watches in real usage.
+    function LocationProbe() {
+      const location = useLocation()
+      return <div data-testid="search-marker">{location.search}</div>
+    }
+
+    render(
+      <ChakraProvider value={system}>
+        <MemoryRouter initialEntries={['/app']}>
+          <Routes>
+            <Route
+              path="/app"
+              element={
+                <>
+                  <Sidebar username="alice" />
+                  <LocationProbe />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </ChakraProvider>
+    )
+
+    const newChatButton = screen.getByRole('button', { name: /New chat/i })
+    fireEvent.click(newChatButton)
+
+    const search = screen.getByTestId('search-marker').textContent ?? ''
+    expect(search).toMatch(/[?&]n=\d+/)
   })
 
   it('active session gets the accent.solid 3px left border', () => {

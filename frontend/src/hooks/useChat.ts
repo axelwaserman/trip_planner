@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { Message, MessageType } from '../types/chat'
 import { apiFetch } from '../lib/auth'
 import {
@@ -170,6 +171,13 @@ export function useChat(): UseChatReturn {
   const [currentModel, setCurrentModel] = useState('qwen3:4b')
   const [providerError, setProviderError] = useState<ProviderErrorView | null>(null)
 
+  // The Sidebar bumps `?n=<timestamp>` whenever the user clicks "New chat".
+  // This is the only signal useChat watches to know it should clear messages
+  // and create a fresh session — purely URL-driven so the hook stays oblivious
+  // to where the click came from. Mount-time init runs with `n === null`.
+  const [searchParams] = useSearchParams()
+  const newChatToken = searchParams.get('n')
+
   const initSession = useCallback(
     async (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => {
       setProviderError(null)
@@ -209,6 +217,13 @@ export function useChat(): UseChatReturn {
     // the legacy 'llm_provider_config' key (Phase 4.1/4.2). If neither exists
     // (cold first run), use ollama/qwen3:4b with null base_url + api_key so
     // the backend factory falls back to its env-var precedence (D-08).
+    //
+    // Re-runs whenever `?n=<token>` changes — that's the Sidebar's "New chat"
+    // signal, which clears messages and initSession-s a fresh session keeping
+    // the user's currently-selected provider/model (read from settings here).
+    setMessages([])
+    setSessionId(null)
+    setIsLoading(false)
     const settings = loadProviderSettings()
     if (settings === null) {
       void initSession('ollama', 'qwen3:4b', null, null)
@@ -216,7 +231,7 @@ export function useChat(): UseChatReturn {
     }
     const selection = resolveSelection(settings)
     void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
-  }, [initSession])
+  }, [initSession, newChatToken])
 
   const handleProviderChange = useCallback(
     (provider: string, model: string) => {

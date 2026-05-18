@@ -51,7 +51,12 @@ export function Sidebar({
       onNewChat()
     }
     if (onNavigate) onNavigate()
-    navigate('/app')
+    // Bump `?n=<token>` so useChat's effect re-runs and creates a fresh
+    // session. Plain `navigate('/app')` was a no-op when already on /app —
+    // useChat only initialises once per mount, so the messages list and
+    // session_id stuck around. The token's value is irrelevant; it just
+    // has to differ from whatever's currently in the URL.
+    navigate(`/app?n=${Date.now()}`)
   }
 
   function handleSessionClick(id: string) {

@@ -1,6 +1,24 @@
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook as rtlRenderHook, waitFor } from '@testing-library/react'
+import type { RenderHookOptions } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
+import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChat } from '../useChat'
+
+// useChat reads `useSearchParams()` to observe Sidebar's `?n=<token>` New
+// chat signal, so every renderHook call needs a Router context. Wrap the
+// upstream renderHook so each test stays single-line. createElement avoids
+// JSX in this `.ts` file.
+function MemoryRouterWrapper({ children }: { children: ReactNode }) {
+  return createElement(MemoryRouter, { initialEntries: ['/app'] }, children)
+}
+
+function renderHook<TResult, TProps>(
+  callback: (props: TProps) => TResult,
+  options?: Omit<RenderHookOptions<TProps>, 'wrapper'>
+) {
+  return rtlRenderHook(callback, { wrapper: MemoryRouterWrapper, ...options })
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -446,5 +464,101 @@ describe('sendMessage error handling', () => {
     const thinkingMessages = result.current.messages.filter((m) => m.role === 'thinking')
     expect(thinkingMessages).toHaveLength(1)
     expect(thinkingMessages[0].content).toBe('Part1 Part2')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// New chat reset (Sidebar `?n=<token>` signal)
+// ---------------------------------------------------------------------------
+
+describe('new chat reset signal', () => {
+  // Compose useChat + useNavigate so the test can bump `?n=<token>` and
+  // observe the hook reacting. Minimal wrapper — the real Sidebar does the
+  // same via navigate(`/app?n=${Date.now()}`).
+  function useChatWithNavigate() {
+    const navigate = useNavigate()
+    const chat = useChat()
+    return { chat, navigate }
+  }
+
+  it('clears messages and creates a fresh session when ?n= changes', async () => {
+    let createCallCount = 0
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
+      createCallCount += 1
+      return {
+        ok: true,
+        json: async () => ({
+          session_id: `sess-${createCallCount}`,
+          provider: 'ollama',
+          model: 'qwen3:4b',
+        }),
+        body: null,
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChatWithNavigate())
+
+    // First mount — initial session.
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-1'))
+    expect(createCallCount).toBe(1)
+
+    // Seed a stale message so we can prove it gets cleared on the reset.
+    await act(async () => {
+      result.current.chat.sendMessage // touch — exists
+    })
+
+    // Bump the new-chat token (mirrors Sidebar.handleNewChat).
+    await act(async () => {
+      result.current.navigate('/app?n=12345')
+    })
+
+    // Effect re-runs → setMessages([]) + setSessionId(null) + a new POST.
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-2'))
+    expect(createCallCount).toBe(2)
+    expect(result.current.chat.messages).toEqual([])
+  })
+
+  it('reuses the currently-selected provider/model when resetting', async () => {
+    localStorage.setItem(
+      'provider_settings',
+      JSON.stringify({
+        selected: { provider: 'ollama', model: 'mistral:7b' },
+        ollama: { base_url: 'http://localhost:11434', models: ['mistral:7b'] },
+        lmstudio: { base_url: 'http://localhost:1234/v1', models: [] },
+        openai: { api_key: '', model: 'gpt-4o-mini' },
+        anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
+      })
+    )
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ session_id: 'sess-x', provider: 'ollama', model: 'mistral:7b' }),
+      body: null,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChatWithNavigate())
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-x'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      result.current.navigate('/app?n=99999')
+    })
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    // Both calls must have used the user-selected mistral:7b — not the
+    // factory default qwen3:4b — proving the reset re-reads provider_settings.
+    const [, secondCall] = fetchMock.mock.calls
+    const secondBody = JSON.parse((secondCall[1] as RequestInit).body as string) as {
+      provider: string
+      model: string
+    }
+    expect(secondBody).toEqual({
+      provider: 'ollama',
+      model: 'mistral:7b',
+      base_url: 'http://localhost:11434',
+      api_key: null,
+    })
   })
 })
