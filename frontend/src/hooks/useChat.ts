@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { Message, MessageType } from '../types/chat'
 import { apiFetch } from '../lib/auth'
 import {
@@ -192,6 +192,15 @@ export function useChat(): UseChatReturn {
   const [searchParams] = useSearchParams()
   const newChatToken = searchParams.get('n')
   const resumeSessionId = searchParams.get('session')
+  const navigate = useNavigate()
+
+  // Tracks the session id useChat has already initialized for. Used to skip
+  // the resume-from-URL effect when initSession just replaced the URL with
+  // ?session=<new_id> on its own — without this guard the effect would
+  // re-fire, wipe messages, and re-fetch history for a session it just
+  // created. Distinct from `sessionId` state because we want to remember
+  // it across the effect's reset-then-initialize cycle.
+  const ownedSessionIdRef = useRef<string | null>(null)
 
   const initSession = useCallback(
     async (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => {
@@ -203,9 +212,17 @@ export function useChat(): UseChatReturn {
         const result = await createSession(provider, model, baseUrl, apiKey)
 
         if (result.ok) {
+          ownedSessionIdRef.current = result.data.session_id
           setSessionId(result.data.session_id)
           setCurrentProvider(result.data.provider)
           setCurrentModel(result.data.model)
+          // Replace the URL so the Sidebar's activeSessionId highlights the
+          // new row and the page is bookmarkable / shareable. `replace: true`
+          // avoids polluting back-button history with `/app?n=<token>` →
+          // `/app?session=<id>` pairs. The effect won't re-run as a resume
+          // because ownedSessionIdRef already holds the new id by the time
+          // the URL change fires the next pass.
+          navigate(`/app?session=${result.data.session_id}`, { replace: true })
           return
         }
 
@@ -224,7 +241,7 @@ export function useChat(): UseChatReturn {
         // apiFetch's 401 handler already redirected; nothing to do here.
       }
     },
-    []
+    [navigate]
   )
 
   const resumeSession = useCallback(async (id: string): Promise<boolean> => {
@@ -241,6 +258,7 @@ export function useChat(): UseChatReturn {
         model: string
         messages: Array<{ role: 'user' | 'assistant'; content: string }>
       }
+      ownedSessionIdRef.current = body.session_id
       setSessionId(body.session_id)
       setCurrentProvider(body.provider)
       setCurrentModel(body.model)
@@ -269,6 +287,15 @@ export function useChat(): UseChatReturn {
     //     the chat.
     //   - ?n=<token>    → clear messages and POST /api/chat/session with the
     //     user's currently-selected provider/model (Sidebar's "New chat").
+    //
+    // Bail when the URL already names a session this hook just created or
+    // resumed — initSession replaces the URL with /app?session=<new_id> so
+    // the new chat row highlights, and we'd otherwise re-fetch its empty
+    // history and wipe the local state moments after creating it.
+    if (resumeSessionId && resumeSessionId === ownedSessionIdRef.current) {
+      return
+    }
+
     setMessages([])
     setSessionId(null)
     setIsLoading(false)

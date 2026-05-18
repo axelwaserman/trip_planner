@@ -21,6 +21,7 @@
  * 260px persistent column.
  */
 
+import { useEffect } from 'react'
 import { Box, Button, Flex, Heading, Stack, Text } from '@chakra-ui/react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquarePlus, Settings as SettingsIcon } from 'lucide-react'
@@ -42,9 +43,20 @@ export function Sidebar({
 }: SidebarProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { sessions, error } = useSessions()
+  const { sessions, error, refetch } = useSessions()
 
   const settingsActive = location.pathname === '/settings/providers'
+
+  // Refetch the sessions list whenever the active session changes — picks
+  // up new sessions useChat just created (it replaces the URL with
+  // /app?session=<new_id> on success) and ensures the new row appears
+  // alongside its highlight. Refetch is a no-op when activeSessionId is
+  // still undefined.
+  useEffect(() => {
+    if (!activeSessionId) return
+    if (sessions.some((s) => s.session_id === activeSessionId)) return
+    refetch()
+  }, [activeSessionId, sessions, refetch])
 
   function handleNewChat() {
     if (onNewChat) {

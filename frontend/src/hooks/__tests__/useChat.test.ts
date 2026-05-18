@@ -1,7 +1,7 @@
 import { act, renderHook as rtlRenderHook, waitFor } from '@testing-library/react'
 import type { RenderHookOptions } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChat } from '../useChat'
 
@@ -359,6 +359,23 @@ describe('sendMessage happy path', () => {
     // is back to false. The "Thinking..." placeholder relies on this so it
     // disappears as soon as the assistant bubble starts filling in.
     expect(result.current.isAwaitingFirstChunk).toBe(false)
+  })
+
+  it('replaces the URL with ?session=<new_id> after a successful create', async () => {
+    vi.stubGlobal('fetch', mockSessionFetch({ session_id: 'sess-new', provider: 'ollama', model: 'qwen3:4b' }))
+
+    function useChatWithLocation() {
+      const chat = useChat()
+      const location = useLocation()
+      return { chat, location }
+    }
+
+    const { result } = renderHook(() => useChatWithLocation())
+
+    await waitFor(() => expect(result.current.chat.sessionId).toBe('sess-new'))
+    // URL must now name the session — Sidebar's activeSessionId reads from
+    // ?session= and highlights the row, and the URL is shareable.
+    await waitFor(() => expect(result.current.location.search).toBe('?session=sess-new'))
   })
 
   it('isAwaitingFirstChunk resets to false on stream error', async () => {

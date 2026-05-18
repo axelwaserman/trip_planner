@@ -209,4 +209,44 @@ describe('Sidebar', () => {
     // The container exists; the assertion above is the actual contract.
     expect(container).toBeTruthy()
   })
+
+  it('refetches sessions when activeSessionId points at a row not yet in the list', () => {
+    // Simulates: user clicks "New chat" → useChat creates a session and
+    // navigates to /app?session=<new_id>. App.tsx threads the new id into
+    // Sidebar.activeSessionId. The hook's session list still doesn't have
+    // the row yet — Sidebar must call refetch() so it appears.
+    const refetch = vi.fn()
+    useSessionsMock.mockReturnValue({
+      sessions: [], // No rows yet — simulates the just-created session
+      isLoading: false,
+      error: null,
+      refetch,
+    })
+
+    renderSidebar({ activeSessionId: 'sess-just-created' })
+
+    expect(refetch).toHaveBeenCalled()
+  })
+
+  it('does not refetch when the active session is already in the list', () => {
+    const refetch = vi.fn()
+    useSessionsMock.mockReturnValue({
+      sessions: [
+        {
+          session_id: 'sess-known',
+          created_at: '2026-05-17T00:00:00Z',
+          provider: 'ollama',
+          model: 'qwen3:4b',
+          first_message_preview: 'Existing chat',
+        },
+      ],
+      isLoading: false,
+      error: null,
+      refetch,
+    })
+
+    renderSidebar({ activeSessionId: 'sess-known' })
+
+    expect(refetch).not.toHaveBeenCalled()
+  })
 })
