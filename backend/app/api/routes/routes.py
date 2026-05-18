@@ -1,5 +1,6 @@
 """Unified routes for Trip Planner API."""
 
+import logging
 import time
 from collections.abc import AsyncGenerator
 from typing import Annotated
@@ -24,6 +25,8 @@ from app.models import (
     SessionCreateRequest,
     StreamEvent,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -97,7 +100,10 @@ async def chat(
                 yield f"data: {event.model_dump_json()}\n\n"
 
         except ValueError:
-            # Session not found
+            # Defensive: the route boundary already 404s missing sessions
+            # (CR-02). This catch covers a narrow race where the session is
+            # deleted between the boundary check and chat_stream's first
+            # history read.
             error_event = StreamEvent(
                 chunk="",
                 session_id=request.session_id,
@@ -105,10 +111,20 @@ async def chat(
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
 
-        except Exception as e:
-            # Other errors
+        except Exception:
+            # CR-05: do NOT echo str(e) over the SSE wire. Upstream SDK
+            # exceptions (httpx, OpenAI / Anthropic SDK, langchain) often
+            # carry internal URLs, file paths, model ids, and partial
+            # payloads in their str() — leaking those to an authenticated-
+            # but-not-trusted client is information disclosure. Log the full
+            # exception server-side (the ApiKeyScrubber redacts any key-
+            # shaped substrings before the formatter runs) and emit a
+            # static, generic message to the client.
+            logger.exception(
+                "chat_stream failed for session %s", request.session_id
+            )
             error_event = StreamEvent(
-                chunk=f"An error occurred: {str(e)}",
+                chunk="Sorry, something went wrong. Please try again.",
                 session_id=request.session_id,
                 type="content",
             )

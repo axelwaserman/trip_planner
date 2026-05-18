@@ -1,6 +1,5 @@
 """Integration tests for session create/delete routes."""
 
-import json
 from collections.abc import Generator
 
 import pytest
