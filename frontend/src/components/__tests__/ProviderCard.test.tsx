@@ -29,15 +29,18 @@ import { ProviderCard, type ProviderSettings } from '../ProviderCard'
 
 const DEFAULT_SETTINGS: ProviderSettings = {
   selected: { provider: 'ollama', model: 'qwen3:4b' },
-  ollama: { base_url: 'http://localhost:11434', models: ['qwen3:4b'] },
+  ollama: { base_url: 'http://localhost:11434', model: 'qwen3:4b', models: ['qwen3:4b'] },
+  lmstudio: { base_url: 'http://localhost:1234/v1', model: '', models: [] },
   openai: { api_key: '', model: 'gpt-4o-mini' },
   anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
 }
 
+type AnyKind = 'ollama' | 'lmstudio' | 'openai' | 'anthropic'
+
 function renderCard(
-  kind: 'ollama' | 'openai' | 'anthropic',
+  kind: AnyKind,
   overrides: Partial<ProviderSettings> = {},
-  onSave: (kind: 'ollama' | 'openai' | 'anthropic', updated: ProviderSettings) => void = vi.fn()
+  onSave: (kind: AnyKind, updated: ProviderSettings) => void = vi.fn()
 ) {
   const settings: ProviderSettings = { ...DEFAULT_SETTINGS, ...overrides }
   return render(
@@ -59,7 +62,7 @@ describe('ProviderCard', () => {
 
   it('renders Ollama discovered models as informational chips', () => {
     renderCard('ollama', {
-      ollama: { base_url: 'http://localhost:11434', models: ['qwen3:4b', 'llama3:8b', 'mistral'] },
+      ollama: { base_url: 'http://localhost:11434', model: 'qwen3:4b', models: ['qwen3:4b', 'llama3:8b', 'mistral'] },
     })
     expect(screen.getByText('qwen3:4b')).toBeInTheDocument()
     expect(screen.getByText('llama3:8b')).toBeInTheDocument()
@@ -71,10 +74,12 @@ describe('ProviderCard', () => {
 
   it('shows the Ollama empty-state hint when no models are discovered', () => {
     renderCard('ollama', {
-      ollama: { base_url: 'http://localhost:11434', models: [] },
+      ollama: { base_url: 'http://localhost:11434', model: 'qwen3:4b', models: [] },
     })
+    // Plan 08b: empty-state copy now hints at the Refresh button (Plan 06b
+    // POST /api/providers/refresh wired in by Task 2).
     expect(
-      screen.getByText(/No models discovered\. Run `ollama pull qwen3:4b` then save below/i)
+      screen.getByText(/No models discovered\. Run `ollama pull qwen3:4b` then click Refresh/i)
     ).toBeInTheDocument()
   })
 
