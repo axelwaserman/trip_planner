@@ -4,8 +4,8 @@ milestone: v1.5
 milestone_name: Re-platform
 status: executing
 stopped_at: Phase 4.4 context gathered
-last_updated: "2026-05-17T15:34:14.909Z"
-last_activity: 2026-05-17 -- Phase 4.6 planning complete
+last_updated: "2026-05-18T03:40:48.467Z"
+last_activity: 2026-05-18 -- Phase 04.6 execution started
 progress:
   total_phases: 15
   completed_phases: 1
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** A user can authenticate via a real login page, pick an LLM provider (a local Ollama model discovered from the host, or a cloud provider via API key), hold a natural conversation with the agent, watch it reason and call travel tools live, and trust that the results are structured, sanitized, and rendered usefully.
-**Current focus:** Phase 4.5 — llm provider abstraction (real cloud + dynamic ollama)
+**Current focus:** Phase 04.6 — vendor-neutral-tool-json
 
 ## Current Position
 
-Phase: 4.5
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-17 -- Phase 4.6 planning complete
+Phase: 04.6 (vendor-neutral-tool-json) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 04.6
+Last activity: 2026-05-18 -- Phase 04.6 execution started
 
 Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases fully complete: 2, 3; Phase 1 and Phase 4.1 partial)
 
