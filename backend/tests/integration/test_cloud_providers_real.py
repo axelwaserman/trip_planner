@@ -37,8 +37,6 @@ from langchain_core.messages import HumanMessage
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.openai import OpenAIProvider
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.mark.skipif(
     not os.getenv("OPENAI_API_KEY"),

@@ -17,12 +17,9 @@ them once the route layer rewires onto the factory.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import pytest
 
 from app.llm.errors import ProbeErrorCode
 from app.llm.providers.ollama import OllamaProvider
-
-pytestmark = pytest.mark.unit
 
 
 def _make_provider(model: str = "qwen3:4b") -> OllamaProvider:

@@ -15,12 +15,9 @@ API keys appear in fixtures only as the literal strings ``"sk-test"`` /
 T-04.5-04-02 (disposition: mitigate).
 """
 
-import pytest
 
 from app.llm.errors import ProbeErrorCode
 from app.llm.providers.openai import OpenAIProvider
-
-pytestmark = pytest.mark.unit
 
 
 async def test_validate_config_returns_missing_api_key_when_key_is_none() -> None:

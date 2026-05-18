@@ -15,12 +15,9 @@ without a live LM Studio daemon.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import pytest
 
 from app.llm.errors import ProbeErrorCode
 from app.llm.providers.lmstudio import LMStudioProvider
-
-pytestmark = pytest.mark.unit
 
 
 def _make_provider(model: str = "qwen2.5-coder-7b") -> LMStudioProvider:

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
 status: ready_to_plan
-stopped_at: Phase 04.5 complete (13/13) — ready to discuss Phase 4.6
+stopped_at: Phase 04.5 + 04.6 complete — ready to discuss Phase 4.7
 last_updated: 2026-05-18T05:25:27.412Z
-last_activity: 2026-05-17 -- Phase 04.5 execution started
+last_activity: 2026-05-18 -- Phase 04.5 merged on top of 04.6 baseline
 progress:
   total_phases: 15
   completed_phases: 1
-  total_plans: 19
-  completed_plans: 19
+  total_plans: 24
+  completed_plans: 24
   percent: 7
 ---
 
@@ -21,11 +21,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** A user can authenticate via a real login page, pick an LLM provider (a local Ollama model discovered from the host, or a cloud provider via API key), hold a natural conversation with the agent, watch it reason and call travel tools live, and trust that the results are structured, sanitized, and rendered usefully.
-**Current focus:** Phase 4.6 — vendor neutral tool json
+**Current focus:** Phase 4.7 — error handling + streamevent hierarchy
 
 ## Current Position
 
-Phase: 4.6
+Phase: 4.7
 Plan: Not started
 Status: Ready to plan
 Last activity: 2026-05-18
@@ -49,7 +49,9 @@ Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases f
 | 3. Mock Flight Search Tool | retro | shipped 2025-11-10 → 2025-11-14 | n/a |
 | 4.1. LLM Provider UI Config | retro (partial) | shipped 2026-05-13 (wiring broken) | n/a |
 | 04.3 | 7 | - | - |
+| 04.4 | 2 | - | - |
 | 04.5 | 13 | - | - |
+| 04.6 | 2 | - | - |
 
 **Recent Trend:**
 
@@ -115,6 +117,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-05-17T06:22:08.132Z
-Stopped at: Phase 4.5 UI-SPEC approved
-Resume file: .planning/phases/04.5-llm-provider-abstraction-real-cloud-dynamic-ollama/04.5-UI-SPEC.md
+Last session: 2026-05-18T05:25:27.412Z
+Stopped at: Phase 4.5 PR #16 merged on top of 4.4 + 4.6 baseline
+Resume file: .planning/phases/04.5-llm-provider-abstraction-real-cloud-dynamic-ollama/04.5-FINAL-REVIEW.md

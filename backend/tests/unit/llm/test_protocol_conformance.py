@@ -26,14 +26,11 @@ duck-typed surfaces. The ``BoundProvider`` Protocol exists separately because
 NOT a ``BaseChatModel`` (verified against installed ``langchain-core`` 1.x).
 """
 
-import pytest
 
 from app.llm.protocol import BoundProvider, LLMProvider
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.ollama import OllamaProvider
 from app.llm.providers.openai import OpenAIProvider
-
-pytestmark = pytest.mark.unit
 
 
 def test_ollama_provider_satisfies_llm_provider_protocol() -> None:

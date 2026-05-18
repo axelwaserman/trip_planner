@@ -25,8 +25,6 @@ import pytest
 from app.llm.errors import ProbeErrorCode
 from app.llm.providers.anthropic import AnthropicProvider
 
-pytestmark = pytest.mark.unit
-
 
 async def test_validate_config_returns_missing_api_key_when_key_is_none() -> None:
     """``AnthropicProvider(api_key=None).validate_config()`` → ``MISSING_API_KEY``."""

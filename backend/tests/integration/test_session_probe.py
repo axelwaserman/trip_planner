@@ -15,8 +15,6 @@ from fastapi.testclient import TestClient
 
 from app.api.main import app
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture
 def client() -> Generator[TestClient]:

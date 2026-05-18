@@ -29,9 +29,6 @@ from app.llm.log_scrubbing import (
     uninstall_log_scrubber,
 )
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # Group A — direct regex coverage on _scrub
 # ---------------------------------------------------------------------------

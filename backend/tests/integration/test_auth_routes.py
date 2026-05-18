@@ -18,7 +18,6 @@ def client() -> TestClient:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 def test_token_endpoint_returns_jwt_for_valid_credentials(client: TestClient) -> None:
     """POST /api/auth/token with valid credentials returns access_token and token_type."""
     response = client.post(
@@ -34,7 +33,6 @@ def test_token_endpoint_returns_jwt_for_valid_credentials(client: TestClient) ->
     assert len(parts) == 3
 
 
-@pytest.mark.integration
 def test_token_endpoint_rejects_wrong_password(client: TestClient) -> None:
     """POST /api/auth/token with wrong password returns 400."""
     response = client.post(
@@ -44,7 +42,6 @@ def test_token_endpoint_rejects_wrong_password(client: TestClient) -> None:
     assert response.status_code == 400
 
 
-@pytest.mark.integration
 def test_token_endpoint_rejects_unknown_user(client: TestClient) -> None:
     """POST /api/auth/token with unknown username returns 400."""
     response = client.post(
@@ -59,7 +56,6 @@ def test_token_endpoint_rejects_unknown_user(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 def test_health_check_is_public(client: TestClient) -> None:
     """GET /health returns 200 without any auth token."""
     response = client.get("/health")
@@ -72,14 +68,12 @@ def test_health_check_is_public(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 def test_get_providers_requires_auth(client: TestClient) -> None:
     """GET /api/providers returns 401 without Bearer token."""
     response = client.get("/api/providers")
     assert response.status_code == 401
 
 
-@pytest.mark.integration
 def test_get_providers_succeeds_with_valid_token(client: TestClient, auth_headers: dict[str, str]) -> None:
     """GET /api/providers returns 200 with a valid Bearer token."""
     response = client.get("/api/providers", headers=auth_headers)
@@ -93,14 +87,12 @@ def test_get_providers_succeeds_with_valid_token(client: TestClient, auth_header
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 def test_create_session_requires_auth(client: TestClient) -> None:
     """POST /api/chat/session returns 401 without Bearer token."""
     response = client.post("/api/chat/session")
     assert response.status_code == 401
 
 
-@pytest.mark.integration
 def test_create_session_succeeds_with_valid_token(client: TestClient, auth_headers: dict[str, str]) -> None:
     """POST /api/chat/session returns 201 with a valid Bearer token."""
     response = client.post("/api/chat/session", headers=auth_headers)
@@ -114,7 +106,6 @@ def test_create_session_succeeds_with_valid_token(client: TestClient, auth_heade
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 def test_chat_requires_auth(client: TestClient) -> None:
     """POST /api/chat returns 401 without Bearer token."""
     response = client.post(

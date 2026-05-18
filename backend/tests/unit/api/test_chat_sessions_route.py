@@ -15,8 +15,6 @@ from langchain_core.chat_history import InMemoryChatMessageHistory
 
 from app.api.main import app
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def client() -> Generator[TestClient]:

@@ -55,6 +55,16 @@ backend/app/
 4. Delete the legacy paths once all imports are migrated.
 5. Update `CLAUDE.md` Architecture section + `ARCHITECTURE.md` accordingly.
 
+## Also in scope
+
+- Move `FlightSearch*` models (`FlightEndpoint`, `CarrierInfo`, `PriceInfo`,
+  `FlightSegment`, `FlightResult`, `FlightSearchQuery`, `FlightSearchResult`)
+  from `app/models.py` into `app/tools/flights/models.py`.
+- Expand the `BaseAPIClient → FlightAPIClient → MockFlightAPIClient` ABC
+  hierarchy into per-provider concrete implementations
+  (`AmadeusFlightClient`, `SkyscannerFlightClient`) with typed method
+  contracts, living under `app/tools/flights/`.
+
 ## Out of scope
 
 - No business logic changes.

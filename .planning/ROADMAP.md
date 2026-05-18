@@ -25,9 +25,9 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [~] **Phase 4.1: LLM Provider UI Config (partial)** — `GET /api/providers`, session creation accepts `{provider, model}`, frontend dropdown, localStorage persistence; **wiring broken — model selector does not produce a working session**. Reopened in 4.2.
 - [ ] **Phase 4.2: Unbreak the App** — React `/login` route + protected routing (REQ-login-page); fix model selector wiring (REQ-llm-provider-ui-fix). Quick-and-dirty: keep `AUTH_USERS` env-seed; PG-seeded users land in Phase 5.
 - [x] **Phase 4.3: CI Reset + Lint/DI Migration** — drop the nightly schedule; lint + unit + integration on every PR push, required for merge; E2E retained only for auth flow + real travel API, gated on credentials. Also: ruff line length 100 → 120 across the codebase, and FastAPI routes migrated from bare `Depends()` to `Annotated[T, Depends(...)]`. (completed 2026-05-16)
-- [ ] **Phase 4.4: Mock Chat in Tests** — `MockLLMStream` fixture replaces Ollama-bound chat tests; `slow` marker removed; doc unit/integration/e2e roles by purpose.
-- [x] **Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)** — `LLMProvider` Protocol + factory; dynamic Ollama model discovery from host; real OpenAI + Anthropic providers via API key (env or session payload); per-session injection. (completed 2026-05-18)
-- [ ] **Phase 4.6: Vendor-Neutral Tool JSON** — `search_flights()` JSON shape designed against Amadeus / Skyscanner / Google Flights field maps; `ToolExecutionCard` renders tables/lists/nested objects.
+- [x] **Phase 4.4: Mock Chat in Tests** — `MockLLMStream` fixture replaces Ollama-bound chat tests; `slow` marker removed; doc unit/integration/e2e roles by purpose. (completed 2026-05-17)
+- [x] **Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)** — `LLMProvider` Protocol + factory; dynamic Ollama model discovery from host; real OpenAI + Anthropic + LM Studio providers via API key (env or session payload); per-session injection. (completed 2026-05-18)
+- [x] **Phase 4.6: Vendor-Neutral Tool JSON** — `search_flights()` JSON shape designed against Amadeus / Skyscanner / Google Flights field maps; `ToolExecutionCard` renders tables/lists/nested objects. (completed 2026-05-18)
 - [ ] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts.
 - [ ] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`.
 - [ ] **Phase 5: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Session`/`Message` tables; named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
@@ -129,6 +129,10 @@ Plans:
   2. All chat tests in `unit/` and `integration/` consume the mock; no chat test in the default suite calls a real Ollama instance.
   3. The `slow` pytest marker is removed (`pyproject.toml` `addopts` updated). Default `pytest` is fast and offline.
   4. README / `CLAUDE.md` describe what unit / integration / e2e tests *contain* by purpose, not just by directory.
+**Plans**: 2 plans across 1 wave
+Plans:
+- [x] 04.4-01-PLAN.md — Wave 1: MockLLM fixture + three locked test scenarios; delete dead mock_llm.py and .skip files
+- [x] 04.4-02-PLAN.md — Wave 1: Strip four custom pytest markers + expand CLAUDE.md test-structure docs to collaborator-scope taxonomy
 
 ### Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)
 **Goal**: The provider layer supports a real cloud LLM via API key and a dynamically-discovered local Ollama model, both selectable per session.
@@ -174,7 +178,10 @@ Plans:
   2. The fixtures above (or their documented substitutes) normalize into our shape without lossy field collapses, asserted by tests in `backend/tests/unit/test_tool_json_normalization.py` (or equivalent).
   3. `ToolExecutionCard` renders the structured result as a table for `results[]`, lists for arrays, and labelled sections for nested objects — never a raw JSON blob.
   4. The LLM still narrates results naturally in chat alongside the structured card; the two views remain consistent.
-**Plans**: TBD
+**Plans**: 2 plans across 1 wave
+Plans:
+- [x] 04.6-01-PLAN.md — Wave 1: Backend FlightSearchResult Pydantic models + Amadeus/Skyscanner normalization adapters + unit tests
+- [x] 04.6-02-PLAN.md — Wave 1: Frontend FlightSearchResultData types + ToolExecutionCard structured Table renderer + component tests
 **UI hint**: yes
 
 ### Phase 4.7: Error Handling + StreamEvent Hierarchy
@@ -264,9 +271,9 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.1. LLM Provider UI Config | v0 | retro / retro | Partial (wiring broken, reopened in 4.2) | 2026-05-13 |
 | 4.2. Unbreak the App | v1 | 0 / TBD | Not started | - |
 | 4.3. CI Reset | v1 | 7/7 | Complete   | 2026-05-16 |
-| 4.4. Mock Chat in Tests | v1 | 0 / TBD | Not started | - |
+| 4.4. Mock Chat in Tests | v1 | 2/2 | Complete   | 2026-05-17 |
 | 4.5. LLM Provider Abstraction (real) | v1 | 13/13 | Complete   | 2026-05-18 |
-| 4.6. Vendor-Neutral Tool JSON | v1 | 0 / TBD | Not started | - |
+| 4.6. Vendor-Neutral Tool JSON | v1 | 2/2 | Complete   | 2026-05-18 |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / TBD | Not started | - |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / TBD | Not started | - |
 | 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |

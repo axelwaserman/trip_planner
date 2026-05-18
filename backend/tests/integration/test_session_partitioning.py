@@ -12,8 +12,6 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.chat_history import InMemoryChatMessageHistory
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture(autouse=True)
 def two_users() -> Generator[None]:

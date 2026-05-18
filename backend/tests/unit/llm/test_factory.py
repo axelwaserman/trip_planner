@@ -23,8 +23,6 @@ from app.llm.providers.lmstudio import LMStudioProvider
 from app.llm.providers.ollama import OllamaProvider
 from app.llm.providers.openai import OpenAIProvider
 
-pytestmark = pytest.mark.unit
-
 
 def test_factory_builds_ollama_provider_for_provider_name_ollama() -> None:
     """``factory.build(provider="ollama", ...)`` returns ``OllamaProvider``."""
