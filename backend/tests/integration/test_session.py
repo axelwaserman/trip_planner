@@ -145,19 +145,50 @@ class TestDeleteSession:
 
 
 class TestChatInvalidSession:
-    def test_invalid_session_streams_empty_error_event(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+    def test_invalid_session_returns_404(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+        """Per CR-02 the route raises 404 at the boundary for missing sessions.
+
+        The previous behaviour emitted an empty SSE event with status 200; we
+        now reject before opening the stream because (a) the same 404 shape
+        is used for not-owner and (b) emitting nothing-but-an-empty-chunk is
+        indistinguishable from an empty success on the client side.
+        """
         response = client.post(
             "/api/chat",
             json={"message": "Hello", "session_id": "nonexistent-session-id"},
             headers=auth_headers,
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
+    def test_user_cannot_post_to_another_users_session(
+        self, client: TestClient, two_users: None
+    ) -> None:
+        """Regression for CR-02: a non-owner cannot POST to /api/chat.
 
-        data_lines = [line for line in response.text.strip().split("\n") if line.startswith("data: ")]
-        assert len(data_lines) >= 1
+        Alice creates a session; Bob (with his own valid token) tries to
+        POST a message to Alice's session_id. The response MUST be 404 (not
+        200, not 403) so existence is not leaked, and Alice's session
+        history MUST NOT have any new entries.
+        """
+        del two_users  # marker — fixture seeded the alice/bob users.
+        alice_headers = _login(client, "alice", "alicepass")
+        bob_headers = _login(client, "bob", "bobpass")
 
-        event = json.loads(data_lines[0][len("data: ") :])
-        assert event["type"] == "content"
-        assert event["chunk"] == ""
-        assert event["session_id"] == "nonexistent-session-id"
+        session_response = client.post("/api/chat/session", headers=alice_headers)
+        assert session_response.status_code == 201
+        alice_session_id = session_response.json()["session_id"]
+
+        chat_service = client.app.state.chat_service
+        original_history_len = len(chat_service._histories[alice_session_id].messages)
+
+        # Bob tries to post a message to alice's session.
+        response = client.post(
+            "/api/chat",
+            json={"message": "I'm bob, hijacking alice's chat", "session_id": alice_session_id},
+            headers=bob_headers,
+        )
+        assert response.status_code == 404
+
+        # Alice's history must NOT have been mutated by bob's attempt.
+        new_history_len = len(chat_service._histories[alice_session_id].messages)
+        assert new_history_len == original_history_len

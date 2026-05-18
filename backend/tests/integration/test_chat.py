@@ -29,15 +29,18 @@ def test_chat_endpoint_requires_session_id(client: TestClient, auth_headers: dic
 
 
 def test_chat_endpoint_rejects_invalid_session(client: TestClient, auth_headers: dict[str, str]) -> None:
-    """Test chat endpoint rejects invalid session."""
+    """Test chat endpoint rejects invalid session.
+
+    Per CR-02 the route raises a 404 at the boundary (before any SSE stream
+    starts) when the session doesn't exist OR is owned by another user. The
+    same shape is used so a non-owner can't probe for session existence.
+    """
     response = client.post(
         "/api/chat",
         json={"message": "Hello", "session_id": "invalid-session"},
         headers=auth_headers,
     )
-    # Endpoint streams errors in SSE format, not HTTP errors
-    # So it returns 200 but the stream will contain error event
-    assert response.status_code == 200
+    assert response.status_code == 404
 
 
 def test_chat_endpoint_streams_response(client: TestClient, auth_headers: dict[str, str]) -> None:

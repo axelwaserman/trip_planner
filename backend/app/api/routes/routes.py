@@ -51,23 +51,40 @@ async def get_llm_factory() -> LLMProviderFactory:
 async def chat(
     request: ChatRequest,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
-    _current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> StreamingResponse:
     """Chat endpoint with streaming responses.
 
     Accepts a chat message and session ID, returns a stream of events including
     AI responses, tool calls, and tool results.
 
+    Per CR-02: the route verifies that ``request.session_id`` exists AND is
+    owned by ``current_user`` before any history mutation or model call.
+    Non-owner / missing-session both surface as 404 (same shape) so a caller
+    cannot probe for session existence by status code. This stops a
+    horizontal privilege escalation where Alice's valid token could read /
+    write Bob's session history just by guessing the UUID.
+
     Args:
         request: ChatRequest with message and session_id
         chat_service: Injected ChatService instance
+        current_user: Authenticated caller; must own the session.
 
     Returns:
         StreamingResponse with server-sent events
 
     Raises:
-        HTTPException: If session doesn't exist (404) or other errors occur (500)
+        HTTPException: 404 if session doesn't exist or is owned by another
+            user; 500 surfaces internally as an SSE error event.
     """
+    # Ownership check (CR-02). Same 404 shape on missing-vs-not-owner so
+    # a non-owner cannot probe for session existence by status code.
+    metadata = chat_service._metadata.get(request.session_id)
+    if metadata is None or metadata.get("user_id") != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {request.session_id} not found",
+        )
 
     async def event_generator() -> AsyncGenerator[str]:
         """Generate server-sent events from chat stream."""
