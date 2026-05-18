@@ -263,8 +263,8 @@ def test_amadeus_offer_normalizes_without_lossy_collapse() -> None:
     assert result.segments[0].carrier.name == "Delta Air Lines"
     assert result.booking_class == "ECONOMY"
     assert result.segments[0].number_of_stops == 0
-    assert result.segments[0].departure.city == "LA"   # resolved from dictionaries, not raw IATA
-    assert result.segments[0].arrival.city == "NYC"    # resolved from dictionaries, not raw IATA
+    assert result.segments[0].departure.city == "LA"  # resolved from dictionaries, not raw IATA
+    assert result.segments[0].arrival.city == "NYC"  # resolved from dictionaries, not raw IATA
 
 
 def test_amadeus_offer_carrier_name_comes_from_dictionaries() -> None:
