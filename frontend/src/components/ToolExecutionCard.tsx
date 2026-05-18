@@ -2,21 +2,7 @@ import { Box, Flex, Text, Spinner, Button, Collapsible, Code, Table } from '@cha
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { FlightSearchResultData, FlightResultData } from '../types/chat'
-
-interface ToolCallMetadata {
-  tool_name: string
-  arguments: Record<string, unknown>
-  started_at: number
-  status: string
-}
-
-interface ToolResultMetadata {
-  summary: string
-  full_result: string
-  status: string
-  elapsed_ms: number
-}
+import type { FlightSearchResultData, FlightResultData, ToolCallMetadata, ToolResultMetadata } from '../types/chat'
 
 interface ToolExecutionCardProps {
   callMetadata: ToolCallMetadata
