@@ -105,11 +105,11 @@ describe('Sidebar', () => {
     useSessionsMock.mockReturnValue({
       sessions: [
         {
-          id: 's1',
+          session_id: 's1',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
-          last_message_preview: 'Plan a trip to Tokyo',
+          first_message_preview: 'Plan a trip to Tokyo',
         },
       ],
       isLoading: false,
@@ -135,18 +135,18 @@ describe('Sidebar', () => {
     useSessionsMock.mockReturnValue({
       sessions: [
         {
-          id: 's-active',
+          session_id: 's-active',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
-          last_message_preview: 'Active session',
+          first_message_preview: 'Active session',
         },
         {
-          id: 's-other',
+          session_id: 's-other',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
-          last_message_preview: 'Other session',
+          first_message_preview: 'Other session',
         },
       ],
       isLoading: false,

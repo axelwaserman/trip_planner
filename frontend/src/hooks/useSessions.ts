@@ -20,11 +20,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../lib/auth'
 
 export interface ChatSession {
-  id: string
+  // Backend wire shape (app/models.py::ChatSessionInfo). The frontend
+  // matches the backend names verbatim — no transform layer.
+  session_id: string
   created_at: string
   provider: string
   model: string
-  last_message_preview?: string
+  first_message_preview?: string | null
 }
 
 interface SessionsResponse {

@@ -53,11 +53,11 @@ describe('useSessions', () => {
     const fetchMock = mockSessionsFetch({
       sessions: [
         {
-          id: 's1',
+          session_id: 's1',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
-          last_message_preview: 'Hello',
+          first_message_preview: 'Hello',
         },
       ],
     })
@@ -67,7 +67,8 @@ describe('useSessions', () => {
 
     await waitFor(() => {
       expect(result.current.sessions.length).toBe(1)
-      expect(result.current.sessions[0].id).toBe('s1')
+      expect(result.current.sessions[0].session_id).toBe('s1')
+      expect(result.current.sessions[0].first_message_preview).toBe('Hello')
       expect(result.current.isLoading).toBe(false)
     })
   })

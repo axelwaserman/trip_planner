@@ -133,16 +133,16 @@ export function Sidebar({
         ) : (
           <Stack gap="0">
             {sessions.map((s) => {
-              const isActive = activeSessionId === s.id
+              const isActive = activeSessionId === s.session_id
               const preview =
-                s.last_message_preview && s.last_message_preview.trim().length > 0
-                  ? s.last_message_preview
+                s.first_message_preview && s.first_message_preview.trim().length > 0
+                  ? s.first_message_preview
                   : 'New chat'
               return (
                 <Box
-                  key={s.id}
+                  key={s.session_id}
                   as="button"
-                  onClick={() => handleSessionClick(s.id)}
+                  onClick={() => handleSessionClick(s.session_id)}
                   h="48px"
                   px="4"
                   display="flex"
