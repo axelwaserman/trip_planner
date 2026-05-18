@@ -1,7 +1,7 @@
 """Flight search tool for LangChain agent."""
 
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -138,8 +138,6 @@ def normalize_amadeus_offer(offer: dict[str, Any], dictionaries: dict[str, Any])
         exercised correctly. Phase 7 must attach a TZ from airport lookup for
         production use.
     """
-    from datetime import datetime  # local import to avoid polluting module namespace
-
     itinerary = offer["itineraries"][0]
     total_duration: str = itinerary["duration"]
     booking_class: str = offer["travelerPricings"][0]["fareDetailsBySegment"][0]["cabin"]
