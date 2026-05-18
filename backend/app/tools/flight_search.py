@@ -215,7 +215,10 @@ def normalize_skyscanner_itinerary(itin: dict[str, Any]) -> FlightResult:
     """
     from datetime import datetime  # local import to avoid polluting module namespace
 
-    leg = itin["legs"][0]
+    legs: list[dict[str, Any]] = itin.get("legs", [])
+    if not legs:
+        raise ValueError("Skyscanner itinerary has no legs; cannot normalize.")
+    leg = legs[0]
     total_duration: str = _to_iso_duration(leg["durationInMinutes"])
     price_amount = Decimal(str(itin["price"]["raw"]))
     price_currency: str = itin["price"]["currency"]
@@ -225,6 +228,8 @@ def normalize_skyscanner_itinerary(itin: dict[str, Any]) -> FlightResult:
 
     segments: list[FlightSegment] = []
     leg_segments: list[dict[str, Any]] = leg.get("segments", [])
+    if not leg_segments:
+        raise ValueError(f"Skyscanner leg '{leg.get('id')}' has no segments; cannot normalize.")
     for idx, seg in enumerate(leg_segments):
         seg_carrier = seg.get("marketingCarrier", leg_carrier)
         carrier_iata: str = seg_carrier.get("iata", "ZZ")
@@ -258,7 +263,7 @@ def normalize_skyscanner_itinerary(itin: dict[str, Any]) -> FlightResult:
                 carrier=CarrierInfo(iata_code=carrier_iata, name=carrier_name),
                 flight_number=seg["flightNumber"],
                 duration=seg_duration,
-                number_of_stops=leg.get("stopCount", 0),
+                number_of_stops=seg.get("numberOfStops", leg.get("stopCount", 0)),
             )
         )
 
@@ -320,7 +325,6 @@ async def search_flights(
         origin: Origin airport IATA code (3 letters, e.g., "LAX", "JFK")
         destination: Destination airport IATA code (3 letters, e.g., "SFO", "ORD")
         departure_date: Departure date in YYYY-MM-DD format (e.g., "2025-06-15")
-                      IMPORTANT: Today is November 13, 2025. Use dates in 2025 or 2026.
         passengers: Number of passengers (default: 1, min: 1, max: 9)
         sort_by: Sort results by "price" (default), "duration", or "departure"
         max_price: Optional maximum price filter in USD (e.g., 500.00)
