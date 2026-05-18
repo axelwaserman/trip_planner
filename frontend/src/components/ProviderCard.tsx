@@ -18,7 +18,7 @@
  * touch localStorage directly; the parent page does that on `onSave`.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -31,16 +31,20 @@ import {
   Text,
   Wrap,
 } from '@chakra-ui/react'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, RefreshCw } from 'lucide-react'
+import { useProviderRefresh } from '../hooks/useProviderRefresh'
+import {
+  loadProviderSettings,
+  type ProviderSettings,
+} from '../lib/providerSettings'
+import { SelectorErrorBanner } from './chat/SelectorErrorBanner'
 
-export interface ProviderSettings {
-  selected: { provider: string; model: string }
-  ollama: { base_url: string; models: string[] }
-  openai: { api_key: string; model: string }
-  anthropic: { api_key: string; model: string }
-}
+// Re-export the canonical ProviderSettings type so existing consumers that
+// imported it from ProviderCard (Plan 08-era) keep compiling. The single
+// source of truth is `frontend/src/lib/providerSettings.ts`.
+export type { ProviderSettings }
 
-export type ProviderKind = 'ollama' | 'openai' | 'anthropic'
+export type ProviderKind = 'ollama' | 'lmstudio' | 'openai' | 'anthropic'
 
 export interface ProviderCardProps {
   kind: ProviderKind
@@ -70,8 +74,21 @@ function getMeta(kind: ProviderKind, settings: ProviderSettings): ProviderMeta {
       displayName: 'Ollama',
       subtitle: 'Open-source models running on your machine. No key needed.',
       models: settings.ollama.models,
+      // Plan 08b: empty-state copy hints at the new Refresh button (Plan 06b
+      // POST /api/providers/refresh) which the action row now wires up.
       emptyMessage:
-        'No models discovered. Run `ollama pull qwen3:4b` then save below to refresh.',
+        'No models discovered. Run `ollama pull qwen3:4b` then click Refresh.',
+    }
+  }
+  if (kind === 'lmstudio') {
+    return {
+      eyebrow: 'LOCAL',
+      displayName: 'LM Studio',
+      subtitle:
+        'Local models exposed over an OpenAI-compatible API. No key needed.',
+      models: settings.lmstudio.models,
+      emptyMessage:
+        'No models loaded. Open LM Studio and load a model, then click Refresh.',
     }
   }
   if (kind === 'openai') {
@@ -105,6 +122,7 @@ function deriveStatus(kind: ProviderKind, settings: ProviderSettings): StatusPil
   // for the card itself; the page just reflects the persisted state.
   const ready =
     (kind === 'ollama' && settings.ollama.base_url.trim().length > 0) ||
+    (kind === 'lmstudio' && settings.lmstudio.base_url.trim().length > 0) ||
     (kind === 'openai' && settings.openai.api_key.trim().length > 0) ||
     (kind === 'anthropic' && settings.anthropic.api_key.trim().length > 0)
 
@@ -127,7 +145,14 @@ function deriveStatus(kind: ProviderKind, settings: ProviderSettings): StatusPil
 export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
   const status = deriveStatus(kind, settings)
 
-  const savedBaseUrl = kind === 'ollama' ? settings.ollama.base_url : ''
+  const isLocal = kind === 'ollama' || kind === 'lmstudio'
+
+  const savedBaseUrl =
+    kind === 'ollama'
+      ? settings.ollama.base_url
+      : kind === 'lmstudio'
+        ? settings.lmstudio.base_url
+        : ''
   const savedApiKey =
     kind === 'openai'
       ? settings.openai.api_key
@@ -138,33 +163,73 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
   const [baseUrl, setBaseUrl] = useState<string>(savedBaseUrl)
   const [apiKey, setApiKey] = useState<string>(savedApiKey)
   const [showKey, setShowKey] = useState<boolean>(false)
+  // Local mirror of the discovered models list. Initialised from props but
+  // updated by the Refresh button so the chip-list reflects the latest
+  // discovery without waiting for the parent to re-read localStorage.
+  const initialModels =
+    kind === 'ollama'
+      ? settings.ollama.models
+      : kind === 'lmstudio'
+        ? settings.lmstudio.models
+        : []
+  const [localModels, setLocalModels] = useState<string[]>(initialModels)
+
+  // Sync localModels with parent-controlled settings updates. The
+  // SettingsProviders page re-fetches GET /api/providers on mount and
+  // splices the live discovery list into per-provider entries — that
+  // upstream change must reach the chip-list without a remount.
+  const upstreamModels =
+    kind === 'ollama'
+      ? settings.ollama.models
+      : kind === 'lmstudio'
+        ? settings.lmstudio.models
+        : null
+  useEffect(() => {
+    if (upstreamModels === null) return
+    setLocalModels(upstreamModels)
+    // We intentionally only sync from props; the Refresh button's
+    // localStorage write is read separately by re-loading via
+    // loadProviderSettings inside handleRefresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [upstreamModels])
+
+  // Refresh hook for local providers — Plan 06b POST /api/providers/refresh.
+  const { refresh, isRefreshing, error: refreshError } = useProviderRefresh()
 
   // Detect Base URL edits that haven't been saved yet — the displayed model
-  // list is derived from settings.ollama.models, which only refreshes after a
-  // round-trip. Surface that to the user so they don't trust a stale list.
+  // list is derived from settings.{ollama|lmstudio}.models, which only
+  // refreshes after a round-trip. Surface that to the user so they don't
+  // trust a stale list.
   const baseUrlEdited = useMemo(
-    () => kind === 'ollama' && baseUrl.trim() !== savedBaseUrl.trim(),
-    [kind, baseUrl, savedBaseUrl]
+    () => isLocal && baseUrl.trim() !== savedBaseUrl.trim(),
+    [isLocal, baseUrl, savedBaseUrl]
   )
 
   // The meta object carries the displayed model list. Recompute on every
-  // render so a downstream settings.ollama.models change is reflected in the
-  // chip-list without waiting for a remount.
-  const meta = getMeta(kind, settings)
+  // render so a downstream settings.{ollama|lmstudio}.models change is
+  // reflected in the chip-list without waiting for a remount.
+  const propsMeta = getMeta(kind, settings)
+  const meta: ProviderMeta = isLocal
+    ? { ...propsMeta, models: localModels }
+    : propsMeta
 
   const fieldId = `provider-${kind}`
 
   // Choose the model to write into the saved selection on Save:
-  //  - For Ollama: pick the first discovered model (informational list, not
-  //    user-selectable). The chat-header popover is where the user picks.
-  //  - For OpenAI / Anthropic: keep the previously-saved model (these cards
-  //    aren't rendered today, but the code path is preserved for forward
-  //    compat when a future plan re-enables them with a real probe).
+  //  - For Ollama / LM Studio: pick the first discovered model (informational
+  //    list, not user-selectable). The chat-header popover is where the user
+  //    picks.
+  //  - For OpenAI / Anthropic: keep the previously-saved model.
   function pickModelOnSave(): string {
     if (kind === 'ollama') {
-      const discovered = settings.ollama.models
+      const discovered = localModels
       if (discovered.length > 0) return discovered[0]
       return settings.selected.model || 'qwen3:4b'
+    }
+    if (kind === 'lmstudio') {
+      const discovered = localModels
+      if (discovered.length > 0) return discovered[0]
+      return settings.lmstudio.model || ''
     }
     return kind === 'openai' ? settings.openai.model : settings.anthropic.model
   }
@@ -176,7 +241,13 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
       updated = {
         ...settings,
         selected: { provider: 'ollama', model },
-        ollama: { base_url: baseUrl, models: settings.ollama.models },
+        ollama: { base_url: baseUrl, model, models: localModels },
+      }
+    } else if (kind === 'lmstudio') {
+      updated = {
+        ...settings,
+        selected: { provider: 'lmstudio', model },
+        lmstudio: { base_url: baseUrl, model, models: localModels },
       }
     } else if (kind === 'openai') {
       updated = {
@@ -192,6 +263,20 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
       }
     }
     onSave(kind, updated)
+  }
+
+  async function handleRefresh() {
+    if (kind !== 'ollama' && kind !== 'lmstudio') return
+    await refresh(kind)
+    // Re-read the freshly-saved settings to refresh the local chip-list.
+    // useProviderRefresh writes to localStorage on success — pick up the
+    // updated entry here so the UI reflects the new model list immediately.
+    const fresh = loadProviderSettings()
+    if (kind === 'ollama') {
+      setLocalModels(fresh.ollama.models)
+    } else {
+      setLocalModels(fresh.lmstudio.models)
+    }
   }
 
   return (
@@ -251,7 +336,7 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
           {meta.subtitle}
         </Text>
 
-        {kind === 'ollama' && (
+        {isLocal && (
           <Field.Root>
             <Field.Label htmlFor={`${fieldId}-base-url`}>Base URL</Field.Label>
             <Input
@@ -259,7 +344,11 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
               type="url"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="http://localhost:11434"
+              placeholder={
+                kind === 'lmstudio'
+                  ? 'http://localhost:1234/v1'
+                  : 'http://localhost:11434'
+              }
             />
             <Field.HelperText>
               Where the daemon listens. Default works for most local setups.
@@ -267,11 +356,10 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
           </Field.Root>
         )}
 
-        {kind === 'ollama' && baseUrlEdited && (
+        {isLocal && baseUrlEdited && (
           <Text fontSize="13px" color="fg.secondary">
             The model list below was discovered from the previously saved Base
-            URL. Save the new URL to refresh it (live refresh lands in a future
-            update).
+            URL. Click Refresh to re-discover.
           </Text>
         )}
 
@@ -347,6 +435,57 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
             Pick the active model from the badge in the chat header.
           </Text>
         </Box>
+
+        {isLocal && (
+          <>
+            {/* CSS keyframe for the spinning Refresh icon. Defined inline so
+                the rule is co-located with the only consumer; the
+                @keyframes rule is hoisted to a stylesheet by the browser
+                regardless of where the <style> tag is rendered. */}
+            <style>{`
+              @keyframes provider-card-spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+              }
+            `}</style>
+            <Flex align="center" gap="3">
+              <Button
+                variant="ghost"
+                colorPalette="accent"
+                onClick={() => {
+                  void handleRefresh()
+                }}
+                disabled={isRefreshing}
+                type="button"
+                size="sm"
+              >
+                <Box
+                  as="span"
+                  display="inline-flex"
+                  alignItems="center"
+                  style={{
+                    animation: isRefreshing
+                      ? 'provider-card-spin 1s linear infinite'
+                      : undefined,
+                  }}
+                >
+                  <RefreshCw size={14} />
+                </Box>
+                <Box as="span" ml="2">
+                  {isRefreshing ? 'Refreshing…' : 'Refresh models'}
+                </Box>
+              </Button>
+            </Flex>
+            {refreshError && (
+              <SelectorErrorBanner
+                error={refreshError}
+                onRetry={() => {
+                  void handleRefresh()
+                }}
+              />
+            )}
+          </>
+        )}
 
         <Flex justify="flex-end" mt="2">
           <Button colorPalette="accent" onClick={handleSave} type="button">

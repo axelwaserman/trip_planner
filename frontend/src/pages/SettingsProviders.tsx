@@ -20,41 +20,13 @@
 import { useEffect, useState } from 'react'
 import { Box, Grid, GridItem, Heading, Stack, Text } from '@chakra-ui/react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ProviderCard, type ProviderSettings } from '../components/ProviderCard'
+import { ProviderCard } from '../components/ProviderCard'
+import {
+  loadProviderSettings,
+  saveProviderSettings,
+  type ProviderSettings,
+} from '../lib/providerSettings'
 import { apiFetch } from '../lib/auth'
-
-const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
-  selected: { provider: 'ollama', model: 'qwen3:4b' },
-  ollama: { base_url: 'http://localhost:11434', models: [] },
-  openai: { api_key: '', model: 'gpt-4o-mini' },
-  anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
-}
-
-/**
- * Read provider_settings from localStorage; fall back to legacy
- * 'llm_provider_config' (one-shot migration handled by useChat — the page
- * just reads). Returns the default record if neither key is present so the
- * cards render with sensible defaults.
- */
-function loadProviderSettings(): ProviderSettings {
-  try {
-    const raw = localStorage.getItem('provider_settings')
-    if (raw) {
-      return JSON.parse(raw) as ProviderSettings
-    }
-    const legacyRaw = localStorage.getItem('llm_provider_config')
-    if (legacyRaw) {
-      const legacy = JSON.parse(legacyRaw) as { provider: string; model: string }
-      return {
-        ...DEFAULT_PROVIDER_SETTINGS,
-        selected: { provider: legacy.provider, model: legacy.model },
-      }
-    }
-  } catch {
-    // Corrupt JSON — fall through to defaults.
-  }
-  return DEFAULT_PROVIDER_SETTINGS
-}
 
 interface ProviderInfo {
   available: boolean
@@ -65,7 +37,8 @@ type ProvidersResponse = Record<string, ProviderInfo>
 
 function isProvidersResponse(value: unknown): value is ProvidersResponse {
   if (typeof value !== 'object' || value === null) return false
-  // We only care that .ollama exists with a models array — the rest is best-effort.
+  // We only care that .ollama / .lmstudio exists with a models array — the
+  // rest is best-effort.
   const v = value as Record<string, unknown>
   const ollama = v.ollama
   if (typeof ollama !== 'object' || ollama === null) return false
@@ -77,12 +50,13 @@ export function SettingsProviders() {
   const navigate = useNavigate()
   const [settings, setSettings] = useState<ProviderSettings>(() => loadProviderSettings())
 
-  // Discover the live model list from the backend on mount. The backend
+  // Discover the live model lists from the backend on mount. The backend
   // lazy-runs `factory.refresh_local_models()` on the first call so this
-  // hits the daemon at /api/tags, populates the cache, and serves the full
-  // list. Falls back silently to the in-localStorage models if the call
-  // fails — the card stays usable; an error banner is overkill on a page
-  // that already has a working selection.
+  // hits the daemons at /api/tags + LM Studio's /v1/models, populates the
+  // cache, and serves the full list. Falls back silently to the
+  // in-localStorage models if the call fails — the card stays usable;
+  // an error banner is overkill on a page that already has a working
+  // selection.
   useEffect(() => {
     let cancelled = false
     apiFetch('/api/providers')
@@ -92,13 +66,24 @@ export function SettingsProviders() {
       })
       .then((payload) => {
         if (cancelled || !payload || !isProvidersResponse(payload)) return
-        setSettings((prev) => ({
-          ...prev,
-          ollama: {
-            ...prev.ollama,
-            models: payload.ollama.models,
-          },
-        }))
+        const typed = payload
+        setSettings((prev) => {
+          const lmstudioInfo = typed.lmstudio
+          return {
+            ...prev,
+            ollama: {
+              ...prev.ollama,
+              models: typed.ollama.models,
+            },
+            lmstudio: {
+              ...prev.lmstudio,
+              models:
+                lmstudioInfo && Array.isArray(lmstudioInfo.models)
+                  ? lmstudioInfo.models
+                  : prev.lmstudio.models,
+            },
+          }
+        })
       })
       .catch(() => {
         // apiFetch handles 401; everything else is non-fatal here.
@@ -108,8 +93,11 @@ export function SettingsProviders() {
     }
   }, [])
 
-  function handleSave(_kind: 'ollama' | 'openai' | 'anthropic', updated: ProviderSettings) {
-    localStorage.setItem('provider_settings', JSON.stringify(updated))
+  function handleSave(
+    _kind: 'ollama' | 'lmstudio' | 'openai' | 'anthropic',
+    updated: ProviderSettings
+  ) {
+    saveProviderSettings(updated)
     setSettings(updated)
     navigate('/app')
   }
@@ -150,6 +138,7 @@ export function SettingsProviders() {
 
           <Stack gap="6" mt="8">
             <ProviderCard kind="ollama" settings={settings} onSave={handleSave} />
+            <ProviderCard kind="lmstudio" settings={settings} onSave={handleSave} />
           </Stack>
 
           <Box mt="8">

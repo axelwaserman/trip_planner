@@ -6,6 +6,11 @@ import {
   type BackendProbeError,
   type ProviderErrorView,
 } from '../lib/providerErrors'
+import {
+  DEFAULT_PROVIDER_SETTINGS,
+  loadProviderSettings as loadSharedProviderSettings,
+  type ProviderSettings,
+} from '../lib/providerSettings'
 import { readSSEStream } from './useSSEStream'
 
 interface UseChatReturn {
@@ -31,32 +36,14 @@ type CreateSessionResult =
   | { ok: false; probeError: ProviderErrorView }
   | { ok: false; probeError: null }
 
-/**
- * localStorage shape under key 'provider_settings' (Phase 4.5 D-21).
- *
- * The selected entry drives session creation; per-provider entries hold the
- * base_url (local providers) or api_key (cloud providers) the user pasted on
- * the settings page. API keys persist in plain text in v1 — Phase 5 introduces
- * backend-encrypted storage. UI-SPEC §"Persistence affordance" mandates that
- * the user is told this honestly.
- *
- * lmstudio is part of the D-21 schema but the orchestrator scope is the three
- * providers below; lmstudio is included for forward compatibility so a future
- * plan can extend without re-touching this interface.
- */
-interface ProviderSettings {
-  selected: { provider: string; model: string }
-  ollama: { base_url: string; models: string[] }
-  openai: { api_key: string; model: string }
-  anthropic: { api_key: string; model: string }
-}
-
-const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
-  selected: { provider: 'ollama', model: 'qwen3:4b' },
-  ollama: { base_url: 'http://localhost:11434', models: [] },
-  openai: { api_key: '', model: 'gpt-4o-mini' },
-  anthropic: { api_key: '', model: 'claude-3-5-sonnet-20241022' },
-}
+// ProviderSettings + DEFAULT_PROVIDER_SETTINGS now live in
+// `frontend/src/lib/providerSettings.ts` (the shared module promoted by Plan
+// 08b so Sidebar/Settings/cards/hooks can co-consume without circular
+// imports). useChat re-uses the same shape verbatim — the only difference is
+// that loadSharedProviderSettings always returns a complete record (defaults
+// back-fill missing entries), so the local `loadProviderSettings()` here
+// simply forwards to it and re-narrows nullability for the existing
+// resolveSelection wiring.
 
 interface ResolvedSelection {
   provider: string
@@ -83,6 +70,14 @@ function resolveSelection(settings: ProviderSettings): ResolvedSelection {
       apiKey: null,
     }
   }
+  if (provider === 'lmstudio') {
+    return {
+      provider,
+      model,
+      baseUrl: settings.lmstudio.base_url || null,
+      apiKey: null,
+    }
+  }
   if (provider === 'openai' || provider === 'anthropic') {
     const key = settings[provider].api_key
     return {
@@ -98,50 +93,27 @@ function resolveSelection(settings: ProviderSettings): ResolvedSelection {
 }
 
 /**
- * Load provider settings from localStorage with one-shot migration from the
- * Phase 4.1/4.2 'llm_provider_config' key (D-21 — planner discretion: chosen
- * read-and-overwrite over per-load migration).
- *
- * Returns null when no settings have ever been persisted (cold first run).
- * The caller treats null as "send {ollama, qwen3:4b, null, null}" — letting
- * the backend factory fall back to its env-var/defaults precedence (D-08)
- * rather than the hook smuggling a frontend-side default base_url onto the
- * wire.
- *
- * Order of resolution:
- *   1. 'provider_settings' present → parse + return.
- *   2. Legacy 'llm_provider_config' present → build a default-shaped record
- *      with `selected` set to the legacy {provider, model}; write
- *      'provider_settings'; remove the legacy key; return the migrated record.
- *   3. Neither present → null (cold run, no settings page input yet).
- *
- * Parse failures fall through to null — corrupted JSON should not brick
- * session creation; the backend defaults handle it.
+ * Forward to the shared module for the canonical migration handling.
+ * Returns null only when the storage shim is itself unavailable — every
+ * other path returns a complete record. The legacy useChat behaviour
+ * treated "no settings ever persisted" as null so the backend factory
+ * falls back to its env-var precedence (D-08); we preserve that signal
+ * by detecting the cold-start case via a single localStorage probe BEFORE
+ * delegating, keeping the original behaviour bit-identical.
  */
 function loadProviderSettings(): ProviderSettings | null {
   try {
-    const raw = localStorage.getItem('provider_settings')
-    if (raw) {
-      // Cast is intentional — full schema validation would require zod and the
-      // settings page is the only writer; defaulting on parse failure is enough.
-      return JSON.parse(raw) as ProviderSettings
+    const existing = localStorage.getItem('provider_settings')
+    const legacy = localStorage.getItem('llm_provider_config')
+    if (!existing && !legacy) {
+      // Cold first run — preserve the original null signal so initSession
+      // sends null base_url + null api_key (backend env-var fallback path).
+      return null
     }
-
-    const legacyRaw = localStorage.getItem('llm_provider_config')
-    if (legacyRaw) {
-      const legacy = JSON.parse(legacyRaw) as { provider: string; model: string }
-      const migrated: ProviderSettings = {
-        ...DEFAULT_PROVIDER_SETTINGS,
-        selected: { provider: legacy.provider, model: legacy.model },
-      }
-      localStorage.setItem('provider_settings', JSON.stringify(migrated))
-      localStorage.removeItem('llm_provider_config')
-      return migrated
-    }
+    return loadSharedProviderSettings()
   } catch {
-    // Corrupt JSON or storage access denied — fall through to null.
+    return null
   }
-  return null
 }
 
 function isProbeErrorBody(value: unknown): value is { detail: BackendProbeError } {
@@ -253,7 +225,13 @@ export function useChat(): UseChatReturn {
       // Re-read provider_settings so a fresh paste of api_key / base_url on the
       // settings page is picked up at session-create time (D-21 + D-08).
       const settings = loadProviderSettings() ?? DEFAULT_PROVIDER_SETTINGS
-      const merged: ProviderSettings = { ...settings, selected: { provider, model } }
+      const merged: ProviderSettings = {
+        ...settings,
+        selected: {
+          provider: provider as ProviderSettings['selected']['provider'],
+          model,
+        },
+      }
       const selection = resolveSelection(merged)
       void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
     },
@@ -265,7 +243,10 @@ export function useChat(): UseChatReturn {
     const settings = loadProviderSettings() ?? DEFAULT_PROVIDER_SETTINGS
     const merged: ProviderSettings = {
       ...settings,
-      selected: { provider: currentProvider, model: currentModel },
+      selected: {
+        provider: currentProvider as ProviderSettings['selected']['provider'],
+        model: currentModel,
+      },
     }
     const selection = resolveSelection(merged)
     void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
