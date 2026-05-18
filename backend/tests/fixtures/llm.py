@@ -82,14 +82,20 @@ class MockLLM(BaseChatModel):
         """Required by BaseChatModel abstract interface; unused in streaming tests."""
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=""))])
 
-    async def _astream(  # noqa: async generator satisfies AsyncIterator
+    async def _astream(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: Any = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
-        chunks: list[Chunk] = next(self._streams_iter)
+        try:
+            chunks: list[Chunk] = next(self._streams_iter)
+        except StopIteration:
+            raise RuntimeError(
+                "MockLLM exhausted: more astream() calls were made than pre-baked stream lists. "
+                "Add another inner list to the streams= argument."
+            ) from None
         for chunk in chunks:
             match chunk:
                 case Content(text=t):

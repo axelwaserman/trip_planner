@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.api.main import app
 from app.chat import ChatService
+from app.models import FlightSearchResult
 from app.tools.flight_client import MockFlightAPIClient
 from tests.fixtures.llm import MockLLM, MockLLMStream
 
@@ -49,6 +50,13 @@ async def test_chat_stream_emits_tool_events_for_flight_query() -> None:
     assert any(isinstance(m, HumanMessage) for m in msgs)
     assert any(isinstance(m, ToolMessage) for m in msgs)
     assert len([m for m in msgs if isinstance(m, AIMessage)]) == 2
+
+    # Assert — tool_result.tool_result is valid FlightSearchResult JSON (REQ-tool-json-output)
+    assert tool_result_event.tool_result is not None
+    parsed = FlightSearchResult.model_validate_json(tool_result_event.tool_result)
+    assert parsed.status == "ok"
+    assert parsed.count >= 1
+    assert parsed.query.origin == "LAX"
 
 
 async def test_chat_stream_retains_history_across_turns() -> None:
