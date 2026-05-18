@@ -231,36 +231,39 @@ async def create_session(
 async def delete_session(
     session_id: str,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> None:
     """Delete a chat session.
 
-    Removes the session and its chat history from memory.
+    Removes the session and its chat history from memory. Authentication is
+    required (CR-01) and the session must belong to ``current_user`` — a
+    non-owner gets the same 404 as a missing session to avoid leaking
+    session existence (mirror of the per-user partition pattern from
+    ``GET /api/chat/sessions``).
 
     Args:
         session_id: Session ID to delete
         chat_service: Injected ChatService instance
+        current_user: Authenticated caller; must own the session.
 
     Raises:
-        HTTPException: If session doesn't exist (404)
+        HTTPException: If session doesn't exist or is owned by another user
+            (both surface as 404).
     """
-    # Check if session exists
-    try:
-        chat_service.get_session_history(session_id)
-    except ValueError as err:
+    metadata = chat_service._metadata.get(session_id)
+    if metadata is None or metadata.get("user_id") != current_user.username:
+        # Same 404 shape on missing-vs-not-owner so a non-owner cannot
+        # probe for session existence by status code.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Session {session_id} not found",
-        ) from err
+        )
 
     # Delete the session
-    if session_id in chat_service._histories:
-        del chat_service._histories[session_id]
-    if session_id in chat_service._metadata:
-        del chat_service._metadata[session_id]
-    if session_id in chat_service._bound_providers:
-        del chat_service._bound_providers[session_id]
-    if session_id in chat_service._last_activity:
-        del chat_service._last_activity[session_id]
+    chat_service._histories.pop(session_id, None)
+    chat_service._metadata.pop(session_id, None)
+    chat_service._bound_providers.pop(session_id, None)
+    chat_service._last_activity.pop(session_id, None)
 
 
 @router.get("/health")
