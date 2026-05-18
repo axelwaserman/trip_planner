@@ -263,6 +263,8 @@ def test_amadeus_offer_normalizes_without_lossy_collapse() -> None:
     assert result.segments[0].carrier.name == "Delta Air Lines"
     assert result.booking_class == "ECONOMY"
     assert result.segments[0].number_of_stops == 0
+    assert result.segments[0].departure.city == "LA"   # resolved from dictionaries, not raw IATA
+    assert result.segments[0].arrival.city == "NYC"    # resolved from dictionaries, not raw IATA
 
 
 def test_amadeus_offer_carrier_name_comes_from_dictionaries() -> None:
@@ -309,6 +311,33 @@ def test_skyscanner_price_decimal_precision() -> None:
     assert result.price.amount == Decimal("450.50"), (
         f"Expected Decimal('450.50'), got {result.price.amount!r} — float-to-Decimal coercion via str() must be applied"
     )
+
+
+def test_skyscanner_empty_legs_raises() -> None:
+    """normalize_skyscanner_itinerary raises ValueError when legs list is empty (CR-01)."""
+    with pytest.raises(ValueError, match="no legs"):
+        normalize_skyscanner_itinerary({"id": "x", "legs": [], "price": {"raw": 100.0, "currency": "USD"}})
+
+
+def test_skyscanner_empty_segments_raises() -> None:
+    """normalize_skyscanner_itinerary raises ValueError when segments list is empty (CR-02)."""
+    itin = {
+        "id": "x",
+        "legs": [
+            {
+                "id": "leg_1",
+                "durationInMinutes": 60,
+                "origin": {"iata": "LAX", "name": "Los Angeles International"},
+                "destination": {"iata": "JFK", "name": "John F. Kennedy International"},
+                "carriers": [{"iata": "DL", "name": "Delta Air Lines"}],
+                "segments": [],
+                "stopCount": 0,
+            }
+        ],
+        "price": {"raw": 100.0, "currency": "USD"},
+    }
+    with pytest.raises(ValueError, match="no segments"):
+        normalize_skyscanner_itinerary(itin)
 
 
 @pytest.mark.asyncio
