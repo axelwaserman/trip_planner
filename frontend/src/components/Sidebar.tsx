@@ -22,11 +22,13 @@
  */
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
-import { Box, Button, Flex, Heading, Stack, Text } from '@chakra-ui/react'
+import { Box, Button, Flex, Heading, Spinner, Stack, Text } from '@chakra-ui/react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquarePlus, Settings as SettingsIcon } from 'lucide-react'
 import {
   getStreamingSessionIds,
+  getUnreadSessionIds,
+  getErrorSessionIds,
   subscribe as subscribeToStore,
 } from '../lib/chatSessionStore'
 import { useSessions } from '../hooks/useSessions'
@@ -54,6 +56,14 @@ export function Sidebar({
   const streamingSessionIds = useSyncExternalStore(
     subscribeToStore,
     useCallback(() => getStreamingSessionIds(), [])
+  )
+  const unreadSessionIds = useSyncExternalStore(
+    subscribeToStore,
+    useCallback(() => getUnreadSessionIds(), [])
+  )
+  const errorSessionIds = useSyncExternalStore(
+    subscribeToStore,
+    useCallback(() => getErrorSessionIds(), [])
   )
 
   const settingsActive = location.pathname === '/settings/providers'
@@ -163,6 +173,8 @@ export function Sidebar({
             {sessions.map((s) => {
               const isActive = activeSessionId === s.session_id
               const isStreaming = streamingSessionIds.has(s.session_id)
+              const hasUnread = !isActive && unreadSessionIds.has(s.session_id)
+              const hasError = !isActive && errorSessionIds.has(s.session_id)
               const preview =
                 s.first_message_preview && s.first_message_preview.trim().length > 0
                   ? s.first_message_preview
@@ -186,14 +198,11 @@ export function Sidebar({
                 >
                   <Flex align="center" gap="2" minW="0">
                     {isStreaming && (
-                      <Box
-                        as="span"
+                      <Spinner
                         aria-label="Generating"
                         flexShrink="0"
-                        w="6px"
-                        h="6px"
-                        borderRadius="full"
-                        bg="accent.solid"
+                        size="xs"
+                        color="accent.solid"
                       />
                     )}
                     <Text
@@ -202,12 +211,29 @@ export function Sidebar({
                       overflow="hidden"
                       textOverflow="ellipsis"
                       whiteSpace="nowrap"
+                      flex="1"
                     >
                       {preview}
                     </Text>
+                    {hasError && (
+                      <Text fontSize="12px" color="red.500" flexShrink="0" aria-label="Error">
+                        !
+                      </Text>
+                    )}
+                    {hasUnread && !hasError && (
+                      <Box
+                        as="span"
+                        aria-label="Unread reply"
+                        flexShrink="0"
+                        w="6px"
+                        h="6px"
+                        borderRadius="full"
+                        bg="accent.solid"
+                      />
+                    )}
                   </Flex>
-                  <Text fontSize="13px" color={isStreaming ? 'accent.solid' : 'fg.muted'} mt="0.5">
-                    {isStreaming ? 'Generating…' : `${s.provider} · ${s.model}`}
+                  <Text fontSize="13px" color="fg.muted" mt="0.5">
+                    {`${s.provider} · ${s.model}`}
                   </Text>
                 </Box>
               )

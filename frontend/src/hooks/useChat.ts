@@ -229,6 +229,10 @@ export function useChat(): UseChatReturn {
   // created. Distinct from `sessionId` state because we want to remember
   // it across the effect's reset-then-initialize cycle.
   const ownedSessionIdRef = useRef<string | null>(null)
+  // Mirror of sessionId state kept in a ref so the sendMessage finally block
+  // can read the CURRENT active session without capturing stale closure values.
+  const activeSessionIdRef = useRef<string | null>(sessionId)
+  activeSessionIdRef.current = sessionId
 
   const initSession = useCallback(
     async (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => {
@@ -249,6 +253,8 @@ export function useChat(): UseChatReturn {
             messages: [],
             isAwaitingFirstChunk: false,
             isStreaming: false,
+            hasUnread: false,
+            hasError: false,
           }))
           setSessionId(result.data.session_id)
           setCurrentProvider(result.data.provider)
@@ -302,8 +308,13 @@ export function useChat(): UseChatReturn {
       // its previous response is still streaming should keep the live
       // accumulator visible, not replace it with the partial server-side
       // history. The "isStreaming" flag is the canonical guard.
+      // If the store already has messages (e.g. thinking tokens + tool cards
+      // accumulated during a previous stream this session), preserve them —
+      // server history only carries user/assistant text and would discard the
+      // richer client-side rows on re-navigation.
       setSession(body.session_id, (prev) => {
         if (prev.isStreaming) return prev
+        if (prev.messages.length > 0) return { ...prev, hasUnread: false, hasError: false }
         return {
           messages: body.messages.map((msg) => ({
             role: msg.role as MessageType,
@@ -311,6 +322,8 @@ export function useChat(): UseChatReturn {
           })),
           isAwaitingFirstChunk: false,
           isStreaming: false,
+          hasUnread: false,
+          hasError: false,
         }
       })
       return true
@@ -428,6 +441,8 @@ export function useChat(): UseChatReturn {
         messages: [...prev.messages, { role: 'user', content: text }],
         isAwaitingFirstChunk: true,
         isStreaming: true,
+        hasUnread: false,
+        hasError: false,
       }))
 
       // Track stream state outside React — these are only read/written
@@ -615,9 +630,13 @@ export function useChat(): UseChatReturn {
               // retryable=true (D-10): attach ErrorEvent to the last tool_execution
               // row so ToolExecutionCard can render the inline error + Retry button.
               updateToolError(event)
+              // Mark hasError so the Sidebar can show a "!" indicator if the user
+              // navigated away before seeing the inline error state.
+              setSession(submitSessionId, (prev) => ({ ...prev, hasError: true }))
             } else {
               // retryable=false (D-10): surface as a toast so the chat stays usable.
-              toaster.create({ title: event.message, type: 'error', duration: 5000 })
+              toaster.create({ title: event.message, type: 'error', duration: 5000})
+              setSession(submitSessionId, (prev) => ({ ...prev, hasError: true }))
 
               if (event.error_code === 'session_error') {
                 // D-12: session_error is always non-retryable. After toasting, silently
@@ -677,10 +696,14 @@ export function useChat(): UseChatReturn {
           ],
         }))
       } finally {
+        const wasAwayDuringStream = activeSessionIdRef.current !== submitSessionId
         setSession(submitSessionId, (prev) => ({
           ...prev,
           isStreaming: false,
           isAwaitingFirstChunk: false,
+          // Mark unread when the user was looking at a different chat while
+          // this stream completed. Cleared when the user navigates back.
+          hasUnread: wasAwayDuringStream && !prev.hasError,
         }))
       }
     },
