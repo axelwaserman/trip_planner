@@ -356,11 +356,7 @@ class ChatService:
 
                 accumulated_final = ""
                 async for final_chunk in bound.astream(messages_with_tools):
-                    if (
-                        hasattr(final_chunk, "content")
-                        and isinstance(final_chunk.content, str)
-                        and final_chunk.content
-                    ):
+                    if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
                         accumulated_final += final_chunk.content
                         yield ContentEvent(chunk=final_chunk.content, session_id=session_id)
 
