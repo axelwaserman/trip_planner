@@ -105,6 +105,7 @@ export function ChatInterface() {
     sendMessage,
     handleProviderChange,
     retryProvider,
+    retryLastTool,
   } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [quickSwitchTick, setQuickSwitchTick] = useState(0)
@@ -310,6 +311,10 @@ export function ChatInterface() {
                     key={idx}
                     callMetadata={msg.toolExecution.callMetadata}
                     resultMetadata={msg.toolExecution.resultMetadata}
+                    errorEvent={msg.toolExecution.errorEvent}
+                    onRetry={
+                      msg.toolExecution.errorEvent?.retryable ? retryLastTool : undefined
+                    }
                   />
                 )
               }

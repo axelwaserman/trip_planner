@@ -2,11 +2,18 @@ import { Box, Flex, Text, Spinner, Button, Collapsible, Code, Table } from '@cha
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { FlightSearchResultData, FlightResultData, ToolCallMetadata, ToolResultMetadata } from '../types/chat'
+// Import as ErrorEventData to avoid shadowing the global lib.dom.d.ts ErrorEvent.
+import type { FlightSearchResultData, FlightResultData, ToolCallMetadata, ToolResultMetadata, ErrorEvent as ErrorEventData } from '../types/chat'
 
 interface ToolExecutionCardProps {
   callMetadata: ToolCallMetadata
   resultMetadata?: ToolResultMetadata
+  /** True while the tool call is being executed (no result yet). Spinner shown. */
+  isLoading?: boolean
+  /** Populated on retryable=true ErrorEvent — renders error state + optional Retry button. */
+  errorEvent?: ErrorEventData
+  /** Called when the user clicks the Retry button. Only rendered when provided. */
+  onRetry?: () => void
 }
 
 function isFlightSearchResult(value: unknown): value is FlightSearchResultData {
@@ -81,15 +88,26 @@ function FlightResultsTable({ data }: { data: FlightSearchResultData }) {
   )
 }
 
-export function ToolExecutionCard({ callMetadata, resultMetadata }: ToolExecutionCardProps) {
+export function ToolExecutionCard({
+  callMetadata,
+  resultMetadata,
+  isLoading: _isLoading,
+  errorEvent,
+  onRetry,
+}: ToolExecutionCardProps) {
   const [isArgsOpen, setIsArgsOpen] = useState(false)
   const [isResultOpen, setIsResultOpen] = useState(false)
 
-  const isComplete = !!resultMetadata
-  const bgColor = isComplete ? 'green.50' : 'blue.50'
-  const borderColor = isComplete ? 'green.200' : 'blue.200'
-  const textColor = isComplete ? 'green.800' : 'blue.800'
-  const accentColor = isComplete ? 'green' : 'blue'
+  // Three-state derivation (executing → completed | error).
+  const hasError = !!errorEvent
+  // isComplete is only true when there is a result AND no error overrides it.
+  const isComplete = !!resultMetadata && !hasError
+
+  // Color token sets per state: red (error), green (complete), blue (executing).
+  const bgColor = hasError ? 'red.50' : isComplete ? 'green.50' : 'blue.50'
+  const borderColor = hasError ? 'red.200' : isComplete ? 'green.200' : 'blue.200'
+  const textColor = hasError ? 'red.800' : isComplete ? 'green.800' : 'blue.800'
+  const accentColor = hasError ? 'red' : isComplete ? 'green' : 'blue'
 
   const handleCopy = async () => {
     if (resultMetadata) {
@@ -110,8 +128,10 @@ export function ToolExecutionCard({ callMetadata, resultMetadata }: ToolExecutio
       {/* Header */}
       <Flex align="center" justify="space-between" mb={2}>
         <Flex align="center" gap={2}>
-          {!isComplete && <Spinner size="sm" color={`${accentColor}.500`} />}
+          {/* Exactly one icon per state */}
+          {!isComplete && !hasError && <Spinner size="sm" color={`${accentColor}.500`} />}
           {isComplete && <Text fontSize="xl">✓</Text>}
+          {hasError && <Text fontSize="xl">✗</Text>}
           <Text fontWeight="semibold" color={textColor}>
             {callMetadata.tool_name.replace(/_/g, ' ')}
           </Text>
@@ -153,8 +173,33 @@ export function ToolExecutionCard({ callMetadata, resultMetadata }: ToolExecutio
         </Collapsible.Content>
       </Collapsible.Root>
 
-      {/* Result Section (only when complete) */}
-      {isComplete && resultMetadata && (
+      {/* Error Section (only when hasError) */}
+      {hasError && errorEvent && (
+        <Box
+          bg="red.50"
+          rounded="md"
+          borderWidth="1px"
+          borderColor="red.200"
+          p={2}
+          mt={2}
+        >
+          <Text
+            fontSize="sm"
+            color="red.700"
+            mb={onRetry ? 2 : 0}
+          >
+            {errorEvent.message}
+          </Text>
+          {onRetry && (
+            <Button size="xs" colorScheme="red" variant="outline" onClick={onRetry}>
+              Retry
+            </Button>
+          )}
+        </Box>
+      )}
+
+      {/* Result Section (only when complete and no error) */}
+      {!hasError && isComplete && resultMetadata && (
         <>
           {/* Summary Preview */}
           {!isResultOpen && (
