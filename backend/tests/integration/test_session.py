@@ -1,11 +1,10 @@
 """Integration tests for session create/delete routes."""
 
-import json
-
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import app
+from tests.utils.sse import parse_sse_events
 
 
 @pytest.fixture
@@ -57,10 +56,8 @@ class TestChatInvalidSession:
 
         assert response.status_code == 200
 
-        data_lines = [line for line in response.text.strip().split("\n") if line.startswith("data: ")]
-        assert len(data_lines) >= 1
-
-        event = json.loads(data_lines[0][len("data: ") :])
-        assert event["type"] == "content"
-        assert event["chunk"] == ""
-        assert event["session_id"] == "nonexistent-session-id"
+        events = parse_sse_events(response.text)
+        assert len(events) >= 1
+        assert events[0].type == "content"
+        assert events[0].chunk == ""
+        assert events[0].session_id == "nonexistent-session-id"
