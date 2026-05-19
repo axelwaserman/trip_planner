@@ -26,8 +26,8 @@ def test_flight_query_valid() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
-        return_date=date(2025, 6, 8),
+        departure_date=FUTURE_DATE,
+        return_date=date(2099, 6, 8),
         passengers=2,
     )
     assert query.origin == "LAX"
@@ -40,7 +40,7 @@ def test_flight_query_iata_code_uppercase() -> None:
     query = FlightQuery(
         origin="lax",
         destination="jfk",
-        departure_date=date(2025, 6, 1),
+        departure_date=FUTURE_DATE,
     )
     assert query.origin == "LAX"
     assert query.destination == "JFK"
@@ -53,7 +53,7 @@ def test_flight_query_invalid_iata_code() -> None:
         FlightQuery(
             origin="LAXX",
             destination="JFK",
-            departure_date=date(2025, 6, 1),
+            departure_date=FUTURE_DATE,
         )
 
     # Too short
@@ -61,7 +61,7 @@ def test_flight_query_invalid_iata_code() -> None:
         FlightQuery(
             origin="LA",
             destination="JFK",
-            departure_date=date(2025, 6, 1),
+            departure_date=FUTURE_DATE,
         )
 
     # Contains digit - this gets past length validation but caught by regex
@@ -69,7 +69,7 @@ def test_flight_query_invalid_iata_code() -> None:
         FlightQuery(
             origin="L4X",
             destination="JFK",
-            departure_date=date(2025, 6, 1),
+            departure_date=FUTURE_DATE,
         )
 
 
@@ -79,8 +79,8 @@ def test_flight_query_return_before_departure() -> None:
         FlightQuery(
             origin="LAX",
             destination="JFK",
-            departure_date=date(2025, 6, 8),
-            return_date=date(2025, 6, 1),  # Before departure
+            departure_date=date(2099, 6, 8),
+            return_date=date(2099, 6, 1),  # Before departure
         )
 
 
@@ -90,8 +90,8 @@ def test_flight_query_return_same_as_departure() -> None:
         FlightQuery(
             origin="LAX",
             destination="JFK",
-            departure_date=date(2025, 6, 1),
-            return_date=date(2025, 6, 1),  # Same day
+            departure_date=FUTURE_DATE,
+            return_date=FUTURE_DATE,  # Same day
         )
 
 
@@ -101,7 +101,7 @@ def test_flight_query_passengers_range() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
+        departure_date=FUTURE_DATE,
         passengers=9,
     )
     assert query.passengers == 9
@@ -111,7 +111,7 @@ def test_flight_query_passengers_range() -> None:
         FlightQuery(
             origin="LAX",
             destination="JFK",
-            departure_date=date(2025, 6, 1),
+            departure_date=FUTURE_DATE,
             passengers=10,
         )
 
@@ -120,7 +120,7 @@ def test_flight_query_passengers_range() -> None:
         FlightQuery(
             origin="LAX",
             destination="JFK",
-            departure_date=date(2025, 6, 1),
+            departure_date=FUTURE_DATE,
             passengers=0,
         )
 
@@ -130,7 +130,7 @@ def test_flight_query_default_passengers() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
+        departure_date=FUTURE_DATE,
     )
     assert query.passengers == 1
 
