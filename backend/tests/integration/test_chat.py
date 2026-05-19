@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.api.main import app
 from app.api.routes.auth import create_access_token
-from app.chat.models import ContentEvent, ErrorEvent, StreamEvent, ToolCallEvent, ToolResultEvent
+from app.chat.models import ContentEvent, StreamEvent
 
 
 @pytest.fixture
@@ -206,24 +206,42 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
     CR-02 / T-04.7-04: same-shape 404 prevents a non-owner from probing
     for session existence via status code differences.
     """
+    from pwdlib import PasswordHash
+    from pwdlib.hashers.argon2 import Argon2Hasher
+
+    import app.api.routes.auth as _auth_module  # local import for targeted monkeypatch
+
     # Arrange — user A (admin) creates a session
     session_response = client.post("/api/chat/session", headers=auth_headers)
     assert session_response.status_code == 201
     session_id = session_response.json()["session_id"]
 
-    # User B — a different authenticated user
-    user_b_token = create_access_token({"sub": "testuser"})
-    user_b_headers = {"Authorization": f"Bearer {user_b_token}"}
-
-    # Act — user B tries to retry user A's session
-    response = client.post(
-        "/api/chat/retry",
-        json={"session_id": session_id},
-        headers=user_b_headers,
+    # Register a second user (user B) in the module-level user store for this test.
+    # The _users_db dict is populated at import time from AUTH_USERS; we inject
+    # user B directly so get_current_active_user can validate the token.
+    hasher = PasswordHash([Argon2Hasher()])
+    user_b_name = "user_b_test_cross_user"
+    _auth_module._users_db[user_b_name] = _auth_module.UserInDB(
+        username=user_b_name,
+        hashed_password=hasher.hash("testpw"),
+        disabled=False,
     )
+    try:
+        user_b_token = create_access_token({"sub": user_b_name})
+        user_b_headers = {"Authorization": f"Bearer {user_b_token}"}
 
-    # Assert — must be 404 (not 403) to avoid leaking session existence
-    assert response.status_code == 404
+        # Act — user B tries to retry user A's session
+        response = client.post(
+            "/api/chat/retry",
+            json={"session_id": session_id},
+            headers=user_b_headers,
+        )
+
+        # Assert — must be 404 (not 403) to avoid leaking session existence
+        assert response.status_code == 404
+    finally:
+        # Clean up user B from the store to avoid polluting other tests
+        _auth_module._users_db.pop(user_b_name, None)
 
 
 def test_retry_endpoint_returns_422_when_no_last_tool_invocation(

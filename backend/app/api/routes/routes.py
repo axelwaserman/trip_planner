@@ -24,6 +24,7 @@ from app.models import (
     ProviderRefreshResponse,
     ProviderTestRequest,
     ProviderTestResponse,
+    RetryRequest,
     SessionCreateRequest,
 )
 
@@ -131,6 +132,103 @@ async def chat(
                 retryable=False,
                 tool_name=None,
                 raw_detail=None,  # No exc str here — logger already captured it
+                session_id=request.session_id,
+            )
+            yield f"data: {error_event.model_dump_json()}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering in nginx
+        },
+    )
+
+
+@router.post("/api/chat/retry", response_class=StreamingResponse)
+async def retry_tool_call(
+    request: RetryRequest,
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> StreamingResponse:
+    """Replay the last tool invocation for ``request.session_id``.
+
+    CONTEXT.md D-07/D-08/D-09: reads ``_metadata[session_id]["last_tool_invocation"]``
+    and re-streams the full LLM turn (tool_call → tool_result → reasoning → final
+    response). Same CR-02 ownership pattern as POST /api/chat: 404 on missing-or-
+    not-owner so a non-owner cannot probe for session existence.
+
+    Returns:
+        StreamingResponse with server-sent events (same SSE format as POST /api/chat).
+
+    Raises:
+        HTTPException: 404 if session doesn't exist or is owned by another user
+            (same shape — prevents session-existence probing, mirrors CR-02).
+        HTTPException: 422 if no tool invocation has been recorded yet for the session
+            (requires at least one prior chat turn that triggered a tool call).
+    """
+    # CR-02 ownership check — same shape as POST /api/chat: 404 on missing-or-not-owner.
+    # A non-owner receives the same 404 as a missing session to avoid leaking session
+    # existence via status code differences (horizontal privilege escalation, T-04.7-04).
+    metadata = chat_service._metadata.get(request.session_id)
+    if metadata is None or metadata.get("user_id") != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {request.session_id} not found",
+        )
+
+    # 422 when no tool invocation has been recorded for the session (D-07).
+    # Surfaces as Unprocessable Entity so the frontend can distinguish "no prior
+    # tool call" (user error) from "missing session" (404 ownership failure).
+    last_inv = metadata.get("last_tool_invocation")
+    if last_inv is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="No retryable tool invocation found for this session.",
+        )
+
+    # D-09: re-stream the full LLM turn. The agent already has the prior
+    # conversation in its history (Plan 01 persists user turns upfront), so a
+    # short directive triggers the same tool-calling loop that produced the
+    # original invocation. The session's bound provider and tool set are
+    # unchanged — only the prompt changes.
+    replay_message = f"Please retry the previous {last_inv['tool_name']} call."
+
+    async def event_generator() -> AsyncGenerator[str]:
+        """Generate server-sent events from the retry stream."""
+        try:
+            async for event in chat_service.chat_stream(
+                message=replay_message,
+                session_id=request.session_id,
+            ):
+                yield f"data: {event.model_dump_json()}\n\n"
+
+        except ValueError:
+            # Defensive: narrow race where the session is deleted between the
+            # ownership check above and chat_stream's first history read.
+            error_event = ErrorEvent(
+                error_code=ErrorCode.session_error,
+                message="Session not found or expired.",
+                retryable=False,
+                tool_name=None,
+                raw_detail=None,
+                session_id=request.session_id,
+            )
+            yield f"data: {error_event.model_dump_json()}\n\n"
+
+        except Exception:
+            # CR-05: same static-message guarantee as POST /api/chat — no
+            # exception text leaks over the SSE wire. The ApiKeyScrubber
+            # redacts key-shaped substrings before the server-side log formats.
+            logger.exception("retry_tool_call stream failed for session %s", request.session_id)
+            error_event = ErrorEvent(
+                error_code=ErrorCode.stream_error,
+                message="Sorry, something went wrong. Please try again.",
+                retryable=False,
+                tool_name=None,
+                raw_detail=None,
                 session_id=request.session_id,
             )
             yield f"data: {error_event.model_dump_json()}\n\n"

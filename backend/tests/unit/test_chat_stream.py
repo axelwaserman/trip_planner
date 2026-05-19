@@ -2,8 +2,6 @@
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from app.chat.models import ErrorCode, ErrorEvent
 from app.exceptions import APIError
 from app.tools.flight_search import search_flights
