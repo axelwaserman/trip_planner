@@ -28,7 +28,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [x] **Phase 4.4: Mock Chat in Tests** — `MockLLMStream` fixture replaces Ollama-bound chat tests; `slow` marker removed; doc unit/integration/e2e roles by purpose. (completed 2026-05-17)
 - [x] **Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)** — `LLMProvider` Protocol + factory; dynamic Ollama model discovery from host; real OpenAI + Anthropic + LM Studio providers via API key (env or session payload); per-session injection. (completed 2026-05-18)
 - [x] **Phase 4.6: Vendor-Neutral Tool JSON** — `search_flights()` JSON shape designed against Amadeus / Skyscanner / Google Flights field maps; `ToolExecutionCard` renders tables/lists/nested objects. (completed 2026-05-18)
-- [ ] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts.
+- [x] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts. (completed 2026-05-19)
 - [ ] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`.
 - [ ] **Phase 5: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Session`/`Message` tables; named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
 - [ ] **Phase 6: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; ADR-001 → Superseded.
@@ -198,7 +198,7 @@ Plans:
 - [x] 04.7-01-PLAN.md — Wave 1: backend chat/ package + StreamEvent discriminated union + ChatService extraction + last_tool_invocation
 - [x] 04.7-02-PLAN.md — Wave 2: route ErrorEvent emissions + POST /api/chat/retry endpoint + RetryRequest model
 - [x] 04.7-03-PLAN.md — Wave 1: frontend discriminated-union types + parseSSE update + Chakra Toaster singleton mounted in App.tsx
-- [ ] 04.7-04-PLAN.md — Wave 3: useChat switch narrowing + ToolExecutionCard tri-state UI + retryLastTool + manual UAT
+- [x] 04.7-04-PLAN.md — Wave 3: useChat switch narrowing + ToolExecutionCard tri-state UI + retryLastTool + manual UAT
 **UI hint**: yes
 
 ### Phase 4.8: Validators + Test Hygiene + Orphan Cleanup
