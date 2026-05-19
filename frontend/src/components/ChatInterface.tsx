@@ -51,6 +51,7 @@ function buildQuickSwitchOptions(
 ): QuickSwitchOption[] {
   let parsed: {
     ollama?: { base_url?: string; models?: string[] }
+    lmstudio?: { base_url?: string; models?: string[] }
     openai?: { api_key?: string; model?: string }
     anthropic?: { api_key?: string; model?: string }
   } = {}
@@ -79,6 +80,19 @@ function buildQuickSwitchOptions(
     } else {
       for (const m of ollamaModels) {
         opts.push({ provider: 'ollama', model: m, label: `ollama · ${m}` })
+      }
+    }
+  }
+
+  // LM Studio: show all saved models when a base_url is configured.
+  const lmstudioBaseUrl = parsed.lmstudio?.base_url?.trim() ?? ''
+  const lmstudioModels = parsed.lmstudio?.models ?? []
+  if (lmstudioBaseUrl.length > 0 || lmstudioModels.length > 0) {
+    if (lmstudioModels.length === 0) {
+      opts.push({ provider: 'lmstudio', model: '', label: 'lmstudio · (no models)' })
+    } else {
+      for (const m of lmstudioModels) {
+        opts.push({ provider: 'lmstudio', model: m, label: `lmstudio · ${m}` })
       }
     }
   }

@@ -28,7 +28,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 
 from app.chat.models import (
     ContentEvent,
@@ -143,8 +143,10 @@ class ChatService:
                     first_message_preview=preview,
                 )
             )
-        # Newest first — the sidebar is reverse-chronological.
-        results.sort(key=lambda info: info.created_at, reverse=True)
+        # Sort by last activity so the session with the most recent message
+        # appears first — more useful than creation time when the user has
+        # replied to an older conversation.
+        results.sort(key=lambda info: self._last_activity.get(info.session_id, 0.0), reverse=True)
         return results
 
     def get_history_for_user(self, session_id: str, user_id: str) -> ChatSessionHistoryResponse | None:
@@ -238,8 +240,6 @@ class ChatService:
         bound = self._bound_providers[session_id]
 
         # Build messages with history
-        from langchain_core.messages import BaseMessage
-
         history_messages: list[BaseMessage] = list(history.messages)
         messages: list[BaseMessage] = [*history_messages, HumanMessage(content=message)]
 
@@ -257,112 +257,114 @@ class ChatService:
         tool_results = []
 
         try:
-            # Stream LLM response
+            # Stream LLM response. We accumulate every chunk so that tool call
+            # arguments — which arrive as partial JSON tokens across many chunks
+            # via tool_call_chunks — are fully assembled before we process them.
+            # Content and thinking events are still emitted in real-time.
+            accumulated_chunk: AIMessageChunk | None = None
             async for chunk in bound.astream(messages):
+                if not isinstance(chunk, AIMessageChunk):
+                    continue
+
                 # Check for reasoning_content (thinking)
                 has_thinking = False
-                if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
+                if chunk.additional_kwargs:
                     reasoning = chunk.additional_kwargs.get("reasoning_content")
                     if reasoning:
                         has_thinking = True
                         yield ThinkingEvent(chunk=reasoning, session_id=session_id)
 
-                # Process content (only if not thinking)
-                if not has_thinking and hasattr(chunk, "content") and chunk.content:
+                # Stream content in real-time (only if not thinking)
+                if not has_thinking and chunk.content:
                     content = chunk.content
                     if isinstance(content, str) and content.strip():
                         accumulated_content += content
                         yield ContentEvent(chunk=content, session_id=session_id)
 
-                # Check for tool calls
-                if isinstance(chunk, AIMessage) and chunk.tool_calls:
-                    tool_was_called = True
-                    tool_call_message = chunk
+                # Accumulate chunks so tool_call_chunks assemble into tool_calls
+                accumulated_chunk = chunk if accumulated_chunk is None else (accumulated_chunk + chunk)
 
-                    from langchain_core.messages import ToolMessage
+            # After the stream ends, check the assembled message for tool calls.
+            # Using the accumulated message guarantees args are fully reconstructed
+            # even when the provider streams JSON arguments across many chunks.
+            if accumulated_chunk is not None and accumulated_chunk.tool_calls:
+                from langchain_core.messages import ToolMessage
 
-                    tool_messages: list[ToolMessage] = []
-                    for tool_call in chunk.tool_calls:
-                        if tool_call["name"] == "search_flights":
-                            # Emit tool_call event
-                            tool_start_time = time.time()
-                            yield ToolCallEvent(
+                tool_was_called = True
+                tool_call_message = accumulated_chunk
+
+                tool_messages: list[ToolMessage] = []
+                for tool_call in accumulated_chunk.tool_calls:
+                    if tool_call["name"] == "search_flights":
+                        tool_start_time = time.time()
+                        yield ToolCallEvent(
+                            tool_name=tool_call["name"],
+                            tool_args=tool_call["args"],
+                            session_id=session_id,
+                        )
+
+                        self._metadata[session_id]["last_tool_invocation"] = {
+                            "tool_name": tool_call["name"],
+                            "tool_args": tool_call["args"],
+                            "tool_call_id": tool_call.get("id", ""),
+                        }
+
+                        try:
+                            tool_result = await search_flights.ainvoke(tool_call["args"])
+                        except APIError as exc:
+                            yield ErrorEvent(
+                                error_code=ErrorCode.tool_error,
+                                message=f"Tool {tool_call['name']} failed: {exc.message}",
+                                retryable=exc.retryable,
                                 tool_name=tool_call["name"],
-                                tool_args=tool_call["args"],
+                                raw_detail=_scrub(str(exc)),
                                 session_id=session_id,
                             )
-
-                            # Store last_tool_invocation for retry endpoint (Phase 4.7 D-07)
-                            self._metadata[session_id]["last_tool_invocation"] = {
-                                "tool_name": tool_call["name"],
-                                "tool_args": tool_call["args"],
-                                "tool_call_id": tool_call.get("id", ""),
-                            }
-
-                            # Execute the tool — wrapped for APIError + generic Exception
-                            try:
-                                tool_result = await search_flights.ainvoke(tool_call["args"])
-                            except APIError as exc:
-                                yield ErrorEvent(
-                                    error_code=ErrorCode.tool_error,
-                                    message=f"Tool {tool_call['name']} failed: {exc.message}",
-                                    retryable=exc.retryable,
-                                    tool_name=tool_call["name"],
-                                    raw_detail=_scrub(str(exc)),
-                                    session_id=session_id,
-                                )
-                                return
-                            except Exception as exc:
-                                yield ErrorEvent(
-                                    error_code=ErrorCode.tool_error,
-                                    message=f"Tool {tool_call['name']} failed.",
-                                    retryable=False,
-                                    tool_name=tool_call["name"],
-                                    raw_detail=_scrub(str(exc)),
-                                    session_id=session_id,
-                                )
-                                return
-
-                            tool_end_time = time.time()
-                            elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
-
-                            # Emit tool_result event
-                            yield ToolResultEvent(
+                            return
+                        except Exception as exc:
+                            yield ErrorEvent(
+                                error_code=ErrorCode.tool_error,
+                                message=f"Tool {tool_call['name']} failed.",
+                                retryable=False,
                                 tool_name=tool_call["name"],
-                                tool_result=str(tool_result),
-                                elapsed_ms=elapsed_ms,
+                                raw_detail=_scrub(str(exc)),
                                 session_id=session_id,
                             )
+                            return
 
-                            tool_messages.append(
-                                ToolMessage(
-                                    content=str(tool_result),
-                                    tool_call_id=tool_call.get("id", ""),
-                                )
+                        elapsed_ms = int((time.time() - tool_start_time) * 1000)
+                        yield ToolResultEvent(
+                            tool_name=tool_call["name"],
+                            tool_result=str(tool_result),
+                            elapsed_ms=elapsed_ms,
+                            session_id=session_id,
+                        )
+                        tool_messages.append(
+                            ToolMessage(
+                                content=str(tool_result),
+                                tool_call_id=tool_call.get("id", ""),
                             )
+                        )
 
-                    tool_results = tool_messages
+                tool_results = tool_messages
 
-                    # Get final response after tool execution
-                    messages_with_tools: list[BaseMessage] = [
-                        *messages,
-                        chunk,
-                        *tool_messages,
-                    ]
+                messages_with_tools: list[BaseMessage] = [
+                    *messages,
+                    accumulated_chunk,
+                    *tool_messages,
+                ]
 
-                    # Stream the final response
-                    accumulated_final = ""
-                    async for final_chunk in bound.astream(messages_with_tools):
-                        if (
-                            hasattr(final_chunk, "content")
-                            and isinstance(final_chunk.content, str)
-                            and final_chunk.content
-                        ):
-                            accumulated_final += final_chunk.content
-                            yield ContentEvent(chunk=final_chunk.content, session_id=session_id)
+                accumulated_final = ""
+                async for final_chunk in bound.astream(messages_with_tools):
+                    if (
+                        hasattr(final_chunk, "content")
+                        and isinstance(final_chunk.content, str)
+                        and final_chunk.content
+                    ):
+                        accumulated_final += final_chunk.content
+                        yield ContentEvent(chunk=final_chunk.content, session_id=session_id)
 
-                    accumulated_content = accumulated_final
-                    break
+                accumulated_content = accumulated_final
         finally:
             # Always persist whatever was accumulated, even on partial streams
             # (client disconnect, GeneratorExit on cancellation, etc.). Empty

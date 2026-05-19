@@ -44,10 +44,10 @@ describe('useProviderRefresh', () => {
 
   it('calls POST /api/providers/refresh on refresh', async () => {
     const fetchMock = mockRefreshFetch({
-      providers: {
-        ollama: { models: [], available: false },
-        lmstudio: { models: [], available: false },
-      },
+      providers: [
+        { name: 'ollama', models: [], available: false },
+        { name: 'lmstudio', models: [], available: false },
+      ],
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -65,10 +65,10 @@ describe('useProviderRefresh', () => {
 
   it('updates provider_settings.ollama.models on a 200 response', async () => {
     const fetchMock = mockRefreshFetch({
-      providers: {
-        ollama: { models: ['qwen3:4b', 'llama3:8b'], available: true },
-        lmstudio: { models: [], available: false },
-      },
+      providers: [
+        { name: 'ollama', models: ['qwen3:4b', 'llama3:8b'], available: true },
+        { name: 'lmstudio', models: [], available: false },
+      ],
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -84,10 +84,10 @@ describe('useProviderRefresh', () => {
 
   it('updates provider_settings.lmstudio.models when called with lmstudio', async () => {
     const fetchMock = mockRefreshFetch({
-      providers: {
-        ollama: { models: [], available: false },
-        lmstudio: { models: ['some-lmstudio-model'], available: true },
-      },
+      providers: [
+        { name: 'ollama', models: [], available: false },
+        { name: 'lmstudio', models: ['some-lmstudio-model'], available: true },
+      ],
     })
     vi.stubGlobal('fetch', fetchMock)
 
