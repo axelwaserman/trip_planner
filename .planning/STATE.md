@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
-status: executing
-stopped_at: Phase 4.8 complete
+status: shipped
+stopped_at: Phase 4.8 shipped — PR #17
 last_updated: "2026-05-19T00:00:00.000Z"
 last_activity: 2026-05-19 -- Phase 4.8 complete
 progress:
