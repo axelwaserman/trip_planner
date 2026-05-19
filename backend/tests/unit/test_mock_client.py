@@ -22,7 +22,7 @@ async def test_search_returns_flights(mock_client: MockFlightAPIClient) -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
         passengers=1,
     )
 
@@ -40,7 +40,7 @@ async def test_search_normalizes_iata_codes(mock_client: MockFlightAPIClient) ->
     query = FlightQuery(
         origin="lax",  # Will be normalized to uppercase by FlightQuery
         destination="jfk",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     flights = await mock_client.search(query)
@@ -55,7 +55,7 @@ async def test_search_returns_sorted_by_price(mock_client: MockFlightAPIClient) 
     query = FlightQuery(
         origin="SFO",
         destination="SEA",
-        departure_date=date(2025, 7, 15),
+        departure_date=date(2099, 7, 15),
     )
 
     flights = await mock_client.search(query)
@@ -70,7 +70,7 @@ async def test_search_generates_valid_flight_data(mock_client: MockFlightAPIClie
     query = FlightQuery(
         origin="ORD",
         destination="DFW",
-        departure_date=date(2025, 8, 10),
+        departure_date=date(2099, 8, 10),
     )
 
     flights = await mock_client.search(query)
@@ -106,7 +106,7 @@ async def test_search_varies_departure_times(mock_client: MockFlightAPIClient) -
     query = FlightQuery(
         origin="LAX",
         destination="SFO",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     flights = await mock_client.search(query)
@@ -123,7 +123,7 @@ async def test_search_varies_airlines(mock_client: MockFlightAPIClient) -> None:
     query = FlightQuery(
         origin="JFK",
         destination="LAX",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     flights = await mock_client.search(query)
@@ -141,7 +141,7 @@ async def test_search_varies_stops(mock_client: MockFlightAPIClient) -> None:
     query = FlightQuery(
         origin="JFK",
         destination="LAX",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     flights = await mock_client.search(query)
@@ -159,7 +159,7 @@ async def test_search_caches_flights(mock_client: MockFlightAPIClient) -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     flights = await mock_client.search(query)
@@ -177,7 +177,7 @@ async def test_get_flight_details_returns_cached_flight(mock_client: MockFlightA
     query = FlightQuery(
         origin="SFO",
         destination="LAX",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     flights = await mock_client.search(query)
@@ -205,7 +205,7 @@ async def test_check_availability_returns_true_for_cached_flights(
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     flights = await mock_client.search(query)
@@ -243,7 +243,7 @@ async def test_search_with_reproducible_seed() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     client1 = MockFlightAPIClient(seed=123)
@@ -265,7 +265,7 @@ async def test_search_without_seed_varies() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     client1 = MockFlightAPIClient()
@@ -286,7 +286,7 @@ async def test_short_distance_flights_have_fewer_stops(mock_client: MockFlightAP
     query = FlightQuery(
         origin="LAX",
         destination="SFO",  # Short distance (~337 miles)
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     flights = await mock_client.search(query)
@@ -307,7 +307,7 @@ async def test_price_varies_by_stops() -> None:
     query = FlightQuery(
         origin="JFK",
         destination="LAX",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
 
     all_flights = []
@@ -335,7 +335,7 @@ async def test_flight_duration_matches_distance(mock_client: MockFlightAPIClient
     short_query = FlightQuery(
         origin="LAX",
         destination="SFO",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
     short_flights = await mock_client.search(short_query)
 
@@ -343,7 +343,7 @@ async def test_flight_duration_matches_distance(mock_client: MockFlightAPIClient
     long_query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2025, 6, 1),
+        departure_date=date(2099, 6, 1),
     )
     long_flights = await mock_client.search(long_query)
 
@@ -357,7 +357,7 @@ async def test_flight_duration_matches_distance(mock_client: MockFlightAPIClient
 @pytest.mark.asyncio
 async def test_departure_date_is_preserved(mock_client: MockFlightAPIClient) -> None:
     """Test all flights depart on the requested date."""
-    departure_date = date(2025, 9, 15)
+    departure_date = date(2099, 9, 15)
     query = FlightQuery(
         origin="ORD",
         destination="ATL",

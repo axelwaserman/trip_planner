@@ -72,6 +72,36 @@ class FlightQuery(BaseModel):
             raise ValueError("Return date must be after departure date")
         return self
 
+    @model_validator(mode="after")
+    def validate_origin_destination(self) -> Self:
+        """Validate origin and destination are different airports.
+
+        Returns:
+            Validated model instance
+
+        Raises:
+            ValueError: If origin and destination are the same IATA code
+        """
+        if self.origin == self.destination:
+            raise ValueError("Origin and destination must be different airports")
+        return self
+
+    @model_validator(mode="after")
+    def validate_departure_not_in_past(self) -> Self:
+        """Validate departure date is not in the past.
+
+        Same-day departures (departure_date == today) are accepted per D-02.
+
+        Returns:
+            Validated model instance
+
+        Raises:
+            ValueError: If departure_date is strictly before today
+        """
+        if self.departure_date < datetime.now().date():
+            raise ValueError("Departure date cannot be in the past")
+        return self
+
 
 class Flight(BaseModel):
     """Base model for flight information.
@@ -128,6 +158,20 @@ class Flight(BaseModel):
                 raise ValueError(f"Invalid booking class: {v}. Must be one of {valid_classes}")
             return normalized  # type: ignore[return-value]
         return v
+
+    @model_validator(mode="after")
+    def validate_arrival_after_departure(self) -> Self:
+        """Validate arrival datetime is strictly after departure datetime.
+
+        Returns:
+            Validated model instance
+
+        Raises:
+            ValueError: If arrival is at or before departure
+        """
+        if self.arrival <= self.departure:
+            raise ValueError("Arrival must be after departure")
+        return self
 
 
 # ============================================================================
