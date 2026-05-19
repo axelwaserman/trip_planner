@@ -346,15 +346,15 @@ def test_flight_query_accepts_future_departure() -> None:
 def test_flight_rejects_arrival_equals_departure() -> None:
     """Flight raises ValidationError when arrival datetime equals departure datetime."""
     # Arrange
-    base_kwargs = dict(
-        id="FL001",
-        origin="LAX",
-        destination="JFK",
-        price=Decimal("450.00"),
-        carrier="American Airlines",
-        flight_number="AA123",
-        duration_minutes=330,
-    )
+    base_kwargs: dict[str, object] = {
+        "id": "FL001",
+        "origin": "LAX",
+        "destination": "JFK",
+        "price": Decimal("450.00"),
+        "carrier": "American Airlines",
+        "flight_number": "AA123",
+        "duration_minutes": 330,
+    }
 
     # Act / Assert
     with pytest.raises(ValidationError, match="Arrival must be after departure"):
@@ -364,15 +364,15 @@ def test_flight_rejects_arrival_equals_departure() -> None:
 def test_flight_rejects_arrival_before_departure() -> None:
     """Flight raises ValidationError when arrival datetime precedes departure datetime."""
     # Arrange
-    base_kwargs = dict(
-        id="FL001",
-        origin="LAX",
-        destination="JFK",
-        price=Decimal("450.00"),
-        carrier="American Airlines",
-        flight_number="AA123",
-        duration_minutes=330,
-    )
+    base_kwargs: dict[str, object] = {
+        "id": "FL001",
+        "origin": "LAX",
+        "destination": "JFK",
+        "price": Decimal("450.00"),
+        "carrier": "American Airlines",
+        "flight_number": "AA123",
+        "duration_minutes": 330,
+    }
 
     # Act / Assert
     with pytest.raises(ValidationError, match="Arrival must be after departure"):
