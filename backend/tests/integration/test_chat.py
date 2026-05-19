@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import app
+from app.api.routes.auth import create_access_token
 from app.chat.models import ContentEvent, StreamEvent
 
 
@@ -140,3 +141,128 @@ def test_chat_endpoint_empty_message(client: TestClient, auth_headers: dict[str,
     )
 
     assert response.status_code == 422  # Validation error
+
+
+def test_retry_endpoint_replays_last_tool_invocation(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """POST /api/chat/retry replays the last tool invocation stored in session metadata.
+
+    Arrange: create a session, inject last_tool_invocation into metadata directly,
+    then POST /api/chat/retry and assert 200 + SSE body containing the replay stream's events.
+    """
+    # Arrange — create a session
+    session_response = client.post("/api/chat/session", headers=auth_headers)
+    assert session_response.status_code == 201
+    session_id = session_response.json()["session_id"]
+
+    # Inject last_tool_invocation directly into the session's metadata.
+    # The real ChatService stores it when processing a ToolCall chunk;
+    # we bypass the full LLM streaming stack in this integration test.
+    chat_service = client.app.state.chat_service
+    chat_service._metadata[session_id]["last_tool_invocation"] = {
+        "tool_name": "search_flights",
+        "tool_args": {"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
+        "tool_call_id": "call_test",
+    }
+
+    # Act — retry stream that yields content
+    async def mock_retry_stream(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
+        yield ContentEvent(chunk="Retry result here.", session_id=session_id)
+
+    with patch("app.chat.service.ChatService.chat_stream", side_effect=mock_retry_stream):
+        response = client.post(
+            "/api/chat/retry",
+            json={"session_id": session_id},
+            headers=auth_headers,
+        )
+
+    # Assert
+    assert response.status_code == 200
+    assert "Retry result here." in response.text
+
+
+def test_retry_endpoint_returns_404_for_unknown_session(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """POST /api/chat/retry with an unknown session_id returns 404.
+
+    CR-02 same-shape: missing-or-not-owner both produce 404 so a caller
+    cannot probe for session existence.
+    """
+    # Arrange — use a random session id that was never created
+    unknown_session_id = "00000000-0000-0000-0000-000000000000"
+
+    # Act
+    response = client.post(
+        "/api/chat/retry",
+        json={"session_id": unknown_session_id},
+        headers=auth_headers,
+    )
+
+    # Assert
+    assert response.status_code == 404
+
+
+def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """User B calling POST /api/chat/retry with user A's session gets 404 (NOT 403).
+
+    CR-02 / T-04.7-04: same-shape 404 prevents a non-owner from probing
+    for session existence via status code differences.
+    """
+    from pwdlib import PasswordHash
+    from pwdlib.hashers.argon2 import Argon2Hasher
+
+    import app.api.routes.auth as _auth_module  # local import for targeted monkeypatch
+
+    # Arrange — user A (admin) creates a session
+    session_response = client.post("/api/chat/session", headers=auth_headers)
+    assert session_response.status_code == 201
+    session_id = session_response.json()["session_id"]
+
+    # Register a second user (user B) in the module-level user store for this test.
+    # The _users_db dict is populated at import time from AUTH_USERS; we inject
+    # user B directly so get_current_active_user can validate the token.
+    hasher = PasswordHash([Argon2Hasher()])
+    user_b_name = "user_b_test_cross_user"
+    _auth_module._users_db[user_b_name] = _auth_module.UserInDB(
+        username=user_b_name,
+        hashed_password=hasher.hash("testpw"),
+        disabled=False,
+    )
+    try:
+        user_b_token = create_access_token({"sub": user_b_name})
+        user_b_headers = {"Authorization": f"Bearer {user_b_token}"}
+
+        # Act — user B tries to retry user A's session
+        response = client.post(
+            "/api/chat/retry",
+            json={"session_id": session_id},
+            headers=user_b_headers,
+        )
+
+        # Assert — must be 404 (not 403) to avoid leaking session existence
+        assert response.status_code == 404
+    finally:
+        # Clean up user B from the store to avoid polluting other tests
+        _auth_module._users_db.pop(user_b_name, None)
+
+
+def test_retry_endpoint_returns_422_when_no_last_tool_invocation(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """POST /api/chat/retry returns 422 when no last_tool_invocation has been stored.
+
+    A fresh session with no prior chat turn has no last_tool_invocation.
+    The retry endpoint must surface this as 422 Unprocessable Entity.
+    """
+    # Arrange — create a fresh session (no chat turn, so no last_tool_invocation)
+    session_response = client.post("/api/chat/session", headers=auth_headers)
+    assert session_response.status_code == 201
+    session_id = session_response.json()["session_id"]
+
+    # Act
+    response = client.post(
+        "/api/chat/retry",
+        json={"session_id": session_id},
+        headers=auth_headers,
+    )
+
+    # Assert
+    assert response.status_code == 422

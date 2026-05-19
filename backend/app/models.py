@@ -363,6 +363,21 @@ class ChatRequest(BaseModel):
     session_id: str = Field(..., description="Session ID for conversation continuity")
 
 
+class RetryRequest(BaseModel):
+    """Request model for the retry endpoint.
+
+    Mirrors the ``ChatRequest`` pattern but carries only a ``session_id``.
+    The last tool invocation to replay is stored server-side in
+    ``_metadata[session_id]["last_tool_invocation"]``; the client never
+    needs to re-send tool args — it just identifies the session.
+    """
+
+    session_id: str = Field(
+        ...,
+        description="Session id whose last tool invocation should be replayed.",
+    )
+
+
 class ChatResponse(BaseModel):
     """Response model for chat endpoint (deprecated - use streaming)."""
 
