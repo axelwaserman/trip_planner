@@ -21,12 +21,14 @@
  * 260px persistent column.
  */
 
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
-import { Box, Button, Flex, Heading, Stack, Text } from '@chakra-ui/react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { Box, Button, Flex, Heading, Spinner, Stack, Text } from '@chakra-ui/react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquarePlus, Settings as SettingsIcon } from 'lucide-react'
 import {
   getStreamingSessionIds,
+  getUnreadSessionIds,
+  getErrorSessionIds,
   subscribe as subscribeToStore,
 } from '../lib/chatSessionStore'
 import { useSessions } from '../hooks/useSessions'
@@ -55,8 +57,28 @@ export function Sidebar({
     subscribeToStore,
     useCallback(() => getStreamingSessionIds(), [])
   )
+  const unreadSessionIds = useSyncExternalStore(
+    subscribeToStore,
+    useCallback(() => getUnreadSessionIds(), [])
+  )
+  const errorSessionIds = useSyncExternalStore(
+    subscribeToStore,
+    useCallback(() => getErrorSessionIds(), [])
+  )
 
   const settingsActive = location.pathname === '/settings/providers'
+
+  // Track how many sessions were streaming on the previous render.
+  // When the count drops (a stream finished), refetch so the sidebar
+  // re-orders by latest message.
+  const prevStreamingSizeRef = useRef(streamingSessionIds.size)
+  useEffect(() => {
+    const prev = prevStreamingSizeRef.current
+    prevStreamingSizeRef.current = streamingSessionIds.size
+    if (streamingSessionIds.size < prev) {
+      refetch()
+    }
+  }, [streamingSessionIds, refetch])
 
   // Refetch the sessions list whenever the active session changes — picks
   // up new sessions useChat just created (it replaces the URL with
@@ -163,6 +185,8 @@ export function Sidebar({
             {sessions.map((s) => {
               const isActive = activeSessionId === s.session_id
               const isStreaming = streamingSessionIds.has(s.session_id)
+              const hasUnread = !isActive && unreadSessionIds.has(s.session_id)
+              const hasError = !isActive && errorSessionIds.has(s.session_id)
               const preview =
                 s.first_message_preview && s.first_message_preview.trim().length > 0
                   ? s.first_message_preview
@@ -172,6 +196,7 @@ export function Sidebar({
                   key={s.session_id}
                   as="button"
                   onClick={() => handleSessionClick(s.session_id)}
+                  w="full"
                   h="48px"
                   px="4"
                   display="flex"
@@ -186,14 +211,11 @@ export function Sidebar({
                 >
                   <Flex align="center" gap="2" minW="0">
                     {isStreaming && (
-                      <Box
-                        as="span"
+                      <Spinner
                         aria-label="Generating"
                         flexShrink="0"
-                        w="6px"
-                        h="6px"
-                        borderRadius="full"
-                        bg="accent.solid"
+                        size="xs"
+                        color="accent.solid"
                       />
                     )}
                     <Text
@@ -202,12 +224,29 @@ export function Sidebar({
                       overflow="hidden"
                       textOverflow="ellipsis"
                       whiteSpace="nowrap"
+                      flex="1"
                     >
                       {preview}
                     </Text>
+                    {hasError && (
+                      <Text fontSize="12px" color="red.500" flexShrink="0" aria-label="Error">
+                        !
+                      </Text>
+                    )}
+                    {hasUnread && !hasError && (
+                      <Box
+                        as="span"
+                        aria-label="Unread reply"
+                        flexShrink="0"
+                        w="6px"
+                        h="6px"
+                        borderRadius="full"
+                        bg="accent.solid"
+                      />
+                    )}
                   </Flex>
-                  <Text fontSize="13px" color={isStreaming ? 'accent.solid' : 'fg.muted'} mt="0.5">
-                    {isStreaming ? 'Generating…' : `${s.provider} · ${s.model}`}
+                  <Text fontSize="13px" color="fg.muted" mt="0.5">
+                    {`${s.provider} · ${s.model}`}
                   </Text>
                 </Box>
               )

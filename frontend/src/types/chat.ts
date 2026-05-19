@@ -17,6 +17,9 @@ export interface ToolResultMetadata {
 export interface ToolExecutionData {
   callMetadata: ToolCallMetadata
   resultMetadata?: ToolResultMetadata
+  // Populated when an ErrorEvent with retryable=true arrives for this tool call.
+  // ToolExecutionCard reads this to render the error-state UI + Retry button.
+  errorEvent?: ErrorEvent
 }
 
 export interface Message {
@@ -25,24 +28,54 @@ export interface Message {
   toolExecution?: ToolExecutionData
 }
 
-export type StreamEventType =
-  | 'content'
-  | 'thinking'
-  | 'tool_call'
-  | 'tool_result'
-  | 'done'
-  | 'error'
+// Discriminated union replacing the flat StreamEvent interface (Phase 4.7 REQ-streamevent-hierarchy).
+// Each member has a required literal `type` field so TypeScript can narrow exhaustively.
 
-export interface StreamEvent {
-  type: StreamEventType
-  chunk?: string
-  session_id?: string
-  tool_name?: string
-  tool_args?: Record<string, unknown>
-  tool_result?: string
-  elapsed_ms?: number
-  error?: string
+export interface ContentEvent {
+  type: 'content'
+  chunk: string
+  session_id: string
 }
+
+export interface ThinkingEvent {
+  type: 'thinking'
+  chunk: string
+  session_id: string
+}
+
+export interface ToolCallEvent {
+  type: 'tool_call'
+  tool_name: string
+  tool_args: Record<string, unknown>
+  session_id: string
+}
+
+export interface ToolResultEvent {
+  type: 'tool_result'
+  tool_name: string
+  tool_result: string
+  elapsed_ms: number
+  session_id: string
+}
+
+export type ErrorCode = 'session_error' | 'tool_error' | 'stream_error'
+
+export interface ErrorEvent {
+  type: 'error'
+  error_code: ErrorCode
+  message: string
+  retryable: boolean
+  tool_name?: string
+  raw_detail?: string
+  session_id: string
+}
+
+export type ChatStreamEvent =
+  | ContentEvent
+  | ThinkingEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | ErrorEvent
 
 // ----------------------------------------------------------------------
 // Structured tool-result types (REQ-tool-json-output)

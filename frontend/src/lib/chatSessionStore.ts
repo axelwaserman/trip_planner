@@ -26,34 +26,49 @@ export interface SessionState {
   messages: Message[]
   isAwaitingFirstChunk: boolean
   isStreaming: boolean
+  /** True when the session finished streaming while the user was looking at a different chat. */
+  hasUnread: boolean
+  /** True when the stream ended with an error while the user was away. */
+  hasError: boolean
 }
 
 const EMPTY_STATE: SessionState = Object.freeze({
   messages: [],
   isAwaitingFirstChunk: false,
   isStreaming: false,
+  hasUnread: false,
+  hasError: false,
 }) as SessionState
 
 const sessions = new Map<string, SessionState>()
 const listeners = new Set<() => void>()
 
-// Cached references so getSnapshot returns a stable reference between
-// notifications — useSyncExternalStore relies on identity to skip rerenders.
+// Cached Set snapshots — useSyncExternalStore requires identity-stable
+// references between notifications, otherwise every getSnapshot call returns
+// a new object and React enters an infinite re-render loop.
 let streamingIdsSnapshot: ReadonlySet<string> = new Set()
-let streamingIdsDirty = true
+let unreadIdsSnapshot: ReadonlySet<string> = new Set()
+let errorIdsSnapshot: ReadonlySet<string> = new Set()
+let idsDirty = true
 
-function rebuildStreamingIdsIfNeeded() {
-  if (!streamingIdsDirty) return
-  const next = new Set<string>()
+function rebuildIdsIfNeeded() {
+  if (!idsDirty) return
+  const streaming = new Set<string>()
+  const unread = new Set<string>()
+  const error = new Set<string>()
   for (const [id, state] of sessions.entries()) {
-    if (state.isStreaming) next.add(id)
+    if (state.isStreaming) streaming.add(id)
+    if (state.hasUnread) unread.add(id)
+    if (state.hasError) error.add(id)
   }
-  streamingIdsSnapshot = next
-  streamingIdsDirty = false
+  streamingIdsSnapshot = streaming
+  unreadIdsSnapshot = unread
+  errorIdsSnapshot = error
+  idsDirty = false
 }
 
 function notify() {
-  streamingIdsDirty = true
+  idsDirty = true
   for (const listener of listeners) {
     listener()
   }
@@ -89,8 +104,18 @@ export function clearSession(sessionId: string): void {
 }
 
 export function getStreamingSessionIds(): ReadonlySet<string> {
-  rebuildStreamingIdsIfNeeded()
+  rebuildIdsIfNeeded()
   return streamingIdsSnapshot
+}
+
+export function getUnreadSessionIds(): ReadonlySet<string> {
+  rebuildIdsIfNeeded()
+  return unreadIdsSnapshot
+}
+
+export function getErrorSessionIds(): ReadonlySet<string> {
+  rebuildIdsIfNeeded()
+  return errorIdsSnapshot
 }
 
 // Test-only: drop everything. Lets vitest specs reset between cases.
@@ -98,5 +123,7 @@ export function __resetForTests(): void {
   sessions.clear()
   listeners.clear()
   streamingIdsSnapshot = new Set()
-  streamingIdsDirty = false
+  unreadIdsSnapshot = new Set()
+  errorIdsSnapshot = new Set()
+  idsDirty = true
 }

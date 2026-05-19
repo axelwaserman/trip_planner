@@ -33,14 +33,20 @@ import {
 
 export type LocalProvider = 'ollama' | 'lmstudio'
 
+interface RefreshEntry {
+  name: string
+  models: string[]
+  available: boolean
+}
+
 interface RefreshResponse {
-  providers: Record<string, { models: string[]; available: boolean }>
+  providers: RefreshEntry[]
 }
 
 function isRefreshResponse(value: unknown): value is RefreshResponse {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
-  return typeof v.providers === 'object' && v.providers !== null
+  return Array.isArray(v.providers)
 }
 
 function isProbeErrorBody(value: unknown): value is BackendProbeError {
@@ -99,11 +105,21 @@ export function useProviderRefresh(): UseProviderRefreshResult {
         return
       }
 
-      const entry = body.providers[provider]
+      const entry = body.providers.find((e) => e.name === provider)
       if (!entry) {
         // Backend response missing the provider entry — treat as soft error
         // so the UI surfaces a hint instead of silently keeping stale data.
         setError(NETWORK_ERROR_VIEW)
+        return
+      }
+
+      if (!entry.available) {
+        setError({
+          code: 'providers_fetch_failed',
+          message: `${provider} is unreachable.`,
+          hint: 'Check that the service is running at the configured URL.',
+          inlineCode: [],
+        })
         return
       }
 

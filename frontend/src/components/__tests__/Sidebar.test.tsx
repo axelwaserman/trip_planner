@@ -233,7 +233,7 @@ describe('Sidebar', () => {
     expect(refetch).toHaveBeenCalled()
   })
 
-  it('renders a Generating… badge on rows whose session is in flight', () => {
+  it('renders a spinner on rows whose session is in flight', () => {
     useSessionsMock.mockReturnValue({
       sessions: [
         {
@@ -261,14 +261,16 @@ describe('Sidebar', () => {
       messages: [],
       isAwaitingFirstChunk: false,
       isStreaming: true,
+      hasUnread: false,
+      hasError: false,
     }))
 
     renderSidebar()
 
-    // The row is identified by its preview text; the streaming row carries
-    // a "Generating…" sub-line, the idle row carries the provider · model.
-    expect(screen.getByText(/Generating…/)).toBeInTheDocument()
-    expect(screen.getByText('ollama · qwen3:4b')).toBeInTheDocument()
+    // Streaming row shows a spinner (aria-label="Generating"); idle row shows provider · model.
+    expect(screen.getByLabelText('Generating')).toBeInTheDocument()
+    // Both rows always show provider · model (no more "Generating…" text replacement).
+    expect(screen.getAllByText('ollama · qwen3:4b')).toHaveLength(2)
   })
 
   it('does not refetch when the active session is already in the list', () => {

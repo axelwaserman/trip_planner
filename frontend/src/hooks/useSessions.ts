@@ -69,7 +69,15 @@ export function useSessions(): UseSessionsResult {
           setIsLoading(false)
           return
         }
-        setSessions(body.sessions)
+        // Deduplicate by session_id — guards against any transient double-send
+        // during new-session creation races.
+        const seen = new Set<string>()
+        const unique = body.sessions.filter((s) => {
+          if (seen.has(s.session_id)) return false
+          seen.add(s.session_id)
+          return true
+        })
+        setSessions(unique)
         setIsLoading(false)
       })
       .catch(() => {
