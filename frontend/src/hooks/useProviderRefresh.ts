@@ -113,6 +113,16 @@ export function useProviderRefresh(): UseProviderRefreshResult {
         return
       }
 
+      if (!entry.available) {
+        setError({
+          code: 'providers_fetch_failed',
+          message: `${provider} is unreachable.`,
+          hint: 'Check that the service is running at the configured URL.',
+          inlineCode: [],
+        })
+        return
+      }
+
       const settings = loadProviderSettings()
       if (provider === 'ollama') {
         settings.ollama = { ...settings.ollama, models: entry.models }

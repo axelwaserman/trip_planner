@@ -21,7 +21,7 @@
  * 260px persistent column.
  */
 
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { Box, Button, Flex, Heading, Spinner, Stack, Text } from '@chakra-ui/react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquarePlus, Settings as SettingsIcon } from 'lucide-react'
@@ -67,6 +67,18 @@ export function Sidebar({
   )
 
   const settingsActive = location.pathname === '/settings/providers'
+
+  // Track how many sessions were streaming on the previous render.
+  // When the count drops (a stream finished), refetch so the sidebar
+  // re-orders by latest message.
+  const prevStreamingSizeRef = useRef(streamingSessionIds.size)
+  useEffect(() => {
+    const prev = prevStreamingSizeRef.current
+    prevStreamingSizeRef.current = streamingSessionIds.size
+    if (streamingSessionIds.size < prev) {
+      refetch()
+    }
+  }, [streamingSessionIds, refetch])
 
   // Refetch the sessions list whenever the active session changes — picks
   // up new sessions useChat just created (it replaces the URL with
@@ -184,6 +196,7 @@ export function Sidebar({
                   key={s.session_id}
                   as="button"
                   onClick={() => handleSessionClick(s.session_id)}
+                  w="full"
                   h="48px"
                   px="4"
                   display="flex"
