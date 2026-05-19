@@ -125,5 +125,5 @@ export function __resetForTests(): void {
   streamingIdsSnapshot = new Set()
   unreadIdsSnapshot = new Set()
   errorIdsSnapshot = new Set()
-  idsDirty = false
+  idsDirty = true
 }

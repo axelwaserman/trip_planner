@@ -165,7 +165,9 @@ def test_retry_endpoint_replays_last_tool_invocation(client: TestClient, auth_he
     }
 
     # Act — retry stream that yields content
-    async def mock_retry_stream(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
+    async def mock_retry_stream(
+        message: str, session_id: str, *, persist_user_message: bool = True
+    ) -> AsyncGenerator[StreamEvent]:
         yield ContentEvent(chunk="Retry result here.", session_id=session_id)
 
     with patch("app.chat.service.ChatService.chat_stream", side_effect=mock_retry_stream):

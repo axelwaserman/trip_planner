@@ -202,6 +202,7 @@ async def retry_tool_call(
             async for event in chat_service.chat_stream(
                 message=replay_message,
                 session_id=request.session_id,
+                persist_user_message=False,
             ):
                 yield f"data: {event.model_dump_json()}\n\n"
 

@@ -220,7 +220,9 @@ class ChatService:
 
         return len(expired)
 
-    async def chat_stream(self, message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
+    async def chat_stream(
+        self, message: str, session_id: str, *, persist_user_message: bool = True
+    ) -> AsyncGenerator[StreamEvent]:
         """Stream a chat response chunk by chunk with tool calling support.
 
         Yields concrete event classes (ContentEvent, ThinkingEvent, ToolCallEvent,
@@ -232,6 +234,10 @@ class ChatService:
         Args:
             message: User message
             session_id: Session ID for conversation continuity
+            persist_user_message: When False the message is included in the
+                LLM context but NOT appended to the session history.  Used by
+                the retry endpoint so synthetic "Please retry…" prompts don't
+                accumulate in the stored conversation.
 
         Yields:
             Concrete event objects (discriminated union members of StreamEvent)
@@ -248,7 +254,10 @@ class ChatService:
         # behaviour appended user + assistant only at end-of-stream — if the
         # client disconnected (e.g. switched to a different chat in the
         # Sidebar), the history's view of "what just happened" was empty.
-        history.add_user_message(message)
+        # Skipped for synthetic retry prompts (persist_user_message=False) so
+        # repeated retries don't corrupt the stored conversation history.
+        if persist_user_message:
+            history.add_user_message(message)
 
         # Track state
         tool_was_called = False
@@ -295,6 +304,16 @@ class ChatService:
 
                 tool_messages: list[ToolMessage] = []
                 for tool_call in accumulated_chunk.tool_calls:
+                    if tool_call["name"] != "search_flights":
+                        yield ErrorEvent(
+                            error_code=ErrorCode.tool_error,
+                            message=f"Unknown tool: {tool_call['name']}",
+                            retryable=False,
+                            tool_name=tool_call["name"],
+                            raw_detail=None,
+                            session_id=session_id,
+                        )
+                        return
                     if tool_call["name"] == "search_flights":
                         tool_start_time = time.time()
                         yield ToolCallEvent(

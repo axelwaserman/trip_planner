@@ -721,11 +721,32 @@ export function useChat(): UseChatReturn {
 
     const submitSessionId = sessionId
 
-    setSession(submitSessionId, (prev) => ({
-      ...prev,
-      isStreaming: true,
-      isAwaitingFirstChunk: true,
-    }))
+    setSession(submitSessionId, (prev) => {
+      // Clear the error state on the last tool_execution message so the card
+      // returns to the executing (blue spinner) state before re-streaming.
+      let lastToolIndex = -1
+      for (let i = prev.messages.length - 1; i >= 0; i--) {
+        if (prev.messages[i].role === 'tool_execution') {
+          lastToolIndex = i
+          break
+        }
+      }
+      const messages =
+        lastToolIndex >= 0
+          ? prev.messages.map((msg, i) =>
+              i === lastToolIndex && msg.toolExecution
+                ? { ...msg, toolExecution: { callMetadata: msg.toolExecution.callMetadata } }
+                : msg
+            )
+          : prev.messages
+      return {
+        ...prev,
+        messages,
+        isStreaming: true,
+        isAwaitingFirstChunk: true,
+        hasError: false,
+      }
+    })
 
     // Track per-call stream state so retryLastTool doesn't bleed into the
     // outer sendMessage closures.
@@ -944,6 +965,7 @@ export function useChat(): UseChatReturn {
         ...prev,
         isStreaming: false,
         isAwaitingFirstChunk: false,
+        hasError: false,
       }))
     }
   }, [sessionId, currentProvider, currentModel, initSession])
