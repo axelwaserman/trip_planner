@@ -11,9 +11,7 @@ from tests.utils.sse import parse_sse_events
 # Minimal valid StreamEvent payload for tests.
 _SESSION_ID = "s1"
 _CONTENT_EVENT = f'{{"chunk":"hi","session_id":"{_SESSION_ID}","type":"content"}}'
-_TOOL_CALL_EVENT = (
-    f'{{"tool_name":"search_flights","tool_args":{{}},"session_id":"{_SESSION_ID}","type":"tool_call"}}'
-)
+_TOOL_CALL_EVENT = f'{{"tool_name":"search_flights","tool_args":{{}},"session_id":"{_SESSION_ID}","type":"tool_call"}}'
 
 
 def test_parse_single_data_event_from_str() -> None:
