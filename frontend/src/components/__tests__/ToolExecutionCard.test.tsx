@@ -9,7 +9,7 @@
  */
 
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ChakraProvider } from '@chakra-ui/react'
 import type React from 'react'
 import { system } from '../../theme'
@@ -211,5 +211,125 @@ describe('ToolExecutionCard', () => {
     expect(screen.queryByRole('table', { hidden: true })).not.toBeInTheDocument()
     expect(screen.queryByText(/show full results/i)).not.toBeInTheDocument()
     expect(screen.getByText(/search flights/i)).toBeInTheDocument()
+  })
+
+  // ---------------------------------------------------------------------------
+  // Phase 4.7 Plan 04: three-state UI (executing / completed / error)
+  // ---------------------------------------------------------------------------
+
+  it('renders Spinner when executing (no resultMetadata and no errorEvent)', () => {
+    // Arrange: no resultMetadata, no errorEvent → executing state
+
+    // Act
+    renderWithChakra(<ToolExecutionCard callMetadata={CALL_META} />)
+
+    // Assert: spinner is present (role="status" for Chakra Spinner)
+    // and the result section is absent
+    const spinnerEl = document.querySelector('[data-state]') ?? screen.queryByRole('status')
+    // Chakra Spinner renders a visible spinner element; just verify no ✓ or ✗ icon
+    expect(screen.queryByText('✓')).not.toBeInTheDocument()
+    expect(screen.queryByText('✗')).not.toBeInTheDocument()
+    expect(screen.queryByText(/show full results/i)).not.toBeInTheDocument()
+    // The tool name is still visible in the header
+    expect(screen.getByText(/search flights/i)).toBeInTheDocument()
+    // Suppress unused variable lint warning
+    void spinnerEl
+  })
+
+  it('renders checkmark and Result section when completed (resultMetadata present, no errorEvent)', () => {
+    // Arrange
+    const resultMetadata = {
+      summary: 'Found 2 flights',
+      full_result: FLIGHT_RESULT_JSON,
+      status: 'completed',
+      elapsed_ms: 123,
+    }
+
+    // Act
+    renderWithChakra(<ToolExecutionCard callMetadata={CALL_META} resultMetadata={resultMetadata} />)
+
+    // Assert: ✓ is visible, result section trigger is present
+    expect(screen.getByText('✓')).toBeInTheDocument()
+    expect(screen.queryByText('✗')).not.toBeInTheDocument()
+    expect(screen.getByText(/show full results/i)).toBeInTheDocument()
+  })
+
+  it('renders error state with message and Retry button when errorEvent + onRetry provided', () => {
+    // Arrange
+    const errorEvent = {
+      type: 'error' as const,
+      error_code: 'tool_error' as const,
+      message: 'Tool search_flights failed: simulated outage',
+      retryable: true,
+      session_id: 'sess-1',
+    }
+    const onRetry = vi.fn()
+
+    // Act
+    renderWithChakra(
+      <ToolExecutionCard callMetadata={CALL_META} errorEvent={errorEvent} onRetry={onRetry} />
+    )
+
+    // Assert: ✗ icon, error message, and Retry button visible
+    expect(screen.getByText('✗')).toBeInTheDocument()
+    expect(screen.queryByText('✓')).not.toBeInTheDocument()
+    expect(screen.getByText(/Tool search_flights failed: simulated outage/)).toBeInTheDocument()
+    const retryBtn = screen.getByRole('button', { name: /retry/i })
+    expect(retryBtn).toBeInTheDocument()
+
+    // Clicking Retry calls onRetry
+    fireEvent.click(retryBtn)
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders error state without Retry button when errorEvent provided but onRetry is absent', () => {
+    // Arrange: errorEvent present, no onRetry
+    const errorEvent = {
+      type: 'error' as const,
+      error_code: 'tool_error' as const,
+      message: 'Tool search_flights failed: bad request param',
+      retryable: false,
+      session_id: 'sess-1',
+    }
+
+    // Act
+    renderWithChakra(<ToolExecutionCard callMetadata={CALL_META} errorEvent={errorEvent} />)
+
+    // Assert: error message visible, NO retry button
+    expect(screen.getByText('✗')).toBeInTheDocument()
+    expect(screen.getByText(/Tool search_flights failed: bad request param/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
+  })
+
+  it('does NOT render the Result Collapsible when both resultMetadata and errorEvent are set', () => {
+    // Arrange: error trumps result
+    const resultMetadata = {
+      summary: 'Found 2 flights',
+      full_result: FLIGHT_RESULT_JSON,
+      status: 'completed',
+      elapsed_ms: 123,
+    }
+    const errorEvent = {
+      type: 'error' as const,
+      error_code: 'tool_error' as const,
+      message: 'Tool failed after result',
+      retryable: true,
+      session_id: 'sess-1',
+    }
+
+    // Act
+    renderWithChakra(
+      <ToolExecutionCard
+        callMetadata={CALL_META}
+        resultMetadata={resultMetadata}
+        errorEvent={errorEvent}
+      />
+    )
+
+    // Assert: result trigger is NOT rendered (hasError=true suppresses it)
+    expect(screen.queryByText(/show full results/i)).not.toBeInTheDocument()
+    // Error is shown
+    expect(screen.getByText('✗')).toBeInTheDocument()
+    expect(screen.getByText(/Tool failed after result/)).toBeInTheDocument()
   })
 })
