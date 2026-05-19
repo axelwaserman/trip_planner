@@ -1,21 +1,104 @@
-import { Box, Button, Flex, Input, Stack, Text } from '@chakra-ui/react'
-import { useEffect, useRef, useState } from 'react'
+import { Box, Button, Flex, Input, Menu, Portal, Stack, Text } from '@chakra-ui/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
+import { Link } from 'react-router-dom'
+import { ChevronDown, Cpu } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToolExecutionCard } from './ToolExecutionCard'
 import { ThinkingCard } from './ThinkingCard'
-import { ProviderSelector } from './ProviderSelector'
 import { SelectorErrorBanner } from './chat/SelectorErrorBanner'
-import { UserMenu } from './chat/UserMenu'
 import { useChat } from '../hooks/useChat'
 import { apiFetch } from '../lib/auth'
-import type { ProviderErrorView } from '../lib/providerErrors'
+
+interface QuickSwitchOption {
+  provider: string
+  model: string
+  label: string
+}
+
+interface ProviderInfo {
+  available: boolean
+  models: string[]
+  base_url: string | null
+}
+type ProvidersResponse = Record<string, ProviderInfo>
+
+function isProvidersResponse(value: unknown): value is ProvidersResponse {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  const ollama = v.ollama
+  if (typeof ollama !== 'object' || ollama === null) return false
+  const models = (ollama as { models?: unknown }).models
+  return Array.isArray(models)
+}
+
+/**
+ * Project provider_settings + the live discovery list from GET /api/providers
+ * into a flat {provider, model} list the active-model badge popover renders.
+ *
+ * For Ollama, every discovered model becomes its own row. If discovery hasn't
+ * run yet (cold first load before /api/providers resolves), fall back to the
+ * saved default so the popover always has at least one row.
+ *
+ * For OpenAI / Anthropic, configured providers get a single row built from
+ * the saved {api_key, model}. Plan 08 doesn't render their settings cards;
+ * the lib layer still drives them and useChat sends their api_key when the
+ * user has saved one out-of-band, so we honor that here.
+ */
+function buildQuickSwitchOptions(
+  liveOllamaModels: string[] | null
+): QuickSwitchOption[] {
+  let parsed: {
+    ollama?: { base_url?: string; models?: string[] }
+    openai?: { api_key?: string; model?: string }
+    anthropic?: { api_key?: string; model?: string }
+  } = {}
+  try {
+    const raw = localStorage.getItem('provider_settings')
+    if (raw) parsed = JSON.parse(raw)
+  } catch {
+    // Corrupt JSON — treat as empty.
+  }
+
+  const opts: QuickSwitchOption[] = []
+
+  // Ollama: prefer the live discovery list when it has loaded; otherwise fall
+  // back to whatever the user-saved settings record carries.
+  const ollamaBaseUrl = parsed.ollama?.base_url?.trim() ?? ''
+  const ollamaModels =
+    liveOllamaModels !== null && liveOllamaModels.length > 0
+      ? liveOllamaModels
+      : (parsed.ollama?.models ?? [])
+  // Show Ollama rows whenever a base_url is configured OR the live discovery
+  // returned models — covers the cold-run case where localStorage is empty
+  // but the daemon is reachable through the backend default.
+  if (ollamaBaseUrl.length > 0 || ollamaModels.length > 0) {
+    if (ollamaModels.length === 0) {
+      opts.push({ provider: 'ollama', model: 'qwen3:4b', label: 'ollama · qwen3:4b' })
+    } else {
+      for (const m of ollamaModels) {
+        opts.push({ provider: 'ollama', model: m, label: `ollama · ${m}` })
+      }
+    }
+  }
+
+  if (parsed.openai?.api_key && parsed.openai.api_key.trim().length > 0) {
+    const m = parsed.openai.model ?? 'gpt-4o-mini'
+    opts.push({ provider: 'openai', model: m, label: `openai · ${m}` })
+  }
+  if (parsed.anthropic?.api_key && parsed.anthropic.api_key.trim().length > 0) {
+    const m = parsed.anthropic.model ?? 'claude-3-5-sonnet-20241022'
+    opts.push({ provider: 'anthropic', model: m, label: `anthropic · ${m}` })
+  }
+  return opts
+}
 
 export function ChatInterface() {
   const {
     messages,
     isLoading,
+    isAwaitingFirstChunk,
     currentProvider,
     currentModel,
     providerError,
@@ -24,46 +107,45 @@ export function ChatInterface() {
     retryProvider,
   } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [username, setUsername] = useState<string>('')
-  const [selectorError, setSelectorError] = useState<ProviderErrorView | null>(null)
-  const activeError = providerError ?? selectorError
+  const [quickSwitchTick, setQuickSwitchTick] = useState(0)
+  const [liveOllamaModels, setLiveOllamaModels] = useState<string[] | null>(null)
 
-  const handleSelectorChange = (provider: string, model: string) => {
-    setSelectorError(null)
-    handleProviderChange(provider, model)
-  }
-
-  const handleRetry = () => {
-    setSelectorError(null)
-    retryProvider()
-  }
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isLoading])
-
+  // Discover the live Ollama model list on mount (lazy-discovery in the
+  // backend means this triggers a one-shot daemon probe on first call) so the
+  // active-model popover lists every installed model — not just whichever
+  // single model the saved settings happened to remember. Falls back silently
+  // if the call fails; the popover still renders from saved settings.
   useEffect(() => {
     let cancelled = false
-    apiFetch('/api/auth/me')
+    apiFetch('/api/providers')
       .then((response) => {
-        if (cancelled || !response.ok) return
-        return response.json()
+        if (cancelled || !response.ok) return null
+        return response.json() as Promise<unknown>
       })
-      .then((payload: unknown) => {
-        if (cancelled || !payload) return
-        if (typeof payload === 'object' && payload !== null && 'username' in payload) {
-          const value = (payload as { username: unknown }).username
-          if (typeof value === 'string') setUsername(value)
-        }
+      .then((payload) => {
+        if (cancelled || !payload || !isProvidersResponse(payload)) return
+        setLiveOllamaModels(payload.ollama.models)
       })
       .catch(() => {
-        // apiFetch already handles the 401 redirect; swallow other errors so the
-        // header just renders without a username rather than breaking the chat.
+        // apiFetch handles 401; everything else is non-fatal here.
       })
     return () => {
       cancelled = true
     }
   }, [])
+
+  // Re-read saved settings every time the badge is opened so the list reflects
+  // edits the user just made on /settings/providers without a remount. The
+  // live discovery list is mixed in too — once it has loaded it's the source
+  // of truth for Ollama's row set.
+  const quickSwitchOptions = useMemo(
+    () => buildQuickSwitchOptions(liveOllamaModels),
+    [liveOllamaModels, quickSwitchTick]
+  )
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isLoading])
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -98,22 +180,112 @@ export function ChatInterface() {
               Ask me anything about planning your trip!
             </Text>
           </Box>
-          <Box>
-            <ProviderSelector
-              onProviderChange={handleSelectorChange}
-              onProviderError={setSelectorError}
-              initialProvider={currentProvider}
-              initialModel={currentModel}
-            />
-          </Box>
+          <Flex align="center" gap="2">
+            {/* Active-model quick-switcher. The badge opens a popover listing
+                providers the user has already configured (Ready in saved
+                settings). Selecting one switches without leaving the chat —
+                handleProviderChange re-reads provider_settings under the
+                hood (Plan 07) so the api_key/base_url for the picked
+                provider is what travels on the next session. The gear icon
+                to the right is the only path to the full settings page. */}
+            <Menu.Root
+              onOpenChange={(details) => {
+                if (details.open) setQuickSwitchTick((t) => t + 1)
+              }}
+              onSelect={(details) => {
+                if (details.value === '__settings__') return
+                const [provider, ...modelParts] = details.value.split('::')
+                const model = modelParts.join('::')
+                if (!provider || !model) return
+                handleProviderChange(provider, model)
+              }}
+            >
+              <Menu.Trigger asChild>
+                <Box
+                  as="button"
+                  bg="bg.canvas"
+                  borderWidth="1px"
+                  borderColor="border.subtle"
+                  borderRadius="full"
+                  px="3"
+                  py="1"
+                  fontSize="13px"
+                  color="fg.secondary"
+                  display="inline-flex"
+                  alignItems="center"
+                  gap="2"
+                  cursor="pointer"
+                  title={`This conversation is using ${currentProvider} · ${currentModel}. Click to switch.`}
+                >
+                  <Cpu size={14} />
+                  {currentProvider} · {currentModel}
+                  <ChevronDown size={12} />
+                </Box>
+              </Menu.Trigger>
+              <Portal>
+                <Menu.Positioner>
+                  <Menu.Content
+                    bg="bg.surface"
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    boxShadow="md"
+                    p="1"
+                    minW="240px"
+                  >
+                    {quickSwitchOptions.length > 0 ? (
+                      quickSwitchOptions.map((opt) => {
+                        const isActive =
+                          opt.provider === currentProvider &&
+                          opt.model === currentModel
+                        return (
+                          <Menu.Item
+                            key={`${opt.provider}::${opt.model}`}
+                            value={`${opt.provider}::${opt.model}`}
+                            fontSize="14px"
+                            px="3"
+                            py="2"
+                            borderRadius="sm"
+                            color={isActive ? 'accent.solid' : 'fg.primary'}
+                            fontWeight={isActive ? '500' : '400'}
+                          >
+                            {opt.label}
+                            {isActive && (
+                              <Box as="span" ml="2" fontSize="12px" color="fg.secondary">
+                                · current
+                              </Box>
+                            )}
+                          </Menu.Item>
+                        )
+                      })
+                    ) : (
+                      <Box px="3" py="2" fontSize="13px" color="fg.secondary">
+                        No providers configured yet.
+                      </Box>
+                    )}
+                    <Box height="1px" bg="border.subtle" my="1" />
+                    <Menu.Item
+                      value="__settings__"
+                      fontSize="13px"
+                      px="3"
+                      py="2"
+                      borderRadius="sm"
+                      color="accent.solid"
+                      asChild
+                    >
+                      <Link to="/settings/providers">Manage providers…</Link>
+                    </Menu.Item>
+                  </Menu.Content>
+                </Menu.Positioner>
+              </Portal>
+            </Menu.Root>
+            {/* Plan 08b: the standalone Settings IconButton was removed —
+                the app-shell Sidebar is now the single nav surface. The
+                "Manage providers…" entry inside the active-model popover
+                remains as a secondary path to /settings/providers. */}
+          </Flex>
         </Flex>
-        <Flex justify="space-between" align="center">
-          <Text fontSize="xs" color="gray.500">
-            Using: {currentProvider} / {currentModel}
-          </Text>
-          {username && <UserMenu username={username} />}
-        </Flex>
-        <SelectorErrorBanner error={activeError} onRetry={handleRetry} />
+        <SelectorErrorBanner error={providerError} onRetry={retryProvider} />
       </Box>
 
       {/* Messages */}
@@ -200,7 +372,7 @@ export function ChatInterface() {
               )
             })
           )}
-          {isLoading && (
+          {isAwaitingFirstChunk && (
             <Flex justify="flex-start">
               <Box bg="white" px={4} py={3} rounded="lg" borderWidth="1px" borderColor="gray.200">
                 <Text color="gray.500">Thinking...</Text>

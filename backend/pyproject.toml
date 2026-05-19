@@ -17,6 +17,8 @@ dependencies = [
     "pyjwt>=2.10.1",
     "pwdlib[argon2]>=0.3.0",
     "python-multipart>=0.0.21",
+    "langchain-openai>=1.2.1",
+    "langchain-anthropic>=1.4.3",
 ]
 
 [dependency-groups]
@@ -34,12 +36,6 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "e2e: marks tests as end-to-end with real LLM calls",
-    "integration: marks tests with mocked external dependencies",
-    "unit: marks tests as pure unit tests",
-]
 
 [tool.mypy]
 python_version = "3.13"

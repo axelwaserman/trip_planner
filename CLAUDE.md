@@ -81,7 +81,15 @@ The `get_chat_service` dependency is overridden to pull from `app.state`, keepin
 
 ### Test structure
 
-Tests live in `backend/tests/{unit,integration,e2e}`. Markers: `@pytest.mark.unit`, `.integration`, `.e2e`, `.slow`. Phase 04.3 dropped the `addopts` filter; `just test` now runs everything under `tests/` (unit + integration + e2e) via path discovery. Tests marked `@pytest.mark.slow` will run by default — opt out explicitly with `pytest -m "not slow"` if needed. `tests/e2e/` is currently a symbolic CI gate — the `E2E` workflow job runs on every push/PR but only collects a no-op placeholder. Real backend-over-HTTP E2E tests (auth flow, optional travel-API tests gated on a CI secret) land in later phases. See `backend/tests/e2e/README.md` for the policy.
+Tests live in `backend/tests/{unit,integration,e2e}`. Test selection is path-based — no pytest markers. `just test` runs everything; `just test-unit`, `just test-integration`, and `just test-e2e` narrow by directory.
+
+Each directory is defined by its collaborator scope:
+
+- `tests/unit/` — one module under test; all collaborators are trivially constructed or `MagicMock`-ed; no FastAPI `TestClient`, no `MockLLM` stream wiring, no HTTP roundtrip.
+- `tests/integration/` — real FastAPI `TestClient` + real `ChatService` + `MockLLM` (from `tests/fixtures/llm.py`) + `MockFlightAPIClient`; mocks live only at the I/O boundary (no real Ollama, no real travel API).
+- `tests/e2e/` — real backend over HTTP, real auth flow; optionally real travel APIs gated on CI secrets; never a real LLM. Currently a symbolic CI gate — see `backend/tests/e2e/README.md` for the policy.
+
+The `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.e2e`, and `@pytest.mark.slow` markers were removed in Phase 4.4; path-only selection is the convention going forward.
 
 ## Key constraints
 

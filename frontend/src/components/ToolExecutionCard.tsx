@@ -1,25 +1,84 @@
-import { Box, Flex, Text, Spinner, Button, Collapsible, Code } from '@chakra-ui/react'
+import { Box, Flex, Text, Spinner, Button, Collapsible, Code, Table } from '@chakra-ui/react'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-
-interface ToolCallMetadata {
-  tool_name: string
-  arguments: Record<string, unknown>
-  started_at: number
-  status: string
-}
-
-interface ToolResultMetadata {
-  summary: string
-  full_result: string
-  status: string
-  elapsed_ms: number
-}
+import type { FlightSearchResultData, FlightResultData, ToolCallMetadata, ToolResultMetadata } from '../types/chat'
 
 interface ToolExecutionCardProps {
   callMetadata: ToolCallMetadata
   resultMetadata?: ToolResultMetadata
+}
+
+function isFlightSearchResult(value: unknown): value is FlightSearchResultData {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    typeof v.status === 'string' &&
+    Array.isArray(v.results) &&
+    typeof v.count === 'number' &&
+    typeof v.query === 'object' &&
+    v.query !== null
+  )
+}
+
+function FlightResultsTable({ data }: { data: FlightSearchResultData }) {
+  const { query, results, count } = data
+
+  return (
+    <Box>
+      <Box mb={2}>
+        <Text fontSize="sm" color="gray.600">
+          {query.origin} &rarr; {query.destination}, {query.departure_date},{' '}
+          {query.passengers} passenger(s)
+        </Text>
+        <Text fontSize="sm" color="gray.600">
+          {count} result(s)
+        </Text>
+      </Box>
+
+      {results.length === 0 ? (
+        <Text fontSize="sm" color="gray.600">
+          No flights matched the search criteria.
+        </Text>
+      ) : (
+        <Table.Root size="sm" variant="line">
+          <Table.Header>
+            <Table.Row>
+              <Table.ColumnHeader>Route</Table.ColumnHeader>
+              <Table.ColumnHeader>Departure</Table.ColumnHeader>
+              <Table.ColumnHeader>Arrival</Table.ColumnHeader>
+              <Table.ColumnHeader>Carrier</Table.ColumnHeader>
+              <Table.ColumnHeader>Duration</Table.ColumnHeader>
+              <Table.ColumnHeader>Price</Table.ColumnHeader>
+              <Table.ColumnHeader>Class</Table.ColumnHeader>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {results.map((r: FlightResultData) => {
+              const seg = r.segments[0]
+              return (
+                <Table.Row key={r.id}>
+                  <Table.Cell>
+                    {seg.departure.iata_code} &rarr; {seg.arrival.iata_code}
+                  </Table.Cell>
+                  <Table.Cell>{new Date(seg.departure.at).toLocaleTimeString()}</Table.Cell>
+                  <Table.Cell>{new Date(seg.arrival.at).toLocaleTimeString()}</Table.Cell>
+                  <Table.Cell>
+                    {seg.carrier.name} ({seg.carrier.iata_code})
+                  </Table.Cell>
+                  <Table.Cell>{r.total_duration.replace('PT', '').toLowerCase()}</Table.Cell>
+                  <Table.Cell>
+                    {r.price.currency} {r.price.amount}
+                  </Table.Cell>
+                  <Table.Cell>{r.booking_class}</Table.Cell>
+                </Table.Row>
+              )
+            })}
+          </Table.Body>
+        </Table.Root>
+      )}
+    </Box>
+  )
 }
 
 export function ToolExecutionCard({ callMetadata, resultMetadata }: ToolExecutionCardProps) {
@@ -128,69 +187,81 @@ export function ToolExecutionCard({ callMetadata, resultMetadata }: ToolExecutio
                 maxH="400px"
                 overflowY="auto"
               >
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    table: ({ children }) => (
-                      <Box as="table" w="full" my={2} borderWidth="1px" borderColor="gray.300">
-                        {children}
-                      </Box>
-                    ),
-                    thead: ({ children }) => (
-                      <Box as="thead" bg="gray.50">
-                        {children}
-                      </Box>
-                    ),
-                    th: ({ children }) => (
-                      <Box
-                        as="th"
-                        px={3}
-                        py={2}
-                        borderWidth="1px"
-                        borderColor="gray.300"
-                        fontWeight="semibold"
-                        textAlign="left"
-                      >
-                        {children}
-                      </Box>
-                    ),
-                    td: ({ children }) => (
-                      <Box as="td" px={3} py={2} borderWidth="1px" borderColor="gray.300">
-                        {children}
-                      </Box>
-                    ),
-                    p: ({ children }) => <Text mb={2}>{children}</Text>,
-                    ul: ({ children }) => (
-                      <Box as="ul" pl={5} my={2}>
-                        {children}
-                      </Box>
-                    ),
-                    ol: ({ children }) => (
-                      <Box as="ol" pl={5} my={2}>
-                        {children}
-                      </Box>
-                    ),
-                    li: ({ children }) => (
-                      <Text as="li" mb={1}>
-                        {children}
-                      </Text>
-                    ),
-                    code: ({ children }) => (
-                      <Box
-                        as="code"
-                        bg="gray.100"
-                        px={1}
-                        rounded="sm"
-                        fontFamily="mono"
-                        fontSize="sm"
-                      >
-                        {children}
-                      </Box>
-                    ),
-                  }}
-                >
-                  {resultMetadata.full_result}
-                </ReactMarkdown>
+                {(() => {
+                  try {
+                    const parsed: unknown = JSON.parse(resultMetadata.full_result)
+                    if (isFlightSearchResult(parsed)) {
+                      return <FlightResultsTable data={parsed} />
+                    }
+                  } catch {
+                    // Fall through to ReactMarkdown for non-JSON content
+                  }
+                  return (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        table: ({ children }) => (
+                          <Box as="table" w="full" my={2} borderWidth="1px" borderColor="gray.300">
+                            {children}
+                          </Box>
+                        ),
+                        thead: ({ children }) => (
+                          <Box as="thead" bg="gray.50">
+                            {children}
+                          </Box>
+                        ),
+                        th: ({ children }) => (
+                          <Box
+                            as="th"
+                            px={3}
+                            py={2}
+                            borderWidth="1px"
+                            borderColor="gray.300"
+                            fontWeight="semibold"
+                            textAlign="left"
+                          >
+                            {children}
+                          </Box>
+                        ),
+                        td: ({ children }) => (
+                          <Box as="td" px={3} py={2} borderWidth="1px" borderColor="gray.300">
+                            {children}
+                          </Box>
+                        ),
+                        p: ({ children }) => <Text mb={2}>{children}</Text>,
+                        ul: ({ children }) => (
+                          <Box as="ul" pl={5} my={2}>
+                            {children}
+                          </Box>
+                        ),
+                        ol: ({ children }) => (
+                          <Box as="ol" pl={5} my={2}>
+                            {children}
+                          </Box>
+                        ),
+                        li: ({ children }) => (
+                          <Text as="li" mb={1}>
+                            {children}
+                          </Text>
+                        ),
+                        code: ({ children }) => (
+                          <Box
+                            as="code"
+                            bg="gray.100"
+                            px={1}
+                            rounded="sm"
+                            fontFamily="mono"
+                            fontSize="sm"
+                          >
+                            {children}
+                          </Box>
+                        ),
+                      }}
+                    >
+                      {resultMetadata.full_result}
+                    </ReactMarkdown>
+                  )
+                })()}
               </Box>
             </Collapsible.Content>
           </Collapsible.Root>
