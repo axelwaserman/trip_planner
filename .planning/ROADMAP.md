@@ -195,9 +195,9 @@ Plans:
   4. Non-blocking errors surface as toast notifications; the streaming UI continues to render subsequent events after a recoverable error.
 **Plans**: 4 plans across 3 waves
 Plans:
-- [ ] 04.7-01-PLAN.md — Wave 1: backend chat/ package + StreamEvent discriminated union + ChatService extraction + last_tool_invocation
+- [x] 04.7-01-PLAN.md — Wave 1: backend chat/ package + StreamEvent discriminated union + ChatService extraction + last_tool_invocation
 - [ ] 04.7-02-PLAN.md — Wave 2: route ErrorEvent emissions + POST /api/chat/retry endpoint + RetryRequest model
-- [ ] 04.7-03-PLAN.md — Wave 1: frontend discriminated-union types + parseSSE update + Chakra Toaster singleton mounted in App.tsx
+- [x] 04.7-03-PLAN.md — Wave 1: frontend discriminated-union types + parseSSE update + Chakra Toaster singleton mounted in App.tsx
 - [ ] 04.7-04-PLAN.md — Wave 3: useChat switch narrowing + ToolExecutionCard tri-state UI + retryLastTool + manual UAT
 **UI hint**: yes
 
@@ -279,7 +279,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.4. Mock Chat in Tests | v1 | 2/2 | Complete   | 2026-05-17 |
 | 4.5. LLM Provider Abstraction (real) | v1 | 13/13 | Complete   | 2026-05-18 |
 | 4.6. Vendor-Neutral Tool JSON | v1 | 2/2 | Complete   | 2026-05-18 |
-| 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / 4 | Planned     | - |
+| 4.7. Error Handling + StreamEvent Hierarchy | v1 | 2/4 | In Progress|  |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / TBD | Not started | - |
 | 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 6. PydanticAI Migration | v1.5 | 0 / TBD | Not started | - |
