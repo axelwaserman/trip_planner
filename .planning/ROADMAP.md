@@ -29,7 +29,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [ ] **Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)** — `LLMProvider` Protocol + factory; dynamic Ollama model discovery from host; real OpenAI + Anthropic providers via API key (env or session payload); per-session injection.
 - [ ] **Phase 4.6: Vendor-Neutral Tool JSON** — `search_flights()` JSON shape designed against Amadeus / Skyscanner / Google Flights field maps; `ToolExecutionCard` renders tables/lists/nested objects.
 - [ ] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts.
-- [ ] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`.
+- [x] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`. (completed 2026-05-19)
 - [ ] **Phase 5: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Session`/`Message` tables; named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
 - [ ] **Phase 6: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; ADR-001 → Superseded.
 - [ ] **Phase 7: Real Flight API** — Amadeus client behind existing `FlightAPIClient` ABC; **outbound HTTP via `pyreqwest`**; reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests.
@@ -183,8 +183,8 @@ Plans:
   3. Orphaned `frontend/src/components/ToolCallCard.tsx` and `ToolResultCard.tsx` are deleted (superseded by `ToolExecutionCard`); the frontend builds without dead-import warnings.
 **Plans**: 2 plans across 2 waves
 Plans:
-- [ ] 04.8-01-PLAN.md — Wave 1: Add Pydantic validators (origin!=destination, departure>=today, arrival>departure) + tests
-- [ ] 04.8-02-PLAN.md — Wave 2: Extract create_mock_flight() + parse_sse_events(), refactor consumers, delete frontend orphans
+- [x] 04.8-01-PLAN.md — Wave 1: Add Pydantic validators (origin!=destination, departure>=today, arrival>departure) + tests
+- [x] 04.8-02-PLAN.md — Wave 2: Extract create_mock_flight() + parse_sse_events(), refactor consumers, delete frontend orphans
 
 ### Phase 5: Postgres + Redis + docker-compose
 **Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
@@ -255,7 +255,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.5. LLM Provider Abstraction (real) | v1 | 0 / TBD | Not started | - |
 | 4.6. Vendor-Neutral Tool JSON | v1 | 0 / TBD | Not started | - |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 0 / TBD | Not started | - |
-| 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 0 / 2 | Planned | - |
+| 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2 / 2 | Complete | 2026-05-19 |
 | 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 6. PydanticAI Migration | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
