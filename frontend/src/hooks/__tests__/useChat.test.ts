@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetForTests as resetChatStore } from '../../lib/chatSessionStore'
 import { useChat } from '../useChat'
 
+vi.mock('../../lib/toaster', () => ({
+  toaster: { create: vi.fn() },
+}))
+
 // useChat reads `useSearchParams()` to observe Sidebar's `?n=<token>` New
 // chat signal, so every renderHook call needs a Router context. Wrap the
 // upstream renderHook so each test stays single-line. createElement avoids
@@ -489,13 +493,14 @@ describe('sendMessage error handling', () => {
     expect(last?.content).toMatch(/error/)
   })
 
-  it('adds an error message when the stream emits an error event', async () => {
+  it('shows a toast when the stream emits a non-retryable error event', async () => {
+    const { toaster } = await import('../../lib/toaster')
     vi.stubGlobal('fetch', mockSessionFetch())
     const { result } = renderHook(() => useChat())
     await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
 
     const sseBody = makeSSEBody(
-      'data: {"type":"error","error":"upstream failure"}'
+      'data: {"type":"error","error_code":"stream_error","message":"upstream failure","retryable":false,"session_id":"sess-1"}'
     )
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: sseBody }))
@@ -504,9 +509,10 @@ describe('sendMessage error handling', () => {
       await result.current.sendMessage('hello')
     })
 
-    const last = result.current.messages.at(-1)
-    expect(last?.role).toBe('assistant')
-    expect(last?.content).toMatch(/error/)
+    // Non-retryable error routes to toast, not an inline error message
+    expect(vi.mocked(toaster.create)).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error' })
+    )
   })
 
   it('accumulates multiple thinking chunks into the same thinking message', async () => {
@@ -810,6 +816,24 @@ describe('background streaming', () => {
     expect(sessAState.isStreaming).toBe(false)
   })
 
+  it('isStreaming still false after a stream completes with non-retryable error', async () => {
+    vi.stubGlobal('fetch', mockSessionFetch())
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    const sseBody = makeSSEBody(
+      'data: {"type":"error","error_code":"stream_error","message":"Something failed","retryable":false,"session_id":"sess-1"}',
+      'data: {"type":"done","session_id":"sess-1"}'
+    )
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: sseBody }))
+
+    await act(async () => {
+      await result.current.sendMessage('test')
+    })
+
+    expect(result.current.isLoading).toBe(false)
+  })
+
   it('isStreaming flips true while a stream is in-flight and false on completion', async () => {
     const fetchMock = mockSessionFetch()
     vi.stubGlobal('fetch', fetchMock)
@@ -845,5 +869,193 @@ describe('background streaming', () => {
     })
 
     expect(result.current.isLoading).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ErrorEvent routing (Phase 4.7 Plan 04)
+// ---------------------------------------------------------------------------
+
+describe('ErrorEvent routing (switch-narrowed handler)', () => {
+  it('retryable=true error updates the last tool_execution message errorEvent field (no toast)', async () => {
+    // Arrange: mock toaster, set up session, send tool_call + retryable error
+    const { toaster } = await import('../../lib/toaster')
+    vi.mocked(toaster.create).mockClear()
+
+    const fetchMock = mockSessionFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    const sseBody = makeSSEBody(
+      'data: {"type":"tool_call","tool_name":"search","tool_args":{"q":"Paris"},"session_id":"sess-1"}',
+      'data: {"type":"error","error_code":"tool_error","message":"Tool search failed: timeout","retryable":true,"tool_name":"search","session_id":"sess-1"}'
+    )
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: sseBody }))
+
+    // Act
+    await act(async () => {
+      await result.current.sendMessage('hello')
+    })
+
+    // Assert: tool_execution message has errorEvent populated
+    const toolMsg = result.current.messages.find((m) => m.role === 'tool_execution')
+    expect(toolMsg).toBeDefined()
+    expect(toolMsg?.toolExecution?.errorEvent).toBeDefined()
+    expect(toolMsg?.toolExecution?.errorEvent?.message).toBe('Tool search failed: timeout')
+    expect(toolMsg?.toolExecution?.errorEvent?.retryable).toBe(true)
+
+    // Toast must NOT have been called for retryable errors
+    expect(vi.mocked(toaster.create)).not.toHaveBeenCalled()
+  })
+
+  it('retryable=false error fires toaster.create and does NOT update tool_execution errorEvent', async () => {
+    // Arrange
+    const { toaster } = await import('../../lib/toaster')
+    vi.mocked(toaster.create).mockClear()
+
+    vi.stubGlobal('fetch', mockSessionFetch())
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    const sseBody = makeSSEBody(
+      'data: {"type":"error","error_code":"stream_error","message":"Something went wrong","retryable":false,"session_id":"sess-1"}'
+    )
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: sseBody }))
+
+    // Act
+    await act(async () => {
+      await result.current.sendMessage('hello')
+    })
+
+    // Assert: toast was called
+    expect(vi.mocked(toaster.create)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(toaster.create)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Something went wrong',
+        type: 'error',
+      })
+    )
+    // No tool_execution message with errorEvent (there was no tool_call first)
+    const toolMsg = result.current.messages.find((m) => m.role === 'tool_execution')
+    expect(toolMsg?.toolExecution?.errorEvent).toBeUndefined()
+  })
+
+  it('session_error fires toaster.create AND triggers a follow-up POST /api/chat/session', async () => {
+    // Arrange
+    const { toaster } = await import('../../lib/toaster')
+    vi.mocked(toaster.create).mockClear()
+
+    let sessionPostCount = 0
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/chat/session' && init?.method === 'POST') {
+        sessionPostCount += 1
+        return {
+          ok: true,
+          json: async () => ({
+            session_id: `sess-${sessionPostCount}`,
+            provider: 'ollama',
+            model: 'qwen3:4b',
+          }),
+          body: null,
+        }
+      }
+      if (url === '/api/chat' && init?.method === 'POST') {
+        return {
+          ok: true,
+          body: makeSSEBody(
+            'data: {"type":"error","error_code":"session_error","message":"Session not found","retryable":false,"session_id":"sess-1"}'
+          ),
+        }
+      }
+      return { ok: true, json: async () => ({}), body: null }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+    expect(sessionPostCount).toBe(1) // initial session creation
+
+    // Act: send a message that results in a session_error
+    await act(async () => {
+      await result.current.sendMessage('hello')
+    })
+
+    // Assert: toast fired
+    expect(vi.mocked(toaster.create)).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error' })
+    )
+    // A second POST /api/chat/session should have been made (silent re-init)
+    await waitFor(() => expect(sessionPostCount).toBeGreaterThanOrEqual(2))
+  })
+
+  it('retryLastTool POSTs to /api/chat/retry with session_id and feeds events through the stream handler', async () => {
+    // Arrange: first get a session, do a tool call to populate last tool state
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/chat/session' && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({ session_id: 'sess-1', provider: 'ollama', model: 'qwen3:4b' }),
+          body: null,
+        }
+      }
+      if (url === '/api/chat' && init?.method === 'POST') {
+        return {
+          ok: true,
+          body: makeSSEBody(
+            'data: {"type":"tool_call","tool_name":"search","tool_args":{"q":"Paris"},"session_id":"sess-1"}',
+            'data: {"type":"error","error_code":"tool_error","message":"Tool failed","retryable":true,"tool_name":"search","session_id":"sess-1"}'
+          ),
+        }
+      }
+      if (url === '/api/chat/retry' && init?.method === 'POST') {
+        return {
+          ok: true,
+          body: makeSSEBody(
+            'data: {"type":"tool_call","tool_name":"search","tool_args":{"q":"Paris"},"session_id":"sess-1"}',
+            'data: {"type":"tool_result","tool_name":"search","tool_result":"Found Paris","elapsed_ms":100,"session_id":"sess-1"}',
+            'data: {"type":"content","chunk":"Great!","session_id":"sess-1"}'
+          ),
+        }
+      }
+      return { ok: false, body: null }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChat())
+    await waitFor(() => expect(result.current.sessionId).toBe('sess-1'))
+
+    // Send message to get a tool call with error
+    await act(async () => {
+      await result.current.sendMessage('hello')
+    })
+
+    // Verify tool_execution exists with errorEvent
+    const toolMsgBefore = result.current.messages.find((m) => m.role === 'tool_execution')
+    expect(toolMsgBefore?.toolExecution?.errorEvent).toBeDefined()
+
+    // Verify retryLastTool is exposed
+    expect(result.current.retryLastTool).toBeDefined()
+
+    // Act: call retryLastTool
+    await act(async () => {
+      await result.current.retryLastTool()
+    })
+
+    // Assert: /api/chat/retry was called with the right session_id
+    const retryCall = fetchMock.mock.calls.find(
+      ([url, init]) => url === '/api/chat/retry' && (init as RequestInit)?.method === 'POST'
+    )
+    expect(retryCall).toBeDefined()
+    const retryBody = JSON.parse((retryCall![1] as RequestInit).body as string) as { session_id: string }
+    expect(retryBody.session_id).toBe('sess-1')
+
+    // The retry stream fed a new tool_call + result into the store
+    const toolMsgAfter = result.current.messages.find(
+      (m) => m.role === 'tool_execution' && m.toolExecution?.resultMetadata?.summary === 'Found Paris'
+    )
+    expect(toolMsgAfter).toBeDefined()
   })
 })

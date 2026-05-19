@@ -17,6 +17,9 @@ export interface ToolResultMetadata {
 export interface ToolExecutionData {
   callMetadata: ToolCallMetadata
   resultMetadata?: ToolResultMetadata
+  // Populated when an ErrorEvent with retryable=true arrives for this tool call.
+  // ToolExecutionCard reads this to render the error-state UI + Retry button.
+  errorEvent?: ErrorEvent
 }
 
 export interface Message {
