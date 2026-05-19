@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import app
-from app.models import StreamEvent
+from app.chat.models import ContentEvent, StreamEvent
 
 
 @pytest.fixture
@@ -54,14 +54,13 @@ def test_chat_endpoint_streams_response(client: TestClient, auth_headers: dict[s
 
     async def mock_stream(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
         """Mock async generator for streaming."""
-        yield StreamEvent(
-            type="content",
+        yield ContentEvent(
             chunk="Hello there!",
             session_id=session_id,
         )
 
-    # Patch the ChatService.chat_stream method
-    with patch("app.chat.ChatService.chat_stream", side_effect=mock_stream):
+    # Patch the ChatService.chat_stream method (patch the real definition location)
+    with patch("app.chat.service.ChatService.chat_stream", side_effect=mock_stream):
         response = client.post(
             "/api/chat",
             json={"message": "Hello", "session_id": session_id},
@@ -95,10 +94,10 @@ def test_chat_endpoint_does_not_leak_exception_text_to_client(client: TestClient
         # An async generator must be a generator function — yield once
         # before raising so the iterator can be advanced into the body.
         if False:
-            yield StreamEvent(type="content", chunk="never", session_id=session_id)
+            yield ContentEvent(chunk="never", session_id=session_id)
         raise RuntimeError(f"upstream call to {sensitive_url} failed with key {sensitive_key}")
 
-    with patch("app.chat.ChatService.chat_stream", side_effect=boom):
+    with patch("app.chat.service.ChatService.chat_stream", side_effect=boom):
         response = client.post(
             "/api/chat",
             json={"message": "Hello", "session_id": session_id},
@@ -117,11 +116,14 @@ def test_chat_endpoint_does_not_leak_exception_text_to_client(client: TestClient
     assert sensitive_key not in body
     assert "An error occurred:" not in body
 
-    # The SSE event must still be a well-formed StreamEvent of type=content.
+    # The SSE event must be a well-formed ErrorEvent of type=error (stream_error code).
+    # Phase 4.7: route-level exceptions emit ErrorEvent(type="error") instead of the
+    # old StreamEvent(type="content") so the frontend can route errors correctly.
     data_lines = [line[len("data: ") :] for line in body.strip().split("\n") if line.startswith("data: ")]
     assert len(data_lines) >= 1
     parsed = json.loads(data_lines[-1])
-    assert parsed["type"] == "content"
+    assert parsed["type"] == "error"
+    assert parsed["error_code"] == "stream_error"
     assert parsed["session_id"] == session_id
 
 

@@ -11,6 +11,13 @@ The 4.2 default fallbacks (``provider="ollama"``, ``model="qwen3:4b"``) live
 in the route layer (``app.api.routes.routes.create_session``); the
 :class:`app.llm.factory.SessionLLMConfig` dataclass requires both fields to be
 non-``None`` at construction.
+
+Phase 4.7: ChatService now yields concrete event classes
+(ContentEvent, ThinkingEvent, ToolCallEvent, ToolResultEvent, ErrorEvent) instead
+of the monolithic StreamEvent, and wraps tool execution in APIError / Exception
+handlers that yield ErrorEvent and return early. After each tool_call yield,
+``_metadata[session_id]["last_tool_invocation"]`` is stored for the retry endpoint
+(Plan 02, D-07).
 """
 
 from __future__ import annotations
@@ -18,12 +25,23 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo, StreamEvent
+from app.chat.models import (
+    ContentEvent,
+    ErrorCode,
+    ErrorEvent,
+    StreamEvent,
+    ThinkingEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+)
+from app.exceptions import APIError
+from app.llm.log_scrubbing import _scrub
+from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo
 from app.tools.flight_search import search_flights
 
 if TYPE_CHECKING:
@@ -54,7 +72,7 @@ class ChatService:
         """
         self._factory = factory
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
-        self._metadata: dict[str, dict[str, str]] = {}  # Session metadata (provider, model)
+        self._metadata: dict[str, dict[str, Any]] = {}  # Session metadata; widens to Any for last_tool_invocation
         self._bound_providers: dict[str, BoundProvider] = {}
         self._last_activity: dict[str, float] = {}
 
@@ -203,12 +221,18 @@ class ChatService:
     async def chat_stream(self, message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
         """Stream a chat response chunk by chunk with tool calling support.
 
+        Yields concrete event classes (ContentEvent, ThinkingEvent, ToolCallEvent,
+        ToolResultEvent, ErrorEvent). Tool execution is wrapped in APIError /
+        Exception handlers — on error an ErrorEvent is yielded and the generator
+        returns early. ``_metadata[session_id]["last_tool_invocation"]`` is stored
+        after each tool_call yield for the Plan 02 retry endpoint (D-07).
+
         Args:
             message: User message
             session_id: Session ID for conversation continuity
 
         Yields:
-            StreamEvent objects with simplified structure
+            Concrete event objects (discriminated union members of StreamEvent)
         """
         history = self.get_session_history(session_id)
         bound = self._bound_providers[session_id]
@@ -241,22 +265,14 @@ class ChatService:
                     reasoning = chunk.additional_kwargs.get("reasoning_content")
                     if reasoning:
                         has_thinking = True
-                        yield StreamEvent(
-                            chunk=reasoning,
-                            session_id=session_id,
-                            type="thinking",
-                        )
+                        yield ThinkingEvent(chunk=reasoning, session_id=session_id)
 
                 # Process content (only if not thinking)
                 if not has_thinking and hasattr(chunk, "content") and chunk.content:
                     content = chunk.content
                     if isinstance(content, str) and content.strip():
                         accumulated_content += content
-                        yield StreamEvent(
-                            chunk=content,
-                            session_id=session_id,
-                            type="content",
-                        )
+                        yield ContentEvent(chunk=content, session_id=session_id)
 
                 # Check for tool calls
                 if isinstance(chunk, AIMessage) and chunk.tool_calls:
@@ -270,27 +286,52 @@ class ChatService:
                         if tool_call["name"] == "search_flights":
                             # Emit tool_call event
                             tool_start_time = time.time()
-                            yield StreamEvent(
-                                chunk="",
-                                session_id=session_id,
-                                type="tool_call",
+                            yield ToolCallEvent(
                                 tool_name=tool_call["name"],
                                 tool_args=tool_call["args"],
+                                session_id=session_id,
                             )
 
-                            # Execute the tool
-                            tool_result = await search_flights.ainvoke(tool_call["args"])
+                            # Store last_tool_invocation for retry endpoint (Phase 4.7 D-07)
+                            self._metadata[session_id]["last_tool_invocation"] = {
+                                "tool_name": tool_call["name"],
+                                "tool_args": tool_call["args"],
+                                "tool_call_id": tool_call.get("id", ""),
+                            }
+
+                            # Execute the tool — wrapped for APIError + generic Exception
+                            try:
+                                tool_result = await search_flights.ainvoke(tool_call["args"])
+                            except APIError as exc:
+                                yield ErrorEvent(
+                                    error_code=ErrorCode.tool_error,
+                                    message=f"Tool {tool_call['name']} failed: {exc.message}",
+                                    retryable=exc.retryable,
+                                    tool_name=tool_call["name"],
+                                    raw_detail=_scrub(str(exc)),
+                                    session_id=session_id,
+                                )
+                                return
+                            except Exception as exc:
+                                yield ErrorEvent(
+                                    error_code=ErrorCode.tool_error,
+                                    message=f"Tool {tool_call['name']} failed.",
+                                    retryable=False,
+                                    tool_name=tool_call["name"],
+                                    raw_detail=_scrub(str(exc)),
+                                    session_id=session_id,
+                                )
+                                return
+
                             tool_end_time = time.time()
                             elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
 
                             # Emit tool_result event
-                            yield StreamEvent(
-                                chunk="",
-                                session_id=session_id,
-                                type="tool_result",
+                            yield ToolResultEvent(
                                 tool_name=tool_call["name"],
                                 tool_result=str(tool_result),
                                 elapsed_ms=elapsed_ms,
+                                session_id=session_id,
                             )
 
                             tool_messages.append(
@@ -318,11 +359,7 @@ class ChatService:
                             and final_chunk.content
                         ):
                             accumulated_final += final_chunk.content
-                            yield StreamEvent(
-                                chunk=final_chunk.content,
-                                session_id=session_id,
-                                type="content",
-                            )
+                            yield ContentEvent(chunk=final_chunk.content, session_id=session_id)
 
                     accumulated_content = accumulated_final
                     break
@@ -341,8 +378,4 @@ class ChatService:
 
         # Ensure at least one content event
         if not accumulated_content:
-            yield StreamEvent(
-                chunk="",
-                session_id=session_id,
-                type="content",
-            )
+            yield ContentEvent(chunk="", session_id=session_id)

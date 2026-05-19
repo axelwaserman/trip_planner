@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.routes.auth import User, get_current_active_user
 from app.chat import ChatService
+from app.chat.models import ErrorCode, ErrorEvent
 from app.config import settings
 from app.llm.errors import ProbeError, ProbeErrorCode
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
@@ -24,7 +25,6 @@ from app.models import (
     ProviderTestRequest,
     ProviderTestResponse,
     SessionCreateRequest,
-    StreamEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,10 +105,13 @@ async def chat(
             # (CR-02). This catch covers a narrow race where the session is
             # deleted between the boundary check and chat_stream's first
             # history read.
-            error_event = StreamEvent(
-                chunk="",
+            error_event = ErrorEvent(
+                error_code=ErrorCode.session_error,
+                message="Session not found or expired.",
+                retryable=False,
+                tool_name=None,
+                raw_detail=None,
                 session_id=request.session_id,
-                type="content",  # Use content for error messages
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
 
@@ -122,10 +125,13 @@ async def chat(
             # shaped substrings before the formatter runs) and emit a
             # static, generic message to the client.
             logger.exception("chat_stream failed for session %s", request.session_id)
-            error_event = StreamEvent(
-                chunk="Sorry, something went wrong. Please try again.",
+            error_event = ErrorEvent(
+                error_code=ErrorCode.stream_error,
+                message="Sorry, something went wrong. Please try again.",
+                retryable=False,
+                tool_name=None,
+                raw_detail=None,  # No exc str here — logger already captured it
                 session_id=request.session_id,
-                type="content",
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
 
