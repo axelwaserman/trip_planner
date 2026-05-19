@@ -81,9 +81,54 @@ describe('parseSSELine', () => {
     expect(event).toEqual({ type: 'done', session_id: 's2' })
   })
 
-  it('parses an error event', () => {
-    const event = parseSSELine('data: {"type":"error","error":"something failed"}')
-    expect(event).toEqual({ type: 'error', error: 'something failed' })
+  it('parses an error event with error_code tool_error (retryable: true)', () => {
+    const event = parseSSELine(
+      'data: {"type":"error","error_code":"tool_error","message":"Tool failed","retryable":true,"tool_name":"search_flights","session_id":"s1"}'
+    )
+    expect(event).toEqual({
+      type: 'error',
+      error_code: 'tool_error',
+      message: 'Tool failed',
+      retryable: true,
+      tool_name: 'search_flights',
+      session_id: 's1',
+    })
+  })
+
+  it('parses an error event with error_code session_error (retryable: false)', () => {
+    const event = parseSSELine(
+      'data: {"type":"error","error_code":"session_error","message":"Session not found","retryable":false,"session_id":"s2"}'
+    )
+    expect(event).toEqual({
+      type: 'error',
+      error_code: 'session_error',
+      message: 'Session not found',
+      retryable: false,
+      session_id: 's2',
+    })
+  })
+
+  it('parses an error event with optional raw_detail field', () => {
+    const event = parseSSELine(
+      'data: {"type":"error","error_code":"stream_error","message":"Something went wrong","retryable":false,"raw_detail":"Exception details","session_id":"s3"}'
+    )
+    expect(event).toEqual({
+      type: 'error',
+      error_code: 'stream_error',
+      message: 'Something went wrong',
+      retryable: false,
+      raw_detail: 'Exception details',
+      session_id: 's3',
+    })
+  })
+
+  it('narrows event.type via switch (ContentEvent discriminator)', () => {
+    const evt = parseSSELine('data: {"type":"content","chunk":"hi","session_id":"s1"}')
+    if (evt && evt.type === 'content') {
+      expect(evt.chunk).toBe('hi')
+    } else {
+      throw new Error('expected ContentEvent')
+    }
   })
 
   it('parses a tool_call event', () => {

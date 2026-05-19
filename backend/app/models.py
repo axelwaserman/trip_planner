@@ -3,7 +3,7 @@
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal, Self
+from typing import Literal, Self
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -407,30 +407,26 @@ class ChatRequest(BaseModel):
     session_id: str = Field(..., description="Session ID for conversation continuity")
 
 
+class RetryRequest(BaseModel):
+    """Request model for the retry endpoint.
+
+    Mirrors the ``ChatRequest`` pattern but carries only a ``session_id``.
+    The last tool invocation to replay is stored server-side in
+    ``_metadata[session_id]["last_tool_invocation"]``; the client never
+    needs to re-send tool args — it just identifies the session.
+    """
+
+    session_id: str = Field(
+        ...,
+        description="Session id whose last tool invocation should be replayed.",
+    )
+
+
 class ChatResponse(BaseModel):
     """Response model for chat endpoint (deprecated - use streaming)."""
 
     response: str = Field(..., description="Agent's response message")
     session_id: str = Field(..., description="Session ID for this conversation")
-
-
-class StreamEvent(BaseModel):
-    """Event emitted during chat streaming.
-
-    Used for Server-Sent Events (SSE) to stream chat responses with tool visibility.
-    Instead of custom metadata classes, we use LangChain's native tool_calls structure.
-    """
-
-    chunk: str = Field(default="", description="Content chunk or empty string for tool events")
-    session_id: str = Field(..., description="Session ID for this conversation")
-    type: Literal["content", "tool_call", "tool_result", "thinking"] = Field(
-        ..., description="Type of event being streamed"
-    )
-    # Tool-specific fields (populated based on type)
-    tool_name: str | None = Field(default=None, description="Tool name (for tool_call/result)")
-    tool_args: dict[str, Any] | None = Field(default=None, description="Tool arguments (for tool_call)")
-    tool_result: str | None = Field(default=None, description="Tool result text (for tool_result)")
-    elapsed_ms: int | None = Field(default=None, description="Execution time in ms (for tool_result)")
 
 
 # ============================================================================

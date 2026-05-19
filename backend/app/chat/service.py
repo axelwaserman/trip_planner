@@ -11,6 +11,13 @@ The 4.2 default fallbacks (``provider="ollama"``, ``model="qwen3:4b"``) live
 in the route layer (``app.api.routes.routes.create_session``); the
 :class:`app.llm.factory.SessionLLMConfig` dataclass requires both fields to be
 non-``None`` at construction.
+
+Phase 4.7: ChatService now yields concrete event classes
+(ContentEvent, ThinkingEvent, ToolCallEvent, ToolResultEvent, ErrorEvent) instead
+of the monolithic StreamEvent, and wraps tool execution in APIError / Exception
+handlers that yield ErrorEvent and return early. After each tool_call yield,
+``_metadata[session_id]["last_tool_invocation"]`` is stored for the retry endpoint
+(Plan 02, D-07).
 """
 
 from __future__ import annotations
@@ -18,12 +25,23 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 
-from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo, StreamEvent
+from app.chat.models import (
+    ContentEvent,
+    ErrorCode,
+    ErrorEvent,
+    StreamEvent,
+    ThinkingEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+)
+from app.exceptions import APIError
+from app.llm.log_scrubbing import _scrub
+from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo
 from app.tools.flight_search import search_flights
 
 if TYPE_CHECKING:
@@ -54,7 +72,7 @@ class ChatService:
         """
         self._factory = factory
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
-        self._metadata: dict[str, dict[str, str]] = {}  # Session metadata (provider, model)
+        self._metadata: dict[str, dict[str, Any]] = {}  # Session metadata; widens to Any for last_tool_invocation
         self._bound_providers: dict[str, BoundProvider] = {}
         self._last_activity: dict[str, float] = {}
 
@@ -125,8 +143,10 @@ class ChatService:
                     first_message_preview=preview,
                 )
             )
-        # Newest first — the sidebar is reverse-chronological.
-        results.sort(key=lambda info: info.created_at, reverse=True)
+        # Sort by last activity so the session with the most recent message
+        # appears first — more useful than creation time when the user has
+        # replied to an older conversation.
+        results.sort(key=lambda info: self._last_activity.get(info.session_id, 0.0), reverse=True)
         return results
 
     def get_history_for_user(self, session_id: str, user_id: str) -> ChatSessionHistoryResponse | None:
@@ -200,22 +220,32 @@ class ChatService:
 
         return len(expired)
 
-    async def chat_stream(self, message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
+    async def chat_stream(
+        self, message: str, session_id: str, *, persist_user_message: bool = True
+    ) -> AsyncGenerator[StreamEvent]:
         """Stream a chat response chunk by chunk with tool calling support.
+
+        Yields concrete event classes (ContentEvent, ThinkingEvent, ToolCallEvent,
+        ToolResultEvent, ErrorEvent). Tool execution is wrapped in APIError /
+        Exception handlers — on error an ErrorEvent is yielded and the generator
+        returns early. ``_metadata[session_id]["last_tool_invocation"]`` is stored
+        after each tool_call yield for the Plan 02 retry endpoint (D-07).
 
         Args:
             message: User message
             session_id: Session ID for conversation continuity
+            persist_user_message: When False the message is included in the
+                LLM context but NOT appended to the session history.  Used by
+                the retry endpoint so synthetic "Please retry…" prompts don't
+                accumulate in the stored conversation.
 
         Yields:
-            StreamEvent objects with simplified structure
+            Concrete event objects (discriminated union members of StreamEvent)
         """
         history = self.get_session_history(session_id)
         bound = self._bound_providers[session_id]
 
         # Build messages with history
-        from langchain_core.messages import BaseMessage
-
         history_messages: list[BaseMessage] = list(history.messages)
         messages: list[BaseMessage] = [*history_messages, HumanMessage(content=message)]
 
@@ -224,7 +254,10 @@ class ChatService:
         # behaviour appended user + assistant only at end-of-stream — if the
         # client disconnected (e.g. switched to a different chat in the
         # Sidebar), the history's view of "what just happened" was empty.
-        history.add_user_message(message)
+        # Skipped for synthetic retry prompts (persist_user_message=False) so
+        # repeated retries don't corrupt the stored conversation history.
+        if persist_user_message:
+            history.add_user_message(message)
 
         # Track state
         tool_was_called = False
@@ -233,99 +266,120 @@ class ChatService:
         tool_results = []
 
         try:
-            # Stream LLM response
+            # Stream LLM response. We accumulate every chunk so that tool call
+            # arguments — which arrive as partial JSON tokens across many chunks
+            # via tool_call_chunks — are fully assembled before we process them.
+            # Content and thinking events are still emitted in real-time.
+            accumulated_chunk: AIMessageChunk | None = None
             async for chunk in bound.astream(messages):
+                if not isinstance(chunk, AIMessageChunk):
+                    continue
+
                 # Check for reasoning_content (thinking)
                 has_thinking = False
-                if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
+                if chunk.additional_kwargs:
                     reasoning = chunk.additional_kwargs.get("reasoning_content")
                     if reasoning:
                         has_thinking = True
-                        yield StreamEvent(
-                            chunk=reasoning,
-                            session_id=session_id,
-                            type="thinking",
-                        )
+                        yield ThinkingEvent(chunk=reasoning, session_id=session_id)
 
-                # Process content (only if not thinking)
-                if not has_thinking and hasattr(chunk, "content") and chunk.content:
+                # Stream content in real-time (only if not thinking)
+                if not has_thinking and chunk.content:
                     content = chunk.content
                     if isinstance(content, str) and content.strip():
                         accumulated_content += content
-                        yield StreamEvent(
-                            chunk=content,
+                        yield ContentEvent(chunk=content, session_id=session_id)
+
+                # Accumulate chunks so tool_call_chunks assemble into tool_calls
+                accumulated_chunk = chunk if accumulated_chunk is None else (accumulated_chunk + chunk)
+
+            # After the stream ends, check the assembled message for tool calls.
+            # Using the accumulated message guarantees args are fully reconstructed
+            # even when the provider streams JSON arguments across many chunks.
+            if accumulated_chunk is not None and accumulated_chunk.tool_calls:
+                from langchain_core.messages import ToolMessage
+
+                tool_was_called = True
+                tool_call_message = accumulated_chunk
+
+                tool_messages: list[ToolMessage] = []
+                for tool_call in accumulated_chunk.tool_calls:
+                    if tool_call["name"] != "search_flights":
+                        yield ErrorEvent(
+                            error_code=ErrorCode.tool_error,
+                            message=f"Unknown tool: {tool_call['name']}",
+                            retryable=False,
+                            tool_name=tool_call["name"],
+                            raw_detail=None,
                             session_id=session_id,
-                            type="content",
+                        )
+                        return
+                    if tool_call["name"] == "search_flights":
+                        tool_start_time = time.time()
+                        yield ToolCallEvent(
+                            tool_name=tool_call["name"],
+                            tool_args=tool_call["args"],
+                            session_id=session_id,
                         )
 
-                # Check for tool calls
-                if isinstance(chunk, AIMessage) and chunk.tool_calls:
-                    tool_was_called = True
-                    tool_call_message = chunk
+                        self._metadata[session_id]["last_tool_invocation"] = {
+                            "tool_name": tool_call["name"],
+                            "tool_args": tool_call["args"],
+                            "tool_call_id": tool_call.get("id", ""),
+                        }
 
-                    from langchain_core.messages import ToolMessage
-
-                    tool_messages: list[ToolMessage] = []
-                    for tool_call in chunk.tool_calls:
-                        if tool_call["name"] == "search_flights":
-                            # Emit tool_call event
-                            tool_start_time = time.time()
-                            yield StreamEvent(
-                                chunk="",
-                                session_id=session_id,
-                                type="tool_call",
-                                tool_name=tool_call["name"],
-                                tool_args=tool_call["args"],
-                            )
-
-                            # Execute the tool
+                        try:
                             tool_result = await search_flights.ainvoke(tool_call["args"])
-                            tool_end_time = time.time()
-                            elapsed_ms = int((tool_end_time - tool_start_time) * 1000)
-
-                            # Emit tool_result event
-                            yield StreamEvent(
-                                chunk="",
-                                session_id=session_id,
-                                type="tool_result",
+                        except APIError as exc:
+                            yield ErrorEvent(
+                                error_code=ErrorCode.tool_error,
+                                message=f"Tool {tool_call['name']} failed: {exc.message}",
+                                retryable=exc.retryable,
                                 tool_name=tool_call["name"],
-                                tool_result=str(tool_result),
-                                elapsed_ms=elapsed_ms,
-                            )
-
-                            tool_messages.append(
-                                ToolMessage(
-                                    content=str(tool_result),
-                                    tool_call_id=tool_call.get("id", ""),
-                                )
-                            )
-
-                    tool_results = tool_messages
-
-                    # Get final response after tool execution
-                    messages_with_tools: list[BaseMessage] = [
-                        *messages,
-                        chunk,
-                        *tool_messages,
-                    ]
-
-                    # Stream the final response
-                    accumulated_final = ""
-                    async for final_chunk in bound.astream(messages_with_tools):
-                        if (
-                            hasattr(final_chunk, "content")
-                            and isinstance(final_chunk.content, str)
-                            and final_chunk.content
-                        ):
-                            accumulated_final += final_chunk.content
-                            yield StreamEvent(
-                                chunk=final_chunk.content,
+                                raw_detail=_scrub(str(exc)),
                                 session_id=session_id,
-                                type="content",
                             )
+                            return
+                        except Exception as exc:
+                            yield ErrorEvent(
+                                error_code=ErrorCode.tool_error,
+                                message=f"Tool {tool_call['name']} failed.",
+                                retryable=False,
+                                tool_name=tool_call["name"],
+                                raw_detail=_scrub(str(exc)),
+                                session_id=session_id,
+                            )
+                            return
 
-                    accumulated_content = accumulated_final
-                    break
+                        elapsed_ms = int((time.time() - tool_start_time) * 1000)
+                        yield ToolResultEvent(
+                            tool_name=tool_call["name"],
+                            tool_result=str(tool_result),
+                            elapsed_ms=elapsed_ms,
+                            session_id=session_id,
+                        )
+                        tool_messages.append(
+                            ToolMessage(
+                                content=str(tool_result),
+                                tool_call_id=tool_call.get("id", ""),
+                            )
+                        )
+
+                tool_results = tool_messages
+
+                messages_with_tools: list[BaseMessage] = [
+                    *messages,
+                    accumulated_chunk,
+                    *tool_messages,
+                ]
+
+                accumulated_final = ""
+                async for final_chunk in bound.astream(messages_with_tools):
+                    if hasattr(final_chunk, "content") and isinstance(final_chunk.content, str) and final_chunk.content:
+                        accumulated_final += final_chunk.content
+                        yield ContentEvent(chunk=final_chunk.content, session_id=session_id)
+
+                accumulated_content = accumulated_final
         finally:
             # Always persist whatever was accumulated, even on partial streams
             # (client disconnect, GeneratorExit on cancellation, etc.). Empty
@@ -341,8 +395,4 @@ class ChatService:
 
         # Ensure at least one content event
         if not accumulated_content:
-            yield StreamEvent(
-                chunk="",
-                session_id=session_id,
-                type="content",
-            )
+            yield ContentEvent(chunk="", session_id=session_id)

@@ -4,7 +4,7 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from app.chat import ChatService
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
@@ -128,7 +128,7 @@ class TestChatStreamPersistence:
     when the user navigates back.
     """
 
-    async def _make_service_with_streamed_chunks(self, chunks: list[AIMessage]) -> tuple[ChatService, str]:
+    async def _make_service_with_streamed_chunks(self, chunks: list[AIMessageChunk]) -> tuple[ChatService, str]:
         """Build a service whose bound provider streams the given chunks."""
         flight_client = MagicMock(spec=FlightAPIClient)
         bound = MagicMock(spec=BoundProvider)
@@ -151,7 +151,7 @@ class TestChatStreamPersistence:
         """The user turn must land in history BEFORE the LLM streams anything."""
         # First chunk yields content; we'll inspect history after only the
         # FIRST chunk has flowed (before the stream completes).
-        service, session_id = await self._make_service_with_streamed_chunks([AIMessage(content="response")])
+        service, session_id = await self._make_service_with_streamed_chunks([AIMessageChunk(content="response")])
 
         history = service.get_session_history(session_id)
         # Pre-stream: history is empty.
@@ -172,8 +172,8 @@ class TestChatStreamPersistence:
         """
         service, session_id = await self._make_service_with_streamed_chunks(
             [
-                AIMessage(content="partial-1 "),
-                AIMessage(content="partial-2"),
+                AIMessageChunk(content="partial-1 "),
+                AIMessageChunk(content="partial-2"),
             ]
         )
 

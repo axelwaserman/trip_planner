@@ -5,13 +5,15 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from app.models import StreamEvent
+from app.chat.models import ContentEvent, StreamEvent
 from tests.utils.sse import parse_sse_events
 
 # Minimal valid StreamEvent payload for tests.
 _SESSION_ID = "s1"
 _CONTENT_EVENT = f'{{"chunk":"hi","session_id":"{_SESSION_ID}","type":"content"}}'
-_TOOL_CALL_EVENT = f'{{"chunk":"","session_id":"{_SESSION_ID}","type":"tool_call"}}'
+_TOOL_CALL_EVENT = (
+    f'{{"tool_name":"search_flights","tool_args":{{}},"session_id":"{_SESSION_ID}","type":"tool_call"}}'
+)
 
 
 def test_parse_single_data_event_from_str() -> None:
@@ -86,7 +88,7 @@ def test_parse_skips_keepalive_comments() -> None:
 
 
 def test_parse_returns_list_of_streamevent_instances() -> None:
-    """Each element in the returned list is a StreamEvent, not a raw dict."""
+    """Each element in the returned list is a concrete event model, not a raw dict."""
     # Arrange
     text = f"data: {_CONTENT_EVENT}\n"
 
@@ -95,7 +97,7 @@ def test_parse_returns_list_of_streamevent_instances() -> None:
 
     # Assert
     assert len(events) == 1
-    assert isinstance(events[0], StreamEvent)
+    assert isinstance(events[0], ContentEvent)
 
 
 def test_parse_empty_string_returns_empty_list() -> None:
@@ -119,7 +121,7 @@ def test_parse_malformed_json_raises_jsondecodeerror() -> None:
 
 def test_parse_pydantic_validation_error_propagates() -> None:
     """A data: line with valid JSON but invalid StreamEvent fields raises ValidationError."""
-    # Arrange — "INVALID_TYPE" is not in Literal["content","tool_call","tool_result","thinking"]
+    # Arrange — "INVALID_TYPE" is not in any discriminated union member's type literal
     text = f'data: {{"type": "INVALID_TYPE", "session_id": "{_SESSION_ID}"}}\n'
 
     # Act / Assert

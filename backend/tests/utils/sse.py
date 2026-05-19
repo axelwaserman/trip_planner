@@ -2,7 +2,11 @@
 
 import json
 
-from app.models import StreamEvent
+from pydantic import TypeAdapter
+
+from app.chat.models import StreamEvent
+
+_adapter: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
 
 
 def parse_sse_events(text: str | list[str]) -> list[StreamEvent]:
@@ -29,5 +33,5 @@ def parse_sse_events(text: str | list[str]) -> list[StreamEvent]:
         if not line.startswith("data: "):
             continue
         payload = line[len("data: ") :]
-        events.append(StreamEvent.model_validate(json.loads(payload)))
+        events.append(_adapter.validate_python(json.loads(payload)))
     return events

@@ -1,10 +1,10 @@
-import type { StreamEvent } from '../types/chat'
+import type { ChatStreamEvent } from '../types/chat'
 
 /**
- * Parse a single SSE line into a typed StreamEvent.
+ * Parse a single SSE line into a typed ChatStreamEvent.
  * Returns null for lines that are not valid SSE data events.
  */
-export function parseSSELine(line: string): StreamEvent | null {
+export function parseSSELine(line: string): ChatStreamEvent | null {
   if (!line.startsWith('data: ')) {
     return null
   }
@@ -23,7 +23,7 @@ export function parseSSELine(line: string): StreamEvent | null {
       return null
     }
 
-    return parsed as StreamEvent
+    return parsed as ChatStreamEvent
   } catch {
     return null
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import type { Message, MessageType } from '../types/chat'
+import type { ChatStreamEvent, ErrorEvent, Message, MessageType } from '../types/chat'
 import { apiFetch } from '../lib/auth'
 import {
   getSnapshot as getSessionSnapshot,
@@ -17,6 +17,7 @@ import {
   loadProviderSettings as loadSharedProviderSettings,
   type ProviderSettings,
 } from '../lib/providerSettings'
+import { toaster } from '../lib/toaster'
 import { readSSEStream } from './useSSEStream'
 
 interface UseChatReturn {
@@ -34,6 +35,9 @@ interface UseChatReturn {
   sendMessage: (text: string) => Promise<void>
   handleProviderChange: (provider: string, model: string) => void
   retryProvider: () => void
+  // Re-streams the last tool invocation via POST /api/chat/retry.
+  // No-op if sessionId is null or the session is currently streaming.
+  retryLastTool: () => Promise<void>
 }
 
 interface SessionData {
@@ -225,6 +229,10 @@ export function useChat(): UseChatReturn {
   // created. Distinct from `sessionId` state because we want to remember
   // it across the effect's reset-then-initialize cycle.
   const ownedSessionIdRef = useRef<string | null>(null)
+  // Mirror of sessionId state kept in a ref so the sendMessage finally block
+  // can read the CURRENT active session without capturing stale closure values.
+  const activeSessionIdRef = useRef<string | null>(sessionId)
+  activeSessionIdRef.current = sessionId
 
   const initSession = useCallback(
     async (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => {
@@ -245,6 +253,8 @@ export function useChat(): UseChatReturn {
             messages: [],
             isAwaitingFirstChunk: false,
             isStreaming: false,
+            hasUnread: false,
+            hasError: false,
           }))
           setSessionId(result.data.session_id)
           setCurrentProvider(result.data.provider)
@@ -298,8 +308,13 @@ export function useChat(): UseChatReturn {
       // its previous response is still streaming should keep the live
       // accumulator visible, not replace it with the partial server-side
       // history. The "isStreaming" flag is the canonical guard.
+      // If the store already has messages (e.g. thinking tokens + tool cards
+      // accumulated during a previous stream this session), preserve them —
+      // server history only carries user/assistant text and would discard the
+      // richer client-side rows on re-navigation.
       setSession(body.session_id, (prev) => {
         if (prev.isStreaming) return prev
+        if (prev.messages.length > 0) return { ...prev, hasUnread: false, hasError: false }
         return {
           messages: body.messages.map((msg) => ({
             role: msg.role as MessageType,
@@ -307,6 +322,8 @@ export function useChat(): UseChatReturn {
           })),
           isAwaitingFirstChunk: false,
           isStreaming: false,
+          hasUnread: false,
+          hasError: false,
         }
       })
       return true
@@ -424,6 +441,8 @@ export function useChat(): UseChatReturn {
         messages: [...prev.messages, { role: 'user', content: text }],
         isAwaitingFirstChunk: true,
         isStreaming: true,
+        hasUnread: false,
+        hasError: false,
       }))
 
       // Track stream state outside React — these are only read/written
@@ -538,6 +557,120 @@ export function useChat(): UseChatReturn {
         })
       }
 
+      // updateToolError mirrors updateToolResult: walks backwards through messages to
+      // find the last tool_execution row and immutably attaches the ErrorEvent to it.
+      // Called only for retryable=true errors per D-10.
+      const updateToolError = (errorEvent: ErrorEvent) => {
+        setSession(submitSessionId, (prev) => {
+          let lastToolIndex = -1
+          for (let i = prev.messages.length - 1; i >= 0; i--) {
+            if (prev.messages[i].role === 'tool_execution') {
+              lastToolIndex = i
+              break
+            }
+          }
+          if (lastToolIndex === -1) {
+            // No tool_execution to attach to — fall back to a toast so the error is
+            // not silently swallowed (belt-and-suspenders guard; unlikely in practice).
+            toaster.create({ title: errorEvent.message, type: 'error', duration: 5000 })
+            return prev
+          }
+          return {
+            ...prev,
+            messages: prev.messages.map((msg, i) =>
+              i === lastToolIndex && msg.toolExecution
+                ? {
+                    ...msg,
+                    toolExecution: {
+                      ...msg.toolExecution,
+                      errorEvent,
+                    },
+                  }
+                : msg
+            ),
+          }
+        })
+      }
+
+      // handleStreamEvent is the single switch dispatcher for SSE events.
+      // Extracted so retryLastTool can reuse the exact same routing logic
+      // without duplicating the branch tree.
+      const handleStreamEvent = (event: ChatStreamEvent) => {
+        // `done` is not in the ChatStreamEvent union; the backend may still emit it
+        // as a stream-end signal. Skip it safely via a cast so the union remains
+        // exhaustive for all declared members.
+        if ((event.type as string) === 'done') return
+
+        switch (event.type) {
+          case 'content':
+            markFirstChunk()
+            if (event.chunk) appendContentChunk(event.chunk)
+            isStreamingAssistant = true
+            break
+
+          case 'thinking':
+            markFirstChunk()
+            if (event.chunk) appendThinkingChunk(event.chunk)
+            isStreamingThinking = true
+            break
+
+          case 'tool_call':
+            markFirstChunk()
+            appendToolCall(event.tool_name, event.tool_args ?? {})
+            break
+
+          case 'tool_result':
+            updateToolResult(event.tool_result ?? '', event.elapsed_ms ?? 0)
+            // Allow a fresh assistant bubble for the post-tool response.
+            isStreamingAssistant = false
+            break
+
+          case 'error':
+            if (event.retryable) {
+              // retryable=true (D-10): attach ErrorEvent to the last tool_execution
+              // row so ToolExecutionCard can render the inline error + Retry button.
+              updateToolError(event)
+              // Mark hasError so the Sidebar can show a "!" indicator if the user
+              // navigated away before seeing the inline error state.
+              setSession(submitSessionId, (prev) => ({ ...prev, hasError: true }))
+            } else {
+              // retryable=false (D-10): surface as a toast so the chat stays usable.
+              toaster.create({ title: event.message, type: 'error', duration: 5000})
+              setSession(submitSessionId, (prev) => ({ ...prev, hasError: true }))
+
+              if (event.error_code === 'session_error') {
+                // D-12: session_error is always non-retryable. After toasting, silently
+                // re-create the session so the next user message has a valid session_id.
+                // Re-read provider_settings so any recent api_key / base_url edits are
+                // picked up — same pattern as handleProviderChange.
+                const settings = loadProviderSettings() ?? DEFAULT_PROVIDER_SETTINGS
+                const merged: ProviderSettings = {
+                  ...settings,
+                  selected: {
+                    provider: currentProvider as ProviderSettings['selected']['provider'],
+                    model: currentModel,
+                  },
+                }
+                const selection = resolveSelection(merged)
+                void initSession(
+                  selection.provider,
+                  selection.model,
+                  selection.baseUrl,
+                  selection.apiKey
+                )
+              }
+            }
+            break
+
+          default: {
+            // TypeScript exhaustiveness guard: if a new event type is added to the
+            // ChatStreamEvent union without a matching case, the compile will fail here.
+            const _exhaustive: never = event
+            void _exhaustive
+          }
+        }
+      }
+
       try {
         const response = await apiFetch('/api/chat', {
           method: 'POST',
@@ -553,39 +686,7 @@ export function useChat(): UseChatReturn {
           throw new Error('No response body')
         }
 
-        await readSSEStream(response.body, (event) => {
-          if (event.type === 'error') {
-            throw new Error(event.error ?? 'Stream error')
-          }
-
-          if (event.type === 'done') return
-
-          if (event.type === 'thinking' && event.chunk) {
-            markFirstChunk()
-            appendThinkingChunk(event.chunk)
-            isStreamingThinking = true
-            return
-          }
-
-          if (event.type === 'content' && event.chunk) {
-            markFirstChunk()
-            appendContentChunk(event.chunk)
-            isStreamingAssistant = true
-            return
-          }
-
-          if (event.type === 'tool_call' && event.tool_name) {
-            markFirstChunk()
-            appendToolCall(event.tool_name, event.tool_args ?? {})
-            return
-          }
-
-          if (event.type === 'tool_result' && event.tool_name) {
-            updateToolResult(event.tool_result ?? '', event.elapsed_ms ?? 0)
-            // Allow a fresh assistant bubble for the post-tool response.
-            isStreamingAssistant = false
-          }
-        })
+        await readSSEStream(response.body, handleStreamEvent)
       } catch {
         setSession(submitSessionId, (prev) => ({
           ...prev,
@@ -595,15 +696,279 @@ export function useChat(): UseChatReturn {
           ],
         }))
       } finally {
+        const wasAwayDuringStream = activeSessionIdRef.current !== submitSessionId
         setSession(submitSessionId, (prev) => ({
           ...prev,
           isStreaming: false,
           isAwaitingFirstChunk: false,
+          // Mark unread when the user was looking at a different chat while
+          // this stream completed. Cleared when the user navigates back.
+          hasUnread: wasAwayDuringStream && !prev.hasError,
         }))
       }
     },
-    [sessionId]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessionId, currentProvider, currentModel, initSession]
   )
+
+  // retryLastTool replays the last tool invocation via POST /api/chat/retry.
+  // Re-uses the same readSSEStream + handleStreamEvent pipeline as sendMessage
+  // so the tool card transitions through executing → completed/error exactly
+  // as it would in a fresh message turn (D-09).
+  const retryLastTool = useCallback(async () => {
+    if (!sessionId) return
+    if (getSessionSnapshot(sessionId).isStreaming) return
+
+    const submitSessionId = sessionId
+
+    setSession(submitSessionId, (prev) => {
+      // Clear the error state on the last tool_execution message so the card
+      // returns to the executing (blue spinner) state before re-streaming.
+      let lastToolIndex = -1
+      for (let i = prev.messages.length - 1; i >= 0; i--) {
+        if (prev.messages[i].role === 'tool_execution') {
+          lastToolIndex = i
+          break
+        }
+      }
+      const messages =
+        lastToolIndex >= 0
+          ? prev.messages.map((msg, i) =>
+              i === lastToolIndex && msg.toolExecution
+                ? { ...msg, toolExecution: { callMetadata: msg.toolExecution.callMetadata } }
+                : msg
+            )
+          : prev.messages
+      return {
+        ...prev,
+        messages,
+        isStreaming: true,
+        isAwaitingFirstChunk: true,
+        hasError: false,
+      }
+    })
+
+    // Track per-call stream state so retryLastTool doesn't bleed into the
+    // outer sendMessage closures.
+    let isStreamingAssistant = false
+    let isStreamingThinking = false
+    let firstChunkSeen = false
+
+    const markFirstChunk = () => {
+      if (firstChunkSeen) return
+      firstChunkSeen = true
+      setSession(submitSessionId, (prev) => ({ ...prev, isAwaitingFirstChunk: false }))
+    }
+
+    const appendThinkingChunk = (chunk: string) => {
+      setSession(submitSessionId, (prev) => {
+        if (!isStreamingThinking) {
+          return {
+            ...prev,
+            messages: [...prev.messages, { role: 'thinking' as MessageType, content: chunk }],
+          }
+        }
+        for (let i = prev.messages.length - 1; i >= 0; i--) {
+          if (prev.messages[i].role === 'thinking') {
+            return {
+              ...prev,
+              messages: prev.messages.map((msg, idx) =>
+                idx === i ? { ...msg, content: msg.content + chunk } : msg
+              ),
+            }
+          }
+        }
+        return prev
+      })
+    }
+
+    const appendContentChunk = (chunk: string) => {
+      setSession(submitSessionId, (prev) => {
+        if (!isStreamingAssistant) {
+          return {
+            ...prev,
+            messages: [...prev.messages, { role: 'assistant' as MessageType, content: chunk }],
+          }
+        }
+        for (let i = prev.messages.length - 1; i >= 0; i--) {
+          if (prev.messages[i].role === 'assistant') {
+            return {
+              ...prev,
+              messages: prev.messages.map((msg, idx) =>
+                idx === i ? { ...msg, content: msg.content + chunk } : msg
+              ),
+            }
+          }
+        }
+        return prev
+      })
+    }
+
+    const appendToolCall = (toolName: string, toolArgs: Record<string, unknown>) => {
+      setSession(submitSessionId, (prev) => ({
+        ...prev,
+        messages: [
+          ...prev.messages,
+          {
+            role: 'tool_execution' as MessageType,
+            content: '',
+            toolExecution: {
+              callMetadata: {
+                tool_name: toolName,
+                arguments: toolArgs,
+                started_at: Date.now(),
+                status: 'executing',
+              },
+            },
+          },
+        ],
+      }))
+    }
+
+    const updateToolResult = (toolResult: string, elapsedMs: number) => {
+      setSession(submitSessionId, (prev) => {
+        let lastToolIndex = -1
+        for (let i = prev.messages.length - 1; i >= 0; i--) {
+          if (prev.messages[i].role === 'tool_execution') {
+            lastToolIndex = i
+            break
+          }
+        }
+        if (lastToolIndex === -1) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map((msg, i) =>
+            i === lastToolIndex && msg.toolExecution
+              ? {
+                  ...msg,
+                  toolExecution: {
+                    ...msg.toolExecution,
+                    resultMetadata: {
+                      summary: toolResult,
+                      full_result: toolResult,
+                      status: 'completed',
+                      elapsed_ms: elapsedMs,
+                    },
+                  },
+                }
+              : msg
+          ),
+        }
+      })
+    }
+
+    const updateToolError = (errorEvent: ErrorEvent) => {
+      setSession(submitSessionId, (prev) => {
+        let lastToolIndex = -1
+        for (let i = prev.messages.length - 1; i >= 0; i--) {
+          if (prev.messages[i].role === 'tool_execution') {
+            lastToolIndex = i
+            break
+          }
+        }
+        if (lastToolIndex === -1) {
+          toaster.create({ title: errorEvent.message, type: 'error', duration: 5000 })
+          return prev
+        }
+        return {
+          ...prev,
+          messages: prev.messages.map((msg, i) =>
+            i === lastToolIndex && msg.toolExecution
+              ? {
+                  ...msg,
+                  toolExecution: {
+                    ...msg.toolExecution,
+                    errorEvent,
+                  },
+                }
+              : msg
+          ),
+        }
+      })
+    }
+
+    const handleStreamEvent = (event: ChatStreamEvent) => {
+      if ((event.type as string) === 'done') return
+
+      switch (event.type) {
+        case 'content':
+          markFirstChunk()
+          if (event.chunk) appendContentChunk(event.chunk)
+          isStreamingAssistant = true
+          break
+
+        case 'thinking':
+          markFirstChunk()
+          if (event.chunk) appendThinkingChunk(event.chunk)
+          isStreamingThinking = true
+          break
+
+        case 'tool_call':
+          markFirstChunk()
+          appendToolCall(event.tool_name, event.tool_args ?? {})
+          break
+
+        case 'tool_result':
+          updateToolResult(event.tool_result ?? '', event.elapsed_ms ?? 0)
+          isStreamingAssistant = false
+          break
+
+        case 'error':
+          if (event.retryable) {
+            updateToolError(event)
+          } else {
+            toaster.create({ title: event.message, type: 'error', duration: 5000 })
+            if (event.error_code === 'session_error') {
+              const settings = loadProviderSettings() ?? DEFAULT_PROVIDER_SETTINGS
+              const merged: ProviderSettings = {
+                ...settings,
+                selected: {
+                  provider: currentProvider as ProviderSettings['selected']['provider'],
+                  model: currentModel,
+                },
+              }
+              const selection = resolveSelection(merged)
+              void initSession(
+                selection.provider,
+                selection.model,
+                selection.baseUrl,
+                selection.apiKey
+              )
+            }
+          }
+          break
+
+        default: {
+          const _exhaustive: never = event
+          void _exhaustive
+        }
+      }
+    }
+
+    try {
+      const response = await apiFetch('/api/chat/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: submitSessionId }),
+      })
+
+      if (!response.ok || !response.body) {
+        toaster.create({ title: 'Could not retry', type: 'error', duration: 5000 })
+        return
+      }
+
+      await readSSEStream(response.body, handleStreamEvent)
+    } catch {
+      toaster.create({ title: 'Could not retry', type: 'error', duration: 5000 })
+    } finally {
+      setSession(submitSessionId, (prev) => ({
+        ...prev,
+        isStreaming: false,
+        isAwaitingFirstChunk: false,
+        hasError: false,
+      }))
+    }
+  }, [sessionId, currentProvider, currentModel, initSession])
 
   return {
     messages,
@@ -616,5 +981,6 @@ export function useChat(): UseChatReturn {
     sendMessage,
     handleProviderChange,
     retryProvider,
+    retryLastTool,
   }
 }
