@@ -1,13 +1,13 @@
 import { parseSSELine } from '../lib/parseSSE'
-import type { StreamEvent } from '../types/chat'
+import type { ChatStreamEvent } from '../types/chat'
 
 /**
- * Reads an SSE response body and calls onEvent for each parsed StreamEvent.
+ * Reads an SSE response body and calls onEvent for each parsed ChatStreamEvent.
  * Resolves when the stream is fully consumed.
  */
 export async function readSSEStream(
   body: ReadableStream<Uint8Array>,
-  onEvent: (event: StreamEvent) => void
+  onEvent: (event: ChatStreamEvent) => void
 ): Promise<void> {
   const reader = body.getReader()
   const decoder = new TextDecoder()

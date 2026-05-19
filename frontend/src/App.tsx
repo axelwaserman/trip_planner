@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Box, Grid, IconButton, useBreakpointValue } from '@chakra-ui/react'
+import { Box, Grid, IconButton, Toaster, ToastRoot, ToastTitle, ToastCloseTrigger, useBreakpointValue } from '@chakra-ui/react'
 import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
+import { toaster } from './lib/toaster'
 import { Menu } from 'lucide-react'
 import { ChatInterface } from './components/ChatInterface'
 import { Sidebar } from './components/Sidebar'
@@ -113,31 +114,42 @@ function AppShell({ children }: { children: ReactNode }) {
 
 function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route
-        path="/app"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <ChatInterface />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/settings/providers"
-        element={
-          <RequireAuth>
-            <AppShell>
-              <SettingsProviders />
-            </AppShell>
-          </RequireAuth>
-        }
-      />
-      <Route path="/" element={<Navigate to="/app" replace />} />
-      <Route path="*" element={<Navigate to="/app" replace />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/app"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <ChatInterface />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/providers"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <SettingsProviders />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+        <Route path="/" element={<Navigate to="/app" replace />} />
+        <Route path="*" element={<Navigate to="/app" replace />} />
+      </Routes>
+      {/* Toast renderer — inside ChakraProvider via main.tsx wrapper (Phase 4.7 D-11) */}
+      <Toaster toaster={toaster}>
+        {(toast) => (
+          <ToastRoot key={toast.id}>
+            {toast.title && <ToastTitle>{toast.title}</ToastTitle>}
+            <ToastCloseTrigger />
+          </ToastRoot>
+        )}
+      </Toaster>
+    </>
   )
 }
 

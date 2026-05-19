@@ -553,12 +553,17 @@ export function useChat(): UseChatReturn {
           throw new Error('No response body')
         }
 
+        // TODO Plan 04 — replace this if-chain with a switch that type-narrows ChatStreamEvent.
         await readSSEStream(response.body, (event) => {
           if (event.type === 'error') {
-            throw new Error(event.error ?? 'Stream error')
+            // Phase 4.7: ErrorEvent carries `message`, not the legacy `error` field.
+            throw new Error(event.message)
           }
 
-          if (event.type === 'done') return
+          // `done` is not in the ChatStreamEvent union; the backend still emits it
+          // as a stream-end signal. Cast to string to suppress the narrowing warning
+          // until the Plan 04 switch refactor lands.
+          if ((event.type as string) === 'done') return
 
           if (event.type === 'thinking' && event.chunk) {
             markFirstChunk()
