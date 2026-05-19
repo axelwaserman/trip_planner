@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from app.chat.models import ContentEvent, StreamEvent
+from app.chat.models import ContentEvent
 from tests.utils.sse import parse_sse_events
 
 # Minimal valid StreamEvent payload for tests.
