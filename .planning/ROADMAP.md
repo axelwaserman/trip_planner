@@ -2,12 +2,12 @@
 
 ## Overview
 
-Trip Planner is an AI-powered chat agent that calls travel tools live and surfaces structured, sanitized results to a React + Chakra UI v3 frontend. Phases 1-3 shipped end-to-end; Phase 4.1 + auth + CI shipped *partially* (UI without working wiring; backend without login UI; CI with the wrong trigger schedule), so the app is **not currently usable in a browser**. v1 begins by unbreaking the app, then resets CI, then mocks Ollama out of default tests, then makes the LLM provider abstraction real (cloud + dynamic Ollama), then redesigns the tool JSON contract to map onto real travel APIs, then layers errors / discriminated `StreamEvent` / Pydantic validators, then re-platforms onto Postgres + Redis + docker-compose, then migrates from LangChain to PydanticAI, then ships the real flight API, then hardens the HTTP layer (no rate limiting in v1).
+Trip Planner is an AI-powered chat agent that calls travel tools live and surfaces structured, sanitized results to a React + Chakra UI v3 frontend. Phases 1-3 shipped end-to-end; Phase 4.1 + auth + CI shipped *partially* (UI without working wiring; backend without login UI; CI with the wrong trigger schedule). Phases 4.2-4.8 completed the v1 working demo arc: unbreaking the app, resetting CI, mocking Ollama out of default tests, making the LLM provider abstraction real (cloud + dynamic Ollama), redesigning the tool JSON contract to map onto real travel APIs, layering errors / discriminated `StreamEvent` / Pydantic validators. Next: re-platform onto Postgres + Redis + docker-compose, then migrate from LangChain to PydanticAI, then ship the real flight API, then harden the HTTP layer (no rate limiting in v1).
 
 ## Milestones
 
 - ✅ **v0 Foundation + Mock Demo** — Phases 1-3 (shipped 2025-11-06 → 2025-11-14); 4.1 partial (shipped 2026-05-13, UI without working wiring)
-- 🚧 **v1 Working Demo** — Phases 4.2-4.8 (in progress; unbreak → CI reset → mock chat → real provider abstraction → vendor-neutral tool JSON → errors + StreamEvent → validators)
+- ✅ **v1 Working Demo** — Phases 4.2-4.8 (complete; unbreak → CI reset → mock chat → real provider abstraction → vendor-neutral tool JSON → errors + StreamEvent → validators)
 - 🚧 **v1.5 Re-platform** — Phase 5 Postgres + Redis + docker-compose → Phase 6 PydanticAI migration
 - 🚧 **v2 Production** — Phase 7 Real Flight API (`pyreqwest` + Amadeus) → Phase 8 Hardening (security headers + structlog + coverage; **no rate limiting**)
 - 📋 **post-v1** — see REQUIREMENTS.md v2 section
@@ -23,13 +23,14 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [x] **Phase 2: LangChain Integration & Chat Agent** — LangChain 1.0 `bind_tools()`, Ollama, SSE streaming, session memory, frontend testing infra + hooks decomposition
 - [x] **Phase 3: Mock Flight Search Tool** — Pydantic models, abstract client, `@tool` agent, `ToolExecutionCard` + `ThinkingCard`, qwen3:4b reasoning
 - [~] **Phase 4.1: LLM Provider UI Config (partial)** — `GET /api/providers`, session creation accepts `{provider, model}`, frontend dropdown, localStorage persistence; **wiring broken — model selector does not produce a working session**. Reopened in 4.2.
-- [ ] **Phase 4.2: Unbreak the App** — React `/login` route + protected routing (REQ-login-page); fix model selector wiring (REQ-llm-provider-ui-fix). Quick-and-dirty: keep `AUTH_USERS` env-seed; PG-seeded users land in Phase 5.
+- [x] **Phase 4.2: Unbreak the App** — React `/login` route + protected routing (REQ-login-page); fix model selector wiring (REQ-llm-provider-ui-fix). Quick-and-dirty: keep `AUTH_USERS` env-seed; PG-seeded users land in Phase 5. (completed 2026-05-20)
 - [x] **Phase 4.3: CI Reset + Lint/DI Migration** — drop the nightly schedule; lint + unit + integration on every PR push, required for merge; E2E retained only for auth flow + real travel API, gated on credentials. Also: ruff line length 100 → 120 across the codebase, and FastAPI routes migrated from bare `Depends()` to `Annotated[T, Depends(...)]`. (completed 2026-05-16)
 - [x] **Phase 4.4: Mock Chat in Tests** — `MockLLMStream` fixture replaces Ollama-bound chat tests; `slow` marker removed; doc unit/integration/e2e roles by purpose. (completed 2026-05-17)
 - [x] **Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)** — `LLMProvider` Protocol + factory; dynamic Ollama model discovery from host; real OpenAI + Anthropic + LM Studio providers via API key (env or session payload); per-session injection. (completed 2026-05-18)
 - [x] **Phase 4.6: Vendor-Neutral Tool JSON** — `search_flights()` JSON shape designed against Amadeus / Skyscanner / Google Flights field maps; `ToolExecutionCard` renders tables/lists/nested objects. (completed 2026-05-18)
 - [x] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts. (completed 2026-05-19)
 - [x] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`. (completed 2026-05-19)
+- [ ] **Phase 4.9: Pre-Phase-5 Prep** — split monolithic `models.py` into domain modules (auth, chat, providers, flights); extract `UserRepository` interface; add TypeScript/React skill + CLAUDE.md skill routing; fix 6 frontend bugs (empty-session new-session, font harmonization, second thinking block, settings URL error, LM Studio stale cache, sidebar overflow).
 - [ ] **Phase 5: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Session`/`Message` tables; named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
 - [ ] **Phase 6: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; ADR-001 → Superseded.
 - [ ] **Phase 7: Real Flight API** — Amadeus client behind existing `FlightAPIClient` ABC; **outbound HTTP via `pyreqwest`**; reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests.
@@ -105,7 +106,7 @@ Plans:
 - [x] 04.2-03-PLAN.md — Wave 1: Frontend auth lib (auth.ts, providerErrors.ts), theme, BrowserRouter, fonts
 - [x] 04.2-04-PLAN.md — Wave 2: Wire probe_provider() into POST /api/chat/session
 - [x] 04.2-05-PLAN.md — Wave 2: Login page + routing (RequireAuth, LoginForm, UserMenu, App.tsx)
-- [ ] 04.2-06-PLAN.md — Wave 3: SelectorErrorBanner + useChat/ProviderSelector rewiring + manual UAT
+- [x] 04.2-06-PLAN.md — Wave 3: SelectorErrorBanner + useChat/ProviderSelector rewiring + manual UAT
 **UI hint**: yes
 
 ### Phase 4.3: CI Reset + Lint/DI Migration
@@ -214,9 +215,31 @@ Plans:
 - [x] 04.8-01-PLAN.md — Wave 1: Add Pydantic validators (origin!=destination, departure>=today, arrival>departure) + tests
 - [x] 04.8-02-PLAN.md — Wave 2: Extract create_mock_flight() + parse_sse_events(), refactor consumers, delete frontend orphans
 
+### Phase 4.9: Pre-Phase-5 Prep
+**Goal**: The codebase is restructured and polished so Phase 5 lands on clean foundations — no monolithic model file, no auth/routes coupling, skill routing documented, and 6 known frontend bugs resolved.
+**Depends on**: Phase 4.8
+**Requirements**: REQ-model-restructure, REQ-user-repository, REQ-skill-routing, REQ-frontend-bug-fixes
+**Success Criteria** (what must be TRUE):
+  1. `backend/app/models.py` is deleted; domain models live in `backend/app/auth/models.py`, `backend/app/chat/models.py`, `backend/app/providers/models.py`, `backend/app/flights/models.py`; all imports updated; `mypy --strict` and `just check` pass.
+  2. A `UserRepository` protocol/interface is extracted; `get_current_active_user` depends on it rather than importing `_users_db` directly from `auth.py`; auth routes are decoupled from auth internals.
+  3. A TypeScript/React skill (`frontend/skills/react-stack.md` or equivalent) capturing Vite + React + Chakra v3 + Vitest patterns is created; CLAUDE.md has a skill-routing table (`/fastapi`, `/chakra-ui`, `/react-stack`, `/pydantic-ai-agent-builder`).
+  4. **Bug fix — empty session**: changing provider/model does NOT create a new session if the current session has no messages; a new session is only created when the active session has ≥ 1 message.
+  5. **Bug fix — fonts**: Login, Chat, and Settings pages use a consistent type scale from the shared Chakra theme.
+  6. **Bug fix — double think**: when LLM flow is think → tool call → think → reply, both thinking blocks appear in the UI.
+  7. **Bug fix — settings URL error**: entering an invalid base URL on a local provider in Settings surfaces a human-readable error in the UI (no silent failure).
+  8. **Bug fix — LM Studio stale cache**: refreshing models in Settings always reflects the current server state; ejecting and re-adding a model shows the correct list within one refresh cycle.
+  9. **Bug fix — sidebar overflow**: model name in the chat sidebar does not overflow its container when it wraps to two lines.
+**Plans**: 5 plans across 4 waves
+Plans:
+- [ ] 04.9-01-PLAN.md — Wave 1: Model split — create 4 domain model files + update 9 production + 5 test import sites + delete app/models.py
+- [ ] 04.9-02-PLAN.md — Wave 2: UserRepository Protocol + EnvUserRepository + DI wiring in main.py + unit tests
+- [ ] 04.9-03-PLAN.md — Wave 3: Frontend bugs A — sidebar overflow, empty-session guard, font harmonization, double-think reset
+- [ ] 04.9-04-PLAN.md — Wave 3: Frontend bugs B — settings URL error (ProviderCard), LM Studio stale cache (routes.py TTL bypass)
+- [ ] 04.9-05-PLAN.md — Wave 4: react-stack SKILL.md + CLAUDE.md skill-routing table
+
 ### Phase 5: Postgres + Redis + docker-compose
 **Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
-**Depends on**: Phase 4.8
+**Depends on**: Phase 4.9
 **Requirements**: REQ-postgres-redis-compose
 **Pre-phase spike** (do this in the discuss phase, not the plan phase): verify `postgresql+psycopg://` async URI works with SQLModel async session out of the box on SQLAlchemy ≥ 2.0. SQLModel historically targeted `asyncpg`; if `psycopg` async needs custom adapter glue, surface that before locking the model layer.
 **Rework risk**: `Message` SQLModel built around LangChain's `BaseChatMessageHistory` shape will need a column/shape revision when Phase 6 swaps in PydanticAI's `ModelMessage` history. Either keep the table generic (JSON `payload` column with a discriminator) or accept the Phase 6 migration cost.
@@ -269,7 +292,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 → 4.7 → 4.8 → 5 → 6 → 7 → 8.
+Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 → 4.7 → 4.8 → 4.9 → 5 → 6 → 7 → 8.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -284,6 +307,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.6. Vendor-Neutral Tool JSON | v1 | 2/2 | Complete   | 2026-05-18 |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 4/4 | Complete   | 2026-05-19 |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
+| 4.9. Pre-Phase-5 Prep | v1.5 | 0 / 5 | Not started | - |
 | 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 6. PydanticAI Migration | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
@@ -294,4 +318,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 All 23 v1 requirements (3 validated + 3 partial-reopened + 17 active) map to exactly one phase. See `REQUIREMENTS.md` Traceability table for the full ID-to-phase mapping. No orphans; no duplicates.
 
 ---
-*Roadmap created: 2026-05-14 by `gsd-roadmapper`. Last updated: 2026-05-15 after PR #6 review — phases renumbered to 4.2–4.8 + 5–8; v1 expanded to include Postgres+compose (Phase 5), PydanticAI migration (Phase 6); rate limiting dropped; `aiohttp` → `pyreqwest`; partial Phase 4.1 / auth / CI shipments status-corrected. Follow-up adversarial pass added `REQ-lint-line-length-120` + `REQ-annotated-depends` to Phase 4.3, named acceptance fixture sources for Phase 4.6, and added rework-risk/spike notes to Phases 4.5 / 5 / 6.*
+*Roadmap created: 2026-05-14 by `gsd-roadmapper`. Last updated: 2026-05-20 — Phase 4.9 plans determined (5 plans, 4 waves).*
