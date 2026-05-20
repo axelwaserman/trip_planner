@@ -56,6 +56,13 @@ These three are reopened: backend code exists but the user-facing surface is inc
 - [ ] **REQ-error-handling-feedback**: Frontend renders distinct, actionable error messages for API errors, session errors, and tool errors. `ToolExecutionCard` shows a loading state during tool execution. Failed tool calls offer a retry control. Toast notifications surface non-blocking errors. Errors do not silently break the streaming UI.
 - [ ] **REQ-streamevent-hierarchy**: Replace the monolithic `StreamEvent` model with a discriminated union — `ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent`. Update SSE serialization on the backend and `parseSSE` on the frontend. Each event type carries only its own fields. The new `ErrorEvent` is the transport for REQ-error-handling-feedback's tool-error and stream-error paths.
 
+#### Phase 4.9 — Pre-Phase-5 Prep
+
+- [ ] **REQ-model-restructure**: `backend/app/models.py` is deleted. Domain models are split into four module files: `backend/app/auth/models.py` (User, TokenResponse), `backend/app/chat/models.py` (ChatSessionInfo, ChatHistoryMessage, SessionCreateRequest, ChatRequest, StreamEvent hierarchy), `backend/app/providers/models.py` (ProviderConfig, SessionCreateError, ProbeResult), `backend/app/flights/models.py` (FlightQuery, Flight, FlightSegment, FlightSearchResult). All intra-app imports updated; `from app.models import X` references replaced with the new module path. `mypy --strict` and `just check` pass with no new ignores.
+- [ ] **REQ-user-repository**: A `UserRepository` protocol is extracted (e.g., `backend/app/auth/repository.py`), declaring `get_user(username: str) -> UserInDB | None` and `verify_password(plain: str, hashed: str) -> bool`. The env-seed implementation lives in `EnvUserRepository`. `get_current_active_user` is updated to depend on `UserRepository` via `Annotated[UserRepository, Depends(...)]` rather than importing `_users_db` directly. The module-global dict in `auth.py` is replaced by the repository class. `mypy --strict` passes; existing auth tests continue to pass.
+- [ ] **REQ-skill-routing**: A project-local TypeScript/React skill is created at `frontend/.claude/skills/react-stack/SKILL.md` (or `.claude/skills/react-stack/SKILL.md` at repo root), covering: Vite 5 + React 19 + TypeScript, Chakra UI v3 component patterns, Vitest + React Testing Library setup, the project's hook conventions (`useChat`, `useSSEStream`, `parseSSE`), and known pitfalls. CLAUDE.md gains a skill-routing table mapping work type to skill command for `/fastapi`, `/chakra-ui`, `/dignified-python`, and `/pydantic-ai-agent-builder`.
+- [ ] **REQ-frontend-bug-fixes**: Six frontend bugs resolved: (1) empty-session guard — model/provider change only creates a new session when the active session has ≥ 1 message; (2) font harmonization — Login, Chat, and Settings use the same type scale from the shared Chakra theme; (3) double-think rendering — when LLM flow is think→tool→think→reply, both thinking blocks appear in the UI; (4) settings URL error feedback — invalid base URL on a local provider in Settings renders a human-readable inline error, not silent failure; (5) LM Studio stale cache — refreshing the model list in Settings always reflects current server state, no stale cached result; (6) sidebar overflow — model name does not overflow its container when wrapping to two lines.
+
 #### Phase 4.8 — Validators + Test Hygiene + Orphan Cleanup
 
 - [ ] **REQ-pydantic-validators**: Add **additional** field/model validators enforcing business rules — `Flight.arrival > Flight.departure`; `FlightQuery.departure_date >= today`; `FlightQuery.origin != FlightQuery.destination`. Note: `FlightQuery` already enforces `return_date > departure_date` via `validate_dates` (`backend/app/models.py:60-72`); this requirement is additive and must not replace or duplicate that existing validator. Invalid data rejected at the model boundary with a clear 422 response.
@@ -148,6 +155,10 @@ Each v1 requirement maps to exactly one phase. **Validated** requirements are li
 | REQ-tool-json-output | Phase 4.6 | Pending |
 | REQ-error-handling-feedback | Phase 4.7 | Pending |
 | REQ-streamevent-hierarchy | Phase 4.7 | Pending |
+| REQ-model-restructure | Phase 4.9 | Pending |
+| REQ-user-repository | Phase 4.9 | Pending |
+| REQ-skill-routing | Phase 4.9 | Pending |
+| REQ-frontend-bug-fixes | Phase 4.9 | Pending |
 | REQ-pydantic-validators | Phase 4.8 | Pending |
 | REQ-test-fixture-dedup | Phase 4.8 | Pending |
 | REQ-postgres-redis-compose | Phase 5 | Pending |
@@ -159,8 +170,8 @@ Each v1 requirement maps to exactly one phase. **Validated** requirements are li
 | REQ-coverage-ratchet-80 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements: 25 total (3 fully validated + 3 partial/broken + 19 active)
-- Mapped to phases: 25
+- v1 requirements: 29 total (3 fully validated + 3 partial/broken + 23 active)
+- Mapped to phases: 29
 - Unmapped: 0 ✓
 
 **Note on retroactive mapping for shipped requirements:** PRs #1, #2, #4 landed alongside Phase 1 product work as the foundational quality gates the project was missing; PR #3 landed alongside Phase 2-era frontend work; PR #5 was a follow-up cleanup. The phase column for shipped items records this retroactive mapping. The active roadmap begins at Phase 4.2 (Unbreak the App).

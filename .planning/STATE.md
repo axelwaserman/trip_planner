@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
-status: "Phase 4.7 shipped — PR #18"
-stopped_at: Phase 4.7 context gathered
-last_updated: "2026-05-19T10:27:33.735Z"
-last_activity: 2026-05-19
+status: "Phase 4.2 complete — v1 Working Demo milestone done"
+stopped_at: Phase 4.2 marked complete
+last_updated: "2026-05-20T00:00:00.000Z"
+last_activity: 2026-05-20
 progress:
   total_phases: 15
-  completed_phases: 3
+  completed_phases: 10
   total_plans: 25
-  completed_plans: 21
-  percent: 20
+  completed_plans: 25
+  percent: 67
 ---
 
 # Project State
@@ -21,16 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** A user can authenticate via a real login page, pick an LLM provider (a local Ollama model discovered from the host, or a cloud provider via API key), hold a natural conversation with the agent, watch it reason and call travel tools live, and trust that the results are structured, sanitized, and rendered usefully.
-**Current focus:** Phase 04.7 — error-handling-streamevent-hierarchy
+**Current focus:** Phase 5 — Postgres + Redis + docker-compose (next up)
 
 ## Current Position
 
-Phase: 04.7 (error-handling-streamevent-hierarchy) — COMPLETE
-Plan: 4 of 4 (all plans done)
-Status: Phase 4.7 shipped — PR #18
-Last activity: 2026-05-19
+Phase: 04.2 (unbreak-the-app) — COMPLETE
+Status: Phase 4.2 complete — v1 Working Demo milestone done (Phases 4.2–4.8 all shipped)
+Last activity: 2026-05-20
 
-Progress: [██░░░░░░░░░░░░░] ~13% (2 of 15 phases fully complete: 2, 3; Phase 1 and Phase 4.1 partial)
+Progress: [██████████░░░░░] ~67% (10 of 15 phases complete: 1, 2, 3, 4.1 partial, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8)
 
 ## Performance Metrics
 
@@ -90,8 +89,8 @@ None yet.
 
 [Issues that affect future work]
 
-- **Critical**: app non-functional in the browser — no login page (every `/api/*` returns 401) and the in-UI model selector does not produce a working session. Phase 4.2 (`REQ-login-page`, `REQ-llm-provider-ui-fix`) unblocks this.
-- **Critical**: CI runs nightly E2E with no useful signal and runs Ollama in E2E rather than auth flow + real travel APIs. Phase 4.3 (`REQ-ci-reset`) fixes this.
+- ~~**Critical**: app non-functional in the browser — no login page (every `/api/*` returns 401) and the in-UI model selector does not produce a working session.~~ **Resolved in Phase 4.2.**
+- ~~**Critical**: CI runs nightly E2E with no useful signal and runs Ollama in E2E rather than auth flow + real travel APIs.~~ **Resolved in Phase 4.3.**
 - ADR transitions queued: ADR-001 (LangChain) → Superseded by ADR-007 (PydanticAI) in Phase 6; ADR-002 (Global Chat Store) → Obsolete once Phase 5 lands PG-backed history; ADR-008 (`pyreqwest`) lands in Phase 7.
 - Phase 5 retires the `AUTH_USERS` env-seeded user store. Phase 4.2's quick-and-dirty login keeps it as the user source for now; the cleanup happens at Phase 5.
 - Coverage debt: backend coverage is at the 60% CI floor — 80% target lands in Phase 8 (`REQ-backend-test-coverage-60` + `REQ-coverage-ratchet-80`).
@@ -117,6 +116,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-05-18T17:11:16.612Z
-Stopped at: Phase 4.7 context gathered
-Resume file: .planning/phases/04.7-error-handling-streamevent-hierarchy/04.7-CONTEXT.md
+Last session: 2026-05-20T00:00:00.000Z
+Stopped at: Phase 4.2 marked complete; v1 Working Demo milestone closed
+Resume file: .planning/ROADMAP.md (next phase: 5 — Postgres + Redis + docker-compose)
