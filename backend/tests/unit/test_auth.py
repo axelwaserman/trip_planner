@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import pytest
 
-from app.api.routes.auth import (
+from app.auth.routes import (
     create_access_token,
     get_current_active_user,
     get_current_user,
@@ -164,7 +164,7 @@ async def test_get_current_active_user_raises_400_for_disabled_user() -> None:
     """get_current_active_user raises HTTP 400 when the user is disabled."""
     from fastapi import HTTPException
 
-    from app.api.routes.auth import User
+    from app.auth.models import User
 
     disabled_user = User(username="bob", disabled=True)
     with pytest.raises(HTTPException) as exc_info:

@@ -5,7 +5,7 @@ and by any future service that needs to reason about authenticated users.
 
 These classes are intentionally thin Pydantic models (Data Model Pattern) — no
 business logic beyond field declarations.  The password-hashing and JWT logic
-live in ``app.api.routes.auth``.
+live in ``app.auth.routes``.
 """
 
 from pydantic import BaseModel

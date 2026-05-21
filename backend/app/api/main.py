@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, routes
+from app.api.routes import routes
+from app.auth import routes as auth_routes
 from app.auth.repository import EnvUserRepository
 from app.chat import ChatService
 from app.config import Settings, settings
@@ -116,8 +117,8 @@ async def get_user_repository_override(request: Request) -> EnvUserRepository:
 
 app.dependency_overrides[routes.get_chat_service] = get_chat_service_override
 app.dependency_overrides[routes.get_llm_factory] = get_llm_factory_override
-app.dependency_overrides[auth.get_user_repository] = get_user_repository_override
+app.dependency_overrides[auth_routes.get_user_repository] = get_user_repository_override
 
 # Include router
 app.include_router(routes.router)
-app.include_router(auth.router, prefix="/api/auth")
+app.include_router(auth_routes.router, prefix="/api/auth")

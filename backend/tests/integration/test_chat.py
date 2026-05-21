@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import app
-from app.api.routes.auth import create_access_token
+from app.auth.routes import create_access_token
 from app.chat.models import ContentEvent, StreamEvent
 
 

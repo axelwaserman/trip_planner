@@ -8,7 +8,7 @@ They will fail until Task 2 updates the auth route to accept the DI parameter.
 import pytest
 from fastapi import HTTPException
 
-from app.api.routes.auth import create_access_token, get_current_user, get_user_repository
+from app.auth.routes import create_access_token, get_current_user, get_user_repository
 from app.auth.models import UserInDB
 
 # ---------------------------------------------------------------------------
