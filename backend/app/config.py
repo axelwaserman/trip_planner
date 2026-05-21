@@ -2,6 +2,7 @@
 
 import logging
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,16 @@ class Settings(BaseSettings):
 
     # CORS — comma-separated origins for CORSMiddleware. Override via CORS_ALLOWED_ORIGINS env var.
     cors_allowed_origins: list[str] = ["http://localhost:5173"]
+
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def _block_cors_wildcard_with_credentials(cls, v: list[str]) -> list[str]:
+        if "*" in v:
+            raise ValueError(
+                "CORS_ALLOWED_ORIGINS must not contain '*' when allow_credentials=True. "
+                "List explicit origins instead (e.g. ['https://app.example.com'])."
+            )
+        return v
 
     # Default LLM Provider
     default_provider: str = "ollama"
@@ -84,6 +95,11 @@ class Settings(BaseSettings):
             logger.warning(
                 "AUTH_USERS is set to the default 'admin:admin'. "
                 "Set the AUTH_USERS environment variable before running in production.",
+            )
+        if self.cors_allowed_origins == ["http://localhost:5173"]:
+            logger.warning(
+                "CORS_ALLOWED_ORIGINS is set to the development default (['http://localhost:5173']). "
+                "Set CORS_ALLOWED_ORIGINS to your production origin(s) before deploying.",
             )
 
     def get_available_providers(self) -> dict[str, dict[str, list[str] | bool]]:
