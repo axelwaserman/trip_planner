@@ -67,6 +67,32 @@ const ANTHROPIC_MODELS = [
   'claude-3-opus-20240229',
 ]
 
+/**
+ * Validate a base URL entered by the user for a local provider.
+ *
+ * Returns null when the URL is valid (or empty — empty means "use the
+ * default"), or a human-readable error string when it is not.
+ *
+ * Mirrors the backend SSRF guard in SessionCreateRequest._validate_base_url
+ * so the user gets immediate inline feedback before any network round-trip.
+ */
+function validateBaseUrl(url: string): string | null {
+  if (url.trim().length === 0) return null
+  try {
+    const parsed = new URL(url.trim())
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return 'URL must use http or https'
+    }
+    const allowedHosts = ['localhost', '127.0.0.1', 'host.docker.internal']
+    if (!allowedHosts.includes(parsed.hostname)) {
+      return 'Only localhost, 127.0.0.1, or host.docker.internal are allowed'
+    }
+    return null
+  } catch {
+    return 'Invalid URL format'
+  }
+}
+
 function getMeta(kind: ProviderKind, settings: ProviderSettings): ProviderMeta {
   if (kind === 'ollama') {
     return {
@@ -163,6 +189,7 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
   const [baseUrl, setBaseUrl] = useState<string>(savedBaseUrl)
   const [apiKey, setApiKey] = useState<string>(savedApiKey)
   const [showKey, setShowKey] = useState<boolean>(false)
+  const [baseUrlError, setBaseUrlError] = useState<string | null>(null)
   // Local mirror of the discovered models list. Initialised from props but
   // updated by the Refresh button so the chip-list reflects the latest
   // discovery without waiting for the parent to re-read localStorage.
@@ -235,6 +262,14 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
   }
 
   function handleSave() {
+    setBaseUrlError(null)
+    if (isLocal && baseUrl.trim().length > 0) {
+      const urlErr = validateBaseUrl(baseUrl.trim())
+      if (urlErr) {
+        setBaseUrlError(urlErr)
+        return
+      }
+    }
     const model = pickModelOnSave()
     let updated: ProviderSettings
     if (kind === 'ollama') {
@@ -337,22 +372,30 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
         </Text>
 
         {isLocal && (
-          <Field.Root>
+          <Field.Root invalid={!!baseUrlError}>
             <Field.Label htmlFor={`${fieldId}-base-url`}>Base URL</Field.Label>
             <Input
               id={`${fieldId}-base-url`}
               type="url"
               value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
+              onChange={(e) => {
+                setBaseUrl(e.target.value)
+                // Clear error as soon as the user starts correcting the value
+                if (baseUrlError) setBaseUrlError(null)
+              }}
               placeholder={
                 kind === 'lmstudio'
                   ? 'http://localhost:1234/v1'
                   : 'http://localhost:11434'
               }
             />
-            <Field.HelperText>
-              Where the daemon listens. Default works for most local setups.
-            </Field.HelperText>
+            {baseUrlError ? (
+              <Field.ErrorText>{baseUrlError}</Field.ErrorText>
+            ) : (
+              <Field.HelperText>
+                Where the daemon listens. Default works for most local setups.
+              </Field.HelperText>
+            )}
           </Field.Root>
         )}
 
