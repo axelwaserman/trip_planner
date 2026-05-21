@@ -1,8 +1,14 @@
 """Unit tests for POST /api/providers/refresh (D-06).
 
 The route is exercised against a TestClient with the lifespan-constructed
-``LLMProviderFactory`` monkeypatched so we can assert TTL-gating + the
-unreachable marker without spawning a real Ollama / LM Studio daemon.
+``LLMProviderFactory`` monkeypatched so we can assert unconditional refresh
+behaviour + the unreachable marker without spawning a real Ollama / LM Studio
+daemon.
+
+Note: TTL gating was removed from this endpoint (Phase 4.9 plan 04). The
+explicit POST /api/providers/refresh always calls factory.refresh_local_models()
+regardless of cache age — the user explicitly requested fresh data. TTL gating
+is only applied by the GET /api/providers lazy-load path.
 """
 
 from collections.abc import Generator
@@ -89,12 +95,12 @@ def test_refresh_marks_unreachable_provider(
     assert ollama_entry["models"] == []
 
 
-def test_refresh_respects_cache_ttl(
+def test_refresh_bypasses_cache_ttl(
     client: TestClient,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Arrange — pre-populate cache + timestamps so the call is a cache hit
+    # Arrange — pre-populate cache with fresh-looking data (TTL not yet expired)
     import time as time_module
 
     now = time_module.time()
@@ -105,12 +111,13 @@ def test_refresh_respects_cache_ttl(
     client.app.state.provider_models_cache["lmstudio"] = ["cached-lm"]
     client.app.state.provider_models_cache_timestamps["lmstudio"] = now
 
-    # If refresh is called, the test fails — make sure it's NOT called.
+    # Even though the cache appears fresh, the explicit refresh endpoint
+    # must ALWAYS call factory.refresh_local_models().
     called = {"count": 0}
 
     async def fake_refresh() -> dict[str, list[str] | None]:
         called["count"] += 1
-        return {"ollama": ["this-should-not-appear"], "lmstudio": []}
+        return {"ollama": ["fresh-model"], "lmstudio": []}
 
     monkeypatch.setattr(
         client.app.state.llm_factory,
@@ -121,9 +128,10 @@ def test_refresh_respects_cache_ttl(
     # Act
     response = client.post("/api/providers/refresh", headers=auth_headers)
 
-    # Assert — cache hit; refresh_local_models was NOT called
+    # Assert — refresh_local_models was called unconditionally; response
+    # reflects the newly-discovered models, not the stale cache.
     assert response.status_code == 200
     body = response.json()
     ollama_entry = next(p for p in body["providers"] if p["name"] == "ollama")
-    assert ollama_entry["models"] == ["cached-model"]
-    assert called["count"] == 0
+    assert ollama_entry["models"] == ["fresh-model"]
+    assert called["count"] == 1

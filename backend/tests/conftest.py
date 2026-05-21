@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from app.api.routes.auth import create_access_token
+from app.auth.routes import create_access_token
 from app.llm.factory import LLMProviderFactory
 from app.llm.protocol import BoundProvider, LLMProvider
 from app.tools.flight_client import MockFlightAPIClient

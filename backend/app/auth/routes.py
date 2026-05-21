@@ -1,96 +1,23 @@
 """Authentication module — JWT via pyjwt, passwords via pwdlib[argon2]."""
 
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pwdlib import PasswordHash
-from pwdlib.hashers.argon2 import Argon2Hasher
-from pydantic import BaseModel
 
+from app.auth.exceptions import UserNotFoundError
+from app.auth.models import User
+from app.auth.repository import _DUMMY_HASH, UserRepository
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_password_hasher = PasswordHash([Argon2Hasher()])
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
-
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
-
-
-class User(BaseModel):
-    """Public user representation (no sensitive fields)."""
-
-    username: str
-    email: str | None = None
-    full_name: str | None = None
-    disabled: bool | None = None
-
-
-class UserInDB(User):
-    """Internal user representation including the hashed password."""
-
-    hashed_password: str
-
-
-# ---------------------------------------------------------------------------
-# In-memory user store
-# ---------------------------------------------------------------------------
-
-
-def load_users_from_env() -> dict[str, UserInDB]:
-    """Build the in-memory user store from the AUTH_USERS environment variable.
-
-    AUTH_USERS format: ``user1:pass1,user2:pass2``
-
-    Falls back to ``admin:admin`` when the variable is absent.
-
-    Malformed entries (missing colon, empty username/password) are skipped
-    with a warning.
-    """
-    raw = os.environ.get("AUTH_USERS", settings.auth_users)
-    users: dict[str, UserInDB] = {}
-    for entry in raw.split(","):
-        entry = entry.strip()
-        if ":" not in entry:
-            logger.warning("Skipping malformed AUTH_USERS entry (no colon): %r", entry)
-            continue
-        username, _, password = entry.partition(":")
-        username = username.strip()
-        password = password.strip()
-        if not username or not password:
-            logger.warning("Skipping AUTH_USERS entry with empty username or password.")
-            continue
-        users[username] = UserInDB(
-            username=username,
-            hashed_password=_password_hasher.hash(password),
-            disabled=False,
-        )
-    return users
-
-
-# Module-level user store — populated once at import time.
-_users_db: dict[str, UserInDB] = load_users_from_env()
-
-
-# ---------------------------------------------------------------------------
-# Password verification
-# ---------------------------------------------------------------------------
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Return True if *plain_password* matches *hashed_password*."""
-    return _password_hasher.verify(plain_password, hashed_password)
 
 
 # ---------------------------------------------------------------------------
@@ -122,8 +49,25 @@ def create_access_token(
 # ---------------------------------------------------------------------------
 
 
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
+def get_user_repository() -> UserRepository:
+    """Placeholder dependency — overridden in main.py lifespan startup.
+
+    T-4.9.02-B: Raises RuntimeError if the lifespan override is missing,
+    ensuring unauthenticated access is impossible before the override is
+    registered (fail-fast rather than silently falling through).
+    """
+    raise RuntimeError("UserRepository not configured")
+
+
+async def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    repo: Annotated[UserRepository, Depends(get_user_repository)],
+) -> User:
     """Decode the Bearer JWT and return the matching user.
+
+    Args:
+        token: Bearer JWT extracted by oauth2_scheme.
+        repo: Injected UserRepository (resolved via dependency override).
 
     Raises:
         HTTPException 401: Token is invalid or user not found.
@@ -141,10 +85,11 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Use
     except jwt.PyJWTError:
         raise credentials_exception from None
 
-    user = _users_db.get(username)
-    if user is None:
-        raise credentials_exception
-    return user
+    try:
+        user_in_db = repo.get_user(username)
+    except UserNotFoundError:
+        raise credentials_exception from None
+    return user_in_db
 
 
 async def get_current_active_user(
@@ -166,11 +111,15 @@ async def get_current_active_user(
 
 
 @router.post("/token")
-async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> dict[str, str]:
+async def login(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    repo: Annotated[UserRepository, Depends(get_user_repository)],
+) -> dict[str, str]:
     """Authenticate with username + password and return a signed JWT.
 
     Args:
         form_data: OAuth2 form with ``username`` and ``password`` fields.
+        repo: Injected UserRepository (resolved via dependency override).
 
     Returns:
         Dict with ``access_token`` (JWT) and ``token_type`` = ``"bearer"``.
@@ -178,8 +127,16 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> d
     Raises:
         HTTPException 400: Credentials are incorrect.
     """
-    user = _users_db.get(form_data.username)
-    if user is None or not verify_password(form_data.password, user.hashed_password):
+    try:
+        user = repo.get_user(form_data.username)
+    except UserNotFoundError:
+        # Run a dummy verify to equalise timing — prevents username enumeration.
+        repo.verify_password(form_data.password, _DUMMY_HASH)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect username or password",
+        ) from None
+    if not repo.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect username or password",

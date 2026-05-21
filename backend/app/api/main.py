@@ -1,18 +1,23 @@
 """FastAPI application for Trip Planner."""
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, routes
+from app.api.routes import routes
+from app.auth import routes as auth_routes
+from app.auth.repository import EnvUserRepository, UserRepository
 from app.chat import ChatService
-from app.config import Settings
+from app.config import settings
 from app.llm.factory import LLMProviderFactory
 from app.llm.log_scrubbing import ApiKeyScrubber, install_log_scrubber, uninstall_log_scrubber
 from app.tools.flight_client import MockFlightAPIClient
 from app.tools.flight_search import search_flights
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -38,8 +43,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # this with a processor.
     log_scrubber: ApiKeyScrubber = install_log_scrubber()
 
-    settings = Settings()
-
     # Initialize flight client
     flight_client = MockFlightAPIClient(seed=42)
 
@@ -59,6 +62,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.chat_service = chat_service
     app.state.llm_factory = llm_factory
 
+    # Phase 4.9-02: UserRepository via DI — replaced by PostgresUserRepository in Phase 5.
+    app.state.user_repo = EnvUserRepository()
+
     # D-05 + D-06: discovery cache + per-entry timestamps for TTL gating.
     # Populated by POST /api/providers/refresh and read by GET /api/providers.
     app.state.provider_models_cache = {}
@@ -68,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Shutdown: cleanup expired sessions
     cleaned_up = chat_service.cleanup_expired_sessions(max_age_seconds=0)
-    print(f"Cleaned up {cleaned_up} sessions on shutdown")
+    logger.info("Cleaned up %d sessions on shutdown", cleaned_up)
 
     # D-10: best-effort filter cleanup. Failure to remove must not raise on shutdown.
     uninstall_log_scrubber(log_scrubber)
@@ -84,7 +90,7 @@ app = FastAPI(
 # Configure CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Vite dev server
+    allow_origins=settings.cors_allowed_origins,  # configurable via CORS_ALLOWED_ORIGINS env var
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,9 +108,15 @@ async def get_llm_factory_override(request: Request) -> LLMProviderFactory:
     return request.app.state.llm_factory  # type: ignore[no-any-return]
 
 
+async def get_user_repository_override(request: Request) -> UserRepository:
+    """Get the UserRepository from app state (Phase 4.9-02 DI wiring)."""
+    return request.app.state.user_repo  # type: ignore[no-any-return]
+
+
 app.dependency_overrides[routes.get_chat_service] = get_chat_service_override
 app.dependency_overrides[routes.get_llm_factory] = get_llm_factory_override
+app.dependency_overrides[auth_routes.get_user_repository] = get_user_repository_override
 
 # Include router
 app.include_router(routes.router)
-app.include_router(auth.router, prefix="/api/auth")
+app.include_router(auth_routes.router, prefix="/api/auth")

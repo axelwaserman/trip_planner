@@ -14,33 +14,21 @@ from langchain_core.chat_history import InMemoryChatMessageHistory
 
 
 @pytest.fixture(autouse=True)
-def two_users() -> Generator[None]:
-    """Seed the in-memory _users_db with alice + bob for this test module.
-
-    AUTH_USERS is read at import time in ``app.api.routes.auth``; we mutate the
-    module-level ``_users_db`` dict directly so the test can issue tokens for
-    distinct users without rerunning ``load_users_from_env``. Cleanup pops the
-    seeded users so sibling test modules see the original AUTH_USERS dict.
-    """
+def two_users(client: TestClient) -> Generator[None]:
+    """Seed alice + bob into the running EnvUserRepository for each test."""
     from pwdlib import PasswordHash
     from pwdlib.hashers.argon2 import Argon2Hasher
 
-    from app.api.routes import auth as auth_module
+    from app.auth.models import UserInDB
+    from app.auth.repository import EnvUserRepository  # noqa: TC001
 
     hasher = PasswordHash([Argon2Hasher()])
-    auth_module._users_db["alice"] = auth_module.UserInDB(
-        username="alice",
-        hashed_password=hasher.hash("alicepass"),
-        disabled=False,
-    )
-    auth_module._users_db["bob"] = auth_module.UserInDB(
-        username="bob",
-        hashed_password=hasher.hash("bobpass"),
-        disabled=False,
-    )
+    user_repo: EnvUserRepository = client.app.state.user_repo
+    user_repo.add_user(UserInDB(username="alice", hashed_password=hasher.hash("alicepass"), disabled=False))
+    user_repo.add_user(UserInDB(username="bob", hashed_password=hasher.hash("bobpass"), disabled=False))
     yield
-    auth_module._users_db.pop("alice", None)
-    auth_module._users_db.pop("bob", None)
+    user_repo.remove_user("alice")
+    user_repo.remove_user("bob")
 
 
 @pytest.fixture

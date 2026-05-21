@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import app
-from app.api.routes.auth import create_access_token
+from app.auth.routes import create_access_token
 from app.chat.models import ContentEvent, StreamEvent
 
 
@@ -211,23 +211,20 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
     from pwdlib import PasswordHash
     from pwdlib.hashers.argon2 import Argon2Hasher
 
-    import app.api.routes.auth as _auth_module  # local import for targeted monkeypatch
+    from app.auth.models import UserInDB
+    from app.auth.repository import EnvUserRepository  # noqa: TC001
 
     # Arrange — user A (admin) creates a session
     session_response = client.post("/api/chat/session", headers=auth_headers)
     assert session_response.status_code == 201
     session_id = session_response.json()["session_id"]
 
-    # Register a second user (user B) in the module-level user store for this test.
-    # The _users_db dict is populated at import time from AUTH_USERS; we inject
-    # user B directly so get_current_active_user can validate the token.
+    # Register a second user (user B) in the EnvUserRepository for this test.
+
     hasher = PasswordHash([Argon2Hasher()])
     user_b_name = "user_b_test_cross_user"
-    _auth_module._users_db[user_b_name] = _auth_module.UserInDB(
-        username=user_b_name,
-        hashed_password=hasher.hash("testpw"),
-        disabled=False,
-    )
+    user_repo: EnvUserRepository = client.app.state.user_repo
+    user_repo.add_user(UserInDB(username=user_b_name, hashed_password=hasher.hash("testpw"), disabled=False))
     try:
         user_b_token = create_access_token({"sub": user_b_name})
         user_b_headers = {"Authorization": f"Bearer {user_b_token}"}
@@ -243,7 +240,7 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
         assert response.status_code == 404
     finally:
         # Clean up user B from the store to avoid polluting other tests
-        _auth_module._users_db.pop(user_b_name, None)
+        user_repo.remove_user(user_b_name)
 
 
 def test_retry_endpoint_returns_422_when_no_last_tool_invocation(

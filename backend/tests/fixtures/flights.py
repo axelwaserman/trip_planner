@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from app.models import Flight, FlightQuery
+from app.flights.models import Flight, FlightQuery
 
 _DEFAULT_DEPARTURE = datetime(2099, 6, 1, 10, 0, tzinfo=UTC)
 _DEFAULT_ARRIVAL = datetime(2099, 6, 1, 18, 30, tzinfo=UTC)  # +8h30m (510 min)

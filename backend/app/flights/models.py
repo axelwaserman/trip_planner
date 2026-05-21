@@ -1,14 +1,20 @@
-"""Pydantic models for domain and API."""
+"""Flight domain models.
+
+Provides vendor-neutral Pydantic models for flight queries, search results,
+and all supporting types.  These are pure data models (Data Model Pattern) —
+validators enforce domain invariants; no business logic or external I/O.
+
+Phase 7 will introduce a real Amadeus client behind the existing
+``FlightAPIClient`` ABC; these models are designed to map onto Amadeus /
+Skyscanner / Google Flights response shapes without lossy field collapses.
+"""
 
 import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal, Self
-from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-
-from app.llm.errors import ProbeErrorCode
 
 # Type aliases
 BookingClass = Literal["economy", "premium_economy", "business", "first"]
@@ -16,7 +22,7 @@ SortBy = Literal["price", "duration", "departure"]
 
 
 # ============================================================================
-# Flight Domain Models
+# Flight Query Models
 # ============================================================================
 
 
@@ -325,233 +331,3 @@ class FlightSearchResult(BaseModel):
     query: FlightSearchQuery = Field(..., description="Echo of the search request parameters")
     results: list[FlightResult] = Field(..., description="List of bookable flight offers")
     count: int = Field(..., ge=0, description="Number of results returned")
-
-
-# ============================================================================
-# Chat API Models
-# ============================================================================
-
-
-class SessionCreateRequest(BaseModel):
-    """Request model for creating a new chat session.
-
-    Per CONTEXT.md D-24, the canonical session-create payload carries four
-    optional fields: provider, model, base_url (local providers only), api_key
-    (cloud providers only). Per D-09, ``api_key`` lives only in session memory —
-    never logged or persisted.
-
-    Validators enforce the threat-model mitigations from PLAN.md:
-    - SSRF guard on ``base_url`` (allowlist localhost / 127.0.0.1 /
-      host.docker.internal; http/https schemes only).
-    - Length cap on ``api_key`` (≤ 256 chars after whitespace stripping;
-      empty-after-strip normalises to ``None``).
-    """
-
-    provider: str | None = Field(default=None, description="LLM provider (ollama, openai, anthropic)")
-    model: str | None = Field(default=None, description="Model name for the provider")
-    base_url: str | None = Field(
-        default=None,
-        description="Local providers only; ignored for cloud",
-    )
-    api_key: str | None = Field(
-        default=None,
-        description=(
-            "Cloud providers only; ignored for local. Stored in session memory only — never logged or persisted."
-        ),
-    )
-
-    @field_validator("api_key")
-    @classmethod
-    def _strip_and_bound_api_key(cls, v: str | None) -> str | None:
-        """Strip whitespace, normalise empty to None, cap length at 256 chars."""
-        if v is None:
-            return None
-        stripped = v.strip()
-        if not stripped:
-            return None
-        if len(stripped) > 256:
-            raise ValueError("api_key exceeds maximum length (256 chars)")
-        return stripped
-
-    @field_validator("base_url")
-    @classmethod
-    def _validate_base_url(cls, v: str | None) -> str | None:
-        """SSRF guard: allowlist of {localhost, 127.0.0.1, host.docker.internal}; http/https only."""
-        if v is None:
-            return None
-        parsed = urlparse(v)
-        if parsed.scheme not in {"http", "https"}:
-            raise ValueError("base_url must be http or https")
-        if parsed.hostname not in {"localhost", "127.0.0.1", "host.docker.internal"}:
-            raise ValueError("base_url host must be localhost, 127.0.0.1, or host.docker.internal in v1")
-        return v
-
-
-class SessionCreateError(BaseModel):
-    """Structured probe failure surfaced via ``HTTPException.detail``.
-
-    Mirrors :class:`app.services.provider_probe.ProbeError` so the OpenAPI schema
-    documents the F1-F4 error envelope returned by ``POST /api/chat/session``
-    when the chosen provider/model fails its pre-flight probe (Plan 04).
-    """
-
-    error: ProbeErrorCode = Field(..., description="Stable error code matching the UI-SPEC F1-F4 taxonomy")
-    message: str = Field(..., description="Human-readable summary for the banner heading")
-    hint: str = Field(..., description="Actionable next step for the user")
-
-
-class ChatRequest(BaseModel):
-    """Request model for chat endpoint."""
-
-    message: str = Field(..., min_length=1, description="User message to send to the agent")
-    session_id: str = Field(..., description="Session ID for conversation continuity")
-
-
-class RetryRequest(BaseModel):
-    """Request model for the retry endpoint.
-
-    Mirrors the ``ChatRequest`` pattern but carries only a ``session_id``.
-    The last tool invocation to replay is stored server-side in
-    ``_metadata[session_id]["last_tool_invocation"]``; the client never
-    needs to re-send tool args — it just identifies the session.
-    """
-
-    session_id: str = Field(
-        ...,
-        description="Session id whose last tool invocation should be replayed.",
-    )
-
-
-class ChatResponse(BaseModel):
-    """Response model for chat endpoint (deprecated - use streaming)."""
-
-    response: str = Field(..., description="Agent's response message")
-    session_id: str = Field(..., description="Session ID for this conversation")
-
-
-# ============================================================================
-# Provider Discovery / Test / Sessions API Models (Plan 04.5-06b)
-# ============================================================================
-
-
-class ProviderInfo(BaseModel):
-    """Single provider entry in the GET /api/providers response (D-25).
-
-    The legacy 4.2 shape carried only ``available`` + ``models``; Plan 04.5-06b
-    adds ``base_url`` so the settings page can pre-fill the local-provider URL
-    field. Cloud providers (OpenAI, Anthropic) leave ``base_url`` as ``None``;
-    local providers (Ollama, LM Studio) populate it from ``Settings``.
-    """
-
-    available: bool = Field(..., description="True when the provider is reachable / has credentials.")
-    models: list[str] = Field(
-        default_factory=list, description="Model identifiers — discovered for local, curated for cloud."
-    )
-    base_url: str | None = Field(
-        default=None,
-        description="Local-provider base URL (e.g., 'http://localhost:11434'); None for cloud providers.",
-    )
-
-
-class ProviderRefreshEntry(BaseModel):
-    """Single provider entry in the refresh response (D-06)."""
-
-    name: str = Field(..., description="Provider name (e.g., 'ollama', 'lmstudio').")
-    models: list[str] = Field(default_factory=list, description="Discovered model ids; empty when unreachable.")
-    available: bool = Field(..., description="True when the last refresh attempt succeeded for this provider.")
-    error: str | None = Field(
-        default=None,
-        description="Wire-level error code when unreachable (e.g., 'provider_unreachable').",
-    )
-
-
-class ProviderRefreshResponse(BaseModel):
-    """Response shape for POST /api/providers/refresh (D-06)."""
-
-    providers: list[ProviderRefreshEntry] = Field(..., description="One entry per local provider class.")
-
-
-class ProviderTestRequest(BaseModel):
-    """Request payload for POST /api/providers/{provider}/test (D-14).
-
-    api_key length is bounded to 256 chars (mirrors SessionCreateRequest's
-    validator) so pathological inputs cannot exhaust memory or downstream
-    cloud APIs. Whitespace is stripped before length validation.
-    """
-
-    api_key: str = Field(..., min_length=1, description="Cloud provider API key to validate.")
-    model: str | None = Field(
-        default=None,
-        description="Optional model id; required for the Anthropic test path (researcher A8).",
-    )
-
-    @field_validator("api_key")
-    @classmethod
-    def _strip_and_bound_api_key(cls, v: str) -> str:
-        """Strip whitespace, raise on empty-after-strip, cap length at 256 chars."""
-        stripped = v.strip()
-        if not stripped:
-            raise ValueError("api_key must not be empty after whitespace stripping")
-        if len(stripped) > 256:
-            raise ValueError("api_key exceeds maximum length (256 chars)")
-        return stripped
-
-
-class ProviderTestResponse(BaseModel):
-    """Success response for POST /api/providers/{provider}/test (D-14).
-
-    Failure paths raise HTTPException with a ProbeError detail; this model
-    is only emitted on a 200 success.
-    """
-
-    status: Literal["ok"] = Field(..., description="Always 'ok' on the success path.")
-
-
-class ChatSessionInfo(BaseModel):
-    """One session entry returned by GET /api/chat/sessions (D-22, D-27)."""
-
-    session_id: str = Field(..., description="Server-generated UUID for this session.")
-    provider: str = Field(..., description="Wire-level provider name (e.g., 'ollama').")
-    model: str = Field(..., description="Per-provider model identifier.")
-    created_at: str = Field(..., description="ISO 8601 UTC timestamp.")
-    first_message_preview: str | None = Field(
-        default=None,
-        description="First HumanMessage content, truncated to 80 chars; None if session has no messages yet.",
-    )
-
-
-class ChatSessionsListResponse(BaseModel):
-    """Response shape for GET /api/chat/sessions (D-22, D-27)."""
-
-    sessions: list[ChatSessionInfo] = Field(..., description="Sessions owned by the authenticated user.")
-
-
-class ChatHistoryMessage(BaseModel):
-    """One message in a session's chat history.
-
-    Used by GET /api/chat/sessions/{id} so the frontend can re-render a
-    previously-active session when the user clicks it in the Sidebar. Only
-    user/assistant turns are surfaced — tool execution traces and reasoning
-    chunks are stream-only artefacts that don't round-trip cleanly.
-    """
-
-    role: Literal["user", "assistant"] = Field(..., description="Message author.")
-    content: str = Field(..., description="Message text (Markdown allowed for assistant).")
-
-
-class ChatSessionHistoryResponse(BaseModel):
-    """Response shape for GET /api/chat/sessions/{session_id}.
-
-    Returned only when the authenticated user owns the requested session.
-    Non-owners and missing sessions both surface as 404 to avoid leaking
-    session existence (mirrors the per-user-partition pattern from
-    GET /api/chat/sessions and DELETE /api/chat/session/{id}).
-    """
-
-    session_id: str = Field(..., description="Echoed session UUID.")
-    provider: str = Field(..., description="Provider the session is bound to.")
-    model: str = Field(..., description="Model the session is bound to.")
-    messages: list[ChatHistoryMessage] = Field(
-        default_factory=list,
-        description="User/assistant turns in chronological order.",
-    )

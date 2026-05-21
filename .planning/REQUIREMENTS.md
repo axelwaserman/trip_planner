@@ -56,6 +56,13 @@ These three are reopened: backend code exists but the user-facing surface is inc
 - [ ] **REQ-error-handling-feedback**: Frontend renders distinct, actionable error messages for API errors, session errors, and tool errors. `ToolExecutionCard` shows a loading state during tool execution. Failed tool calls offer a retry control. Toast notifications surface non-blocking errors. Errors do not silently break the streaming UI.
 - [ ] **REQ-streamevent-hierarchy**: Replace the monolithic `StreamEvent` model with a discriminated union — `ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent`. Update SSE serialization on the backend and `parseSSE` on the frontend. Each event type carries only its own fields. The new `ErrorEvent` is the transport for REQ-error-handling-feedback's tool-error and stream-error paths.
 
+#### Phase 4.9 — Pre-Phase-5 Prep
+
+- [x] **REQ-model-restructure**: `backend/app/models.py` is deleted. Domain models are split into four module files: `backend/app/auth/models.py` (User, TokenResponse), `backend/app/chat/models.py` (ChatSessionInfo, ChatHistoryMessage, SessionCreateRequest, ChatRequest, StreamEvent hierarchy), `backend/app/providers/models.py` (ProviderConfig, SessionCreateError, ProbeResult), `backend/app/flights/models.py` (FlightQuery, Flight, FlightSegment, FlightSearchResult). All intra-app imports updated; `from app.models import X` references replaced with the new module path. `mypy --strict` and `just check` pass with no new ignores.
+- [x] **REQ-user-repository**: A `UserRepository` protocol is extracted (e.g., `backend/app/auth/repository.py`), declaring `get_user(username: str) -> UserInDB | None` and `verify_password(plain: str, hashed: str) -> bool`. The env-seed implementation lives in `EnvUserRepository`. `get_current_active_user` is updated to depend on `UserRepository` via `Annotated[UserRepository, Depends(...)]` rather than importing `_users_db` directly. The module-global dict in `auth.py` is replaced by the repository class. `mypy --strict` passes; existing auth tests continue to pass.
+- [x] **REQ-skill-routing**: A project-local TypeScript/React skill is created at `frontend/.claude/skills/react-stack/SKILL.md` (or `.claude/skills/react-stack/SKILL.md` at repo root), covering: Vite 5 + React 19 + TypeScript, Chakra UI v3 component patterns, Vitest + React Testing Library setup, the project's hook conventions (`useChat`, `useSSEStream`, `parseSSE`), and known pitfalls. CLAUDE.md gains a skill-routing table mapping work type to skill command for `/fastapi`, `/chakra-ui`, `/dignified-python`, and `/pydantic-ai-agent-builder`.
+- [ ] **REQ-frontend-bug-fixes**: Six frontend bugs resolved: (1) empty-session guard — model/provider change only creates a new session when the active session has ≥ 1 message; (2) font harmonization — Login, Chat, and Settings use the same type scale from the shared Chakra theme; (3) double-think rendering — when LLM flow is think→tool→think→reply, both thinking blocks appear in the UI; (4) settings URL error feedback — invalid base URL on a local provider in Settings renders a human-readable inline error, not silent failure; (5) LM Studio stale cache — refreshing the model list in Settings always reflects current server state, no stale cached result; (6) sidebar overflow — model name does not overflow its container when wrapping to two lines.
+
 #### Phase 4.8 — Validators + Test Hygiene + Orphan Cleanup
 
 - [ ] **REQ-pydantic-validators**: Add **additional** field/model validators enforcing business rules — `Flight.arrival > Flight.departure`; `FlightQuery.departure_date >= today`; `FlightQuery.origin != FlightQuery.destination`. Note: `FlightQuery` already enforces `return_date > departure_date` via `validate_dates` (`backend/app/models.py:60-72`); this requirement is additive and must not replace or duplicate that existing validator. Invalid data rejected at the model boundary with a clear 422 response.
@@ -64,6 +71,20 @@ These three are reopened: backend code exists but the user-facing surface is inc
 #### Phase 5 — Postgres + Redis + docker-compose
 
 - [ ] **REQ-postgres-redis-compose**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes. Restarting compose preserves data via the named volumes (acceptance test: write a row, `docker compose down`, `docker compose up`, read the row back). Backend uses **`psycopg` async driver** + **`sqlmodel`** for `User`, `Session`, and `Message` models. **Pre-phase spike**: verify `postgresql+psycopg://` async URI works with SQLModel async session out-of-the-box on SQLAlchemy ≥ 2.0 — SQLModel historically targeted `asyncpg`, so adapter glue may be required. Migrations use `alembic` (or `sqlmodel`-native migration if it suffices). `ChatService._histories` is replaced by a Postgres-backed history store; the `Message` table either accepts a Phase 6 forward-migration to PydanticAI's `ModelMessage` shape, or is kept generic (JSON `payload` + discriminator) so no migration is needed — the phase plan must state which. **User-data migration**: existing JWTs from Phase 4.2 are invalidated at Phase 5 boot via `jwt_secret` rotation; the bootstrap script re-seeds the same usernames from the `AUTH_USERS` env var into PG with the same passwords (hashed via `pwdlib`, then env unset). Redis is wired in for ephemeral state (e.g., active-stream tracking) but not used for rate limiting (which is dropped from v1). `OLLAMA_BASE_URL` defaults to `host.docker.internal:11434` inside compose. CORS is resolved by the compose network — the previous hard-coded `allow_origins=["http://localhost:5173"]` becomes irrelevant when frontend + backend share an origin via the proxy. The `just install` and `just backend` commands document the compose path.
+
+#### Phase 5 — Architectural Carry-Forward from Phase 4.9 Review
+
+- [ ] **REQ-p5-conversation-rename**: Rename the `session` concept throughout the codebase to `conversation` (or `chat`) and reserve `session` for user navigation sessions (browser/JWT lifetime). Define distinct data structures for account-less conversations (pre-login) and authenticated ones, plus a migration mechanism that promotes an account-less conversation to an authenticated user's history upon login — persisting the message history without data loss.
+
+- [ ] **REQ-p5-db-seed**: Replace `EnvUserRepository` with `PostgresUserRepository` as the only user backend. Add a `SEED_DEMO_USERS=true` config flag that pre-populates Postgres with test/demo users at startup (read once from `AUTH_USERS` env, hashed via `pwdlib`, then env unset). This makes `EnvUserRepository` redundant — remove it entirely.
+
+- [ ] **REQ-p5-stream-event-abc**: Refactor the `StreamEvent` discriminated-union alias into a proper `StreamEvent(ABC)` base class with `ContentEvent`, `ThinkingEvent`, `ToolCallEvent`, `ToolResultEvent`, `ErrorEvent` as concrete subclasses. The `Annotated[..., Field(discriminator="type")]` union and the per-class `type: Literal[...]` instance fields are implementation details that leak Pydantic internals into consumers — encapsulate them behind the ABC.
+
+- [ ] **REQ-p5-session-create-request-split**: Split `SessionCreateRequest` into two models respecting SRP: `ConversationTarget(provider, model)` for identifying what to talk to, and `ProviderCredentials(base_url, api_key)` for how to reach it. The SSRF/length validators move to `ProviderCredentials`. Update all session-creation call sites.
+
+- [ ] **REQ-p5-flight-client-di**: Replace the back-door `search_flights._flight_client = flight_client` attribute injection with a proper FastAPI `Depends(get_flight_client)` dependency. Requires refactoring the LangChain `@tool` into a class-based tool or a request-scoped factory that receives the client via DI.
+
+- [ ] **REQ-p5-provider-info-split**: Split `ProviderInfo` into `LocalProviderInfo(available, models, base_url: str)` and `CloudProviderInfo(available, models, api_key_configured: bool)` subclasses of a `ProviderInfo` base. Update the `GET /api/providers` response schema and the frontend type definitions accordingly.
 
 #### Phase 6 — PydanticAI Migration
 
@@ -148,9 +169,19 @@ Each v1 requirement maps to exactly one phase. **Validated** requirements are li
 | REQ-tool-json-output | Phase 4.6 | Pending |
 | REQ-error-handling-feedback | Phase 4.7 | Pending |
 | REQ-streamevent-hierarchy | Phase 4.7 | Pending |
+| REQ-model-restructure | Phase 4.9 | Complete |
+| REQ-user-repository | Phase 4.9 | Complete |
+| REQ-skill-routing | Phase 4.9 | Complete |
+| REQ-frontend-bug-fixes | Phase 4.9 | Pending |
 | REQ-pydantic-validators | Phase 4.8 | Pending |
 | REQ-test-fixture-dedup | Phase 4.8 | Pending |
 | REQ-postgres-redis-compose | Phase 5 | Pending |
+| REQ-p5-conversation-rename | Phase 5 | Pending |
+| REQ-p5-db-seed | Phase 5 | Pending |
+| REQ-p5-stream-event-abc | Phase 5 | Pending |
+| REQ-p5-session-create-request-split | Phase 5 | Pending |
+| REQ-p5-flight-client-di | Phase 5 | Pending |
+| REQ-p5-provider-info-split | Phase 5 | Pending |
 | REQ-pydantic-ai-migration | Phase 6 | Pending |
 | REQ-real-flight-api | Phase 7 | Pending |
 | REQ-security-headers | Phase 8 | Pending |
@@ -159,8 +190,8 @@ Each v1 requirement maps to exactly one phase. **Validated** requirements are li
 | REQ-coverage-ratchet-80 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements: 25 total (3 fully validated + 3 partial/broken + 19 active)
-- Mapped to phases: 25
+- v1 requirements: 35 total (3 fully validated + 3 partial/broken + 29 active)
+- Mapped to phases: 35
 - Unmapped: 0 ✓
 
 **Note on retroactive mapping for shipped requirements:** PRs #1, #2, #4 landed alongside Phase 1 product work as the foundational quality gates the project was missing; PR #3 landed alongside Phase 2-era frontend work; PR #5 was a follow-up cleanup. The phase column for shipped items records this retroactive mapping. The active roadmap begins at Phase 4.2 (Unbreak the App).

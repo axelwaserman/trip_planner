@@ -198,6 +198,7 @@ export function Sidebar({
                   onClick={() => handleSessionClick(s.session_id)}
                   w="full"
                   h="48px"
+                  overflow="hidden"
                   px="4"
                   display="flex"
                   flexDirection="column"
@@ -245,7 +246,14 @@ export function Sidebar({
                       />
                     )}
                   </Flex>
-                  <Text fontSize="13px" color="fg.muted" mt="0.5">
+                  <Text
+                    fontSize="13px"
+                    color="fg.muted"
+                    mt="0.5"
+                    overflow="hidden"
+                    textOverflow="ellipsis"
+                    whiteSpace="nowrap"
+                  >
                     {`${s.provider} · ${s.model}`}
                   </Text>
                 </Box>

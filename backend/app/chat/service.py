@@ -31,6 +31,9 @@ from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 
 from app.chat.models import (
+    ChatHistoryMessage,
+    ChatSessionHistoryResponse,
+    ChatSessionInfo,
     ContentEvent,
     ErrorCode,
     ErrorEvent,
@@ -41,7 +44,6 @@ from app.chat.models import (
 )
 from app.exceptions import APIError
 from app.llm.log_scrubbing import _scrub
-from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo
 from app.tools.flight_search import search_flights
 
 if TYPE_CHECKING:
@@ -264,6 +266,7 @@ class ChatService:
         accumulated_content = ""
         tool_call_message = None
         tool_results = []
+        stream_completed_cleanly = False
 
         try:
             # Stream LLM response. We accumulate every chunk so that tool call
@@ -380,18 +383,26 @@ class ChatService:
                         yield ContentEvent(chunk=final_chunk.content, session_id=session_id)
 
                 accumulated_content = accumulated_final
+            stream_completed_cleanly = True
         finally:
-            # Always persist whatever was accumulated, even on partial streams
-            # (client disconnect, GeneratorExit on cancellation, etc.). Empty
-            # accumulated_content is intentional: the route surfaced nothing
-            # and resuming the session shows that turn as "user said X, no
-            # response" rather than dropping the user message entirely.
+            # Persist tool-call messages and the assistant response.
+            # guard: only persist the AIMessage when the stream ran to completion
+            # OR when accumulated_content has something worth saving. Early-return
+            # error paths (unknown-tool, APIError, generic Exception) leave
+            # accumulated_content="" and should not pollute history with blank
+            # AIMessage entries that would be sent as context on subsequent turns.
             if tool_was_called and tool_call_message and tool_results:
                 history.add_message(tool_call_message)
                 for tool_msg in tool_results:
                     history.add_message(tool_msg)
 
-            history.add_ai_message(accumulated_content)
+            if stream_completed_cleanly or accumulated_content:
+                history.add_ai_message(accumulated_content)
+            elif tool_was_called and tool_results:
+                # Post-tool LLM stream failed. Write a placeholder AIMessage so the
+                # history ends with AIMessage → ToolMessage → AIMessage (valid
+                # alternation). The retry endpoint can overwrite this on success.
+                history.add_ai_message("")
 
         # Ensure at least one content event
         if not accumulated_content:

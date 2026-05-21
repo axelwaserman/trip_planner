@@ -10,11 +10,8 @@ Design notes:
 
 - **D-13 — key presence only by default.** :meth:`validate_config` performs a
   purely local truthy check on ``self._api_key``; it never makes an outbound
-  HTTP call. Live key validation is opt-in via the future
-  ``POST /api/providers/{provider}/test`` endpoint and emits
-  ``ProbeErrorCode.INVALID_API_KEY``. Rationale: a freshly pasted key on
-  ``/settings/providers`` should NOT trigger an OpenAI billing event on every
-  session create.
+  HTTP call. Rationale: a freshly pasted key on ``/settings/providers`` should
+  NOT trigger an OpenAI billing event on every session create.
 - **D-04 — curated cloud model list.** :meth:`list_models` returns a hardcoded
   five-element allow-list matching ``Settings.get_available_providers()``.
   Cloud providers do not perform live ``/v1/models`` discovery in Phase 4.5.

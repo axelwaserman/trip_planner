@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.api.main import app
-from app.models import FlightSearchResult
+from app.flights.models import FlightSearchResult
 from tests.fixtures.llm import (
     MockLLMStream,
     default_session_config,

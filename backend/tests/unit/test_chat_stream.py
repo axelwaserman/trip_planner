@@ -2,6 +2,8 @@
 
 from unittest.mock import AsyncMock, patch
 
+from langchain_core.messages import AIMessage
+
 from app.chat.models import ErrorCode, ErrorEvent
 from app.exceptions import APIError
 from app.tools.flight_search import search_flights
@@ -118,6 +120,45 @@ async def test_chat_stream_yields_error_event_on_tool_unexpected_exception() -> 
     assert err.error_code == ErrorCode.tool_error
     assert err.retryable is False
     assert err.tool_name == "search_flights"
+
+
+async def test_tool_apierror_does_not_write_blank_ai_message_to_history() -> None:
+    """Stream that hits an APIError early return must NOT pollute history with AIMessage('').
+
+    When the tool raises APIError, chat_stream returns early (before the second
+    astream call), so tool_results stays empty. The `elif tool_was_called and
+    tool_results:` guard in the finally block must NOT fire, leaving history with
+    exactly 1 HumanMessage and 0 AIMessages.
+    """
+    # Arrange
+    service = make_chat_service_with_mock_llm(
+        MockLLMStream.from_chunks(
+            [
+                [
+                    ToolCall(
+                        name="search_flights",
+                        args={"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
+                        id="call_test",
+                    )
+                ],
+            ]
+        )
+    )
+    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+
+    # Act — patch search_flights.ainvoke to raise a retryable APIError
+    with patch.object(
+        type(search_flights),
+        "ainvoke",
+        new_callable=AsyncMock,
+        side_effect=APIError(message="upstream boom", retryable=True),
+    ):
+        _events = [e async for e in service.chat_stream("find flights", session_id)]
+
+    # Assert — history has 1 HumanMessage and NO AIMessage entries
+    history = service.get_session_history(session_id)
+    ai_messages = [m for m in history.messages if isinstance(m, AIMessage)]
+    assert ai_messages == [], "No AIMessage should be written on tool error early return"
 
 
 async def test_chat_stream_scrubs_api_key_from_raw_detail() -> None:

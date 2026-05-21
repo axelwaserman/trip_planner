@@ -15,33 +15,21 @@ def client() -> TestClient:
 
 
 @pytest.fixture
-def two_users() -> Generator[None]:
-    """Seed the in-memory ``_users_db`` with alice + bob for the cross-user test.
-
-    Mirrors the pattern used in ``test_session_partitioning.py``: AUTH_USERS is
-    read at import time so we mutate ``_users_db`` directly to issue tokens for
-    distinct users without rerunning ``load_users_from_env``. Cleanup pops the
-    seeded users so sibling test modules see the original AUTH_USERS dict.
-    """
+def two_users(client: TestClient) -> Generator[None]:
+    """Seed alice + bob into the running EnvUserRepository for cross-user tests."""
     from pwdlib import PasswordHash
     from pwdlib.hashers.argon2 import Argon2Hasher
 
-    from app.api.routes import auth as auth_module
+    from app.auth.models import UserInDB
+    from app.auth.repository import EnvUserRepository  # noqa: TC001
 
     hasher = PasswordHash([Argon2Hasher()])
-    auth_module._users_db["alice"] = auth_module.UserInDB(
-        username="alice",
-        hashed_password=hasher.hash("alicepass"),
-        disabled=False,
-    )
-    auth_module._users_db["bob"] = auth_module.UserInDB(
-        username="bob",
-        hashed_password=hasher.hash("bobpass"),
-        disabled=False,
-    )
+    user_repo: EnvUserRepository = client.app.state.user_repo
+    user_repo.add_user(UserInDB(username="alice", hashed_password=hasher.hash("alicepass"), disabled=False))
+    user_repo.add_user(UserInDB(username="bob", hashed_password=hasher.hash("bobpass"), disabled=False))
     yield
-    auth_module._users_db.pop("alice", None)
-    auth_module._users_db.pop("bob", None)
+    user_repo.remove_user("alice")
+    user_repo.remove_user("bob")
 
 
 def _login(client: TestClient, username: str, password: str) -> dict[str, str]:
