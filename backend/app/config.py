@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
     auth_users: str = "admin:admin"
 
+    # CORS — comma-separated origins for CORSMiddleware. Override via CORS_ALLOWED_ORIGINS env var.
+    cors_allowed_origins: list[str] = ["http://localhost:5173"]
+
     # Default LLM Provider
     default_provider: str = "ollama"
     default_model: str = "qwen3:4b"
