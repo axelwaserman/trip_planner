@@ -266,6 +266,7 @@ class ChatService:
         accumulated_content = ""
         tool_call_message = None
         tool_results = []
+        stream_completed_cleanly = False
 
         try:
             # Stream LLM response. We accumulate every chunk so that tool call
@@ -382,18 +383,21 @@ class ChatService:
                         yield ContentEvent(chunk=final_chunk.content, session_id=session_id)
 
                 accumulated_content = accumulated_final
+            stream_completed_cleanly = True
         finally:
-            # Always persist whatever was accumulated, even on partial streams
-            # (client disconnect, GeneratorExit on cancellation, etc.). Empty
-            # accumulated_content is intentional: the route surfaced nothing
-            # and resuming the session shows that turn as "user said X, no
-            # response" rather than dropping the user message entirely.
+            # Persist tool-call messages and the assistant response.
+            # guard: only persist the AIMessage when the stream ran to completion
+            # OR when accumulated_content has something worth saving. Early-return
+            # error paths (unknown-tool, APIError, generic Exception) leave
+            # accumulated_content="" and should not pollute history with blank
+            # AIMessage entries that would be sent as context on subsequent turns.
             if tool_was_called and tool_call_message and tool_results:
                 history.add_message(tool_call_message)
                 for tool_msg in tool_results:
                     history.add_message(tool_msg)
 
-            history.add_ai_message(accumulated_content)
+            if stream_completed_cleanly or accumulated_content:
+                history.add_ai_message(accumulated_content)
 
         # Ensure at least one content event
         if not accumulated_content:
