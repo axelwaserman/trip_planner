@@ -99,6 +99,7 @@ The `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.e2e`, and `@p
 - Auth uses JWT (`pyjwt`) with `pwdlib[argon2]` for password hashing (`api/routes/auth.py`); protected routes depend on `get_current_active_user`
 - **Cross-module taxonomies use `StrEnum`, not duplicated `Literal[...]` unions.** When the same set of stable string codes appears in more than one file (e.g. a wire-level error code shared between a service and a Pydantic response model), define it once as a `StrEnum` and import it. See `app.services.provider_probe.ProbeErrorCode` for the canonical example.
 - **Tunable thresholds live on `Settings`, not as module-level constants.** Probe timeouts, retry counts, expiry windows, and similar knobs go in `app/config.py` so they can be overridden per environment via env vars. Module constants are reserved for values that are part of the contract (e.g. JSON keys, MIME types).
+- **Abstract interfaces use `ABC`, never `Protocol`.** Python abstract base classes (`class Foo(ABC)`) are the project convention for interfaces that concrete implementations must satisfy. `typing.Protocol` (structural subtyping) is reserved for third-party duck-typing compatibility only. Activate the `/dignified-python` skill when adding or modifying abstract base types.
 
 ## Context files
 

@@ -240,7 +240,7 @@ Plans:
 ### Phase 5: Postgres + Redis + docker-compose
 **Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
 **Depends on**: Phase 4.9
-**Requirements**: REQ-postgres-redis-compose
+**Requirements**: REQ-postgres-redis-compose, REQ-p5-conversation-rename, REQ-p5-db-seed, REQ-p5-stream-event-abc, REQ-p5-session-create-request-split, REQ-p5-flight-client-di, REQ-p5-provider-info-split
 **Pre-phase spike** (do this in the discuss phase, not the plan phase): verify `postgresql+psycopg://` async URI works with SQLModel async session out of the box on SQLAlchemy ≥ 2.0. SQLModel historically targeted `asyncpg`; if `psycopg` async needs custom adapter glue, surface that before locking the model layer.
 **Rework risk**: `Message` SQLModel built around LangChain's `BaseChatMessageHistory` shape will need a column/shape revision when Phase 6 swaps in PydanticAI's `ModelMessage` history. Either keep the table generic (JSON `payload` column with a discriminator) or accept the Phase 6 migration cost.
 **User-data migration**: existing JWTs issued under the Phase 4.2 `AUTH_USERS` env-seed are invalidated at Phase 5 boot (rotate `jwt_secret`); the bootstrap script re-seeds the same usernames into PG with the same passwords (read once from the env, hashed via `pwdlib`, then env unset). Define this concretely in the Phase 5 plan.
@@ -251,6 +251,14 @@ Plans:
   4. `OLLAMA_BASE_URL` defaults to `host.docker.internal:11434` inside compose; the host's local Ollama remains reachable.
   5. CORS hard-coding in `api/main.py` is removed — the compose network collapses backend + frontend onto a single origin via the proxy. Any non-compose deployment defers CORS to Phase 8's `settings.cors_origins`.
   6. `just install` and `just backend` document the compose path; the legacy "run uv + npm directly" path remains supported for fast inner-loop iteration.
+
+**Carry-forward from Phase 4.9 review** (scoped into this phase):
+- REQ-p5-conversation-rename: rename `session` → `conversation`; add account-less → authenticated migration
+- REQ-p5-db-seed: replace `EnvUserRepository` with Postgres-backed seeding; remove env-file user loading
+- REQ-p5-stream-event-abc: `StreamEvent` discriminated union → proper ABC hierarchy
+- REQ-p5-session-create-request-split: split `SessionCreateRequest` by SRP into target + credentials
+- REQ-p5-flight-client-di: replace `_flight_client` attribute injection with `Depends(get_flight_client)`
+- REQ-p5-provider-info-split: split `ProviderInfo` into `LocalProviderInfo` / `CloudProviderInfo`
 
 ### Phase 6: PydanticAI Migration
 **Goal**: The chat agent runs on PydanticAI rather than LangChain — lighter, easier to test — preserving the **frontend-facing** SSE event contract from Phase 4.7. The internal extraction of thinking + tool_call chunks is rewritten against PydanticAI's stream surface.
