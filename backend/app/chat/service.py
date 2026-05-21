@@ -398,6 +398,11 @@ class ChatService:
 
             if stream_completed_cleanly or accumulated_content:
                 history.add_ai_message(accumulated_content)
+            elif tool_was_called and tool_results:
+                # Post-tool LLM stream failed. Write a placeholder AIMessage so the
+                # history ends with AIMessage → ToolMessage → AIMessage (valid
+                # alternation). The retry endpoint can overwrite this on success.
+                history.add_ai_message("")
 
         # Ensure at least one content event
         if not accumulated_content:
