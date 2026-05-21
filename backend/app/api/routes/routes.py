@@ -498,27 +498,23 @@ async def refresh_providers(
 ) -> ProviderRefreshResponse:
     """Re-discover all local providers in parallel; return enriched provider list (D-06).
 
-    Cache TTL gating: per-entry, ttl from
-    :attr:`Settings.provider_models_cache_ttl_seconds`. On partial unreachable,
-    returns 200 with the unreachable entries marked ``available=False`` and
+    Unlike GET /api/providers (which uses TTL-gated lazy loading), this endpoint
+    always calls factory.refresh_local_models() unconditionally — the user
+    explicitly requested fresh data. On partial unreachable, returns 200 with
+    the unreachable entries marked ``available=False`` and
     ``error="provider_unreachable"`` — clients show the marker rather than
     failing the whole settings page.
     """
     cache: dict[str, list[str]] = request.app.state.provider_models_cache
     timestamps: dict[str, float] = request.app.state.provider_models_cache_timestamps
-    ttl = settings.provider_models_cache_ttl_seconds
     now = time.time()
 
-    stale = [name for name in _LOCAL_PROVIDER_NAMES if name not in timestamps or (now - timestamps[name]) > ttl]
-
-    if stale:
-        fresh = await factory.refresh_local_models()
-        for name, models in fresh.items():
-            if name not in stale:
-                # Skip non-stale even if refresh returned them — preserves TTL.
-                continue
-            cache[name] = [] if models is None else models
-            timestamps[name] = now
+    # Explicit refresh always re-discovers regardless of TTL. The user pressed
+    # "Refresh" — they want current data, not a cached snapshot.
+    fresh = await factory.refresh_local_models()
+    for name, models in fresh.items():
+        cache[name] = [] if models is None else models
+        timestamps[name] = now
 
     # Build the response from cache. Mark unreachable when cache is empty
     # (a cache entry of [] means we just probed and the daemon didn't answer).
