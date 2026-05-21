@@ -30,7 +30,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [x] **Phase 4.6: Vendor-Neutral Tool JSON** — `search_flights()` JSON shape designed against Amadeus / Skyscanner / Google Flights field maps; `ToolExecutionCard` renders tables/lists/nested objects. (completed 2026-05-18)
 - [x] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts. (completed 2026-05-19)
 - [x] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`. (completed 2026-05-19)
-- [ ] **Phase 4.9: Pre-Phase-5 Prep** — split monolithic `models.py` into domain modules (auth, chat, providers, flights); extract `UserRepository` interface; add TypeScript/React skill + CLAUDE.md skill routing; fix 6 frontend bugs (empty-session new-session, font harmonization, second thinking block, settings URL error, LM Studio stale cache, sidebar overflow).
+- [x] **Phase 4.9: Pre-Phase-5 Prep** — split monolithic `models.py` into domain modules (auth, chat, providers, flights); extract `UserRepository` interface; add TypeScript/React skill + CLAUDE.md skill routing; fix 6 frontend bugs (empty-session new-session, font harmonization, second thinking block, settings URL error, LM Studio stale cache, sidebar overflow). (completed 2026-05-21)
 - [ ] **Phase 5: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Session`/`Message` tables; named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
 - [ ] **Phase 6: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; ADR-001 → Superseded.
 - [ ] **Phase 7: Real Flight API** — Amadeus client behind existing `FlightAPIClient` ABC; **outbound HTTP via `pyreqwest`**; reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests.
@@ -233,9 +233,9 @@ Plans:
 Plans:
 - [x] 04.9-01-PLAN.md — Wave 1: Model split — create 4 domain model files + update 9 production + 5 test import sites + delete app/models.py
 - [x] 04.9-02-PLAN.md — Wave 2: UserRepository Protocol + EnvUserRepository + DI wiring in main.py + unit tests
-- [ ] 04.9-03-PLAN.md — Wave 3: Frontend bugs A — sidebar overflow, empty-session guard, font harmonization, double-think reset
-- [ ] 04.9-04-PLAN.md — Wave 3: Frontend bugs B — settings URL error (ProviderCard), LM Studio stale cache (routes.py TTL bypass)
-- [ ] 04.9-05-PLAN.md — Wave 4: react-stack SKILL.md + CLAUDE.md skill-routing table
+- [x] 04.9-03-PLAN.md — Wave 3: Frontend bugs A — sidebar overflow, empty-session guard, font harmonization, double-think reset
+- [x] 04.9-04-PLAN.md — Wave 3: Frontend bugs B — settings URL error (ProviderCard), LM Studio stale cache (routes.py TTL bypass)
+- [x] 04.9-05-PLAN.md — Wave 4: react-stack SKILL.md + CLAUDE.md skill-routing table
 
 ### Phase 5: Postgres + Redis + docker-compose
 **Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
@@ -307,7 +307,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.6. Vendor-Neutral Tool JSON | v1 | 2/2 | Complete   | 2026-05-18 |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 4/4 | Complete   | 2026-05-19 |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
-| 4.9. Pre-Phase-5 Prep | v1.5 | 2/5 | In Progress|  |
+| 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 6. PydanticAI Migration | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
