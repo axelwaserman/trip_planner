@@ -390,6 +390,17 @@ export function useChat(): UseChatReturn {
   const handleProviderChange = useCallback(
     (provider: string, model: string) => {
       setProviderError(null)
+      // Guard: if provider and model haven't changed AND the session is empty,
+      // there's nothing to do — skip the redundant initSession call that would
+      // create a second new session for the same config on an empty session.
+      if (
+        provider === currentProvider &&
+        model === currentModel &&
+        sessionId !== null &&
+        getSessionSnapshot(sessionId).messages.length === 0
+      ) {
+        return
+      }
       // initSession will seed a fresh empty store entry for the new session
       // id; the previous session's entry stays put so a background stream
       // there can keep updating the Sidebar indicator.
@@ -406,7 +417,7 @@ export function useChat(): UseChatReturn {
       const selection = resolveSelection(merged)
       void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
     },
-    [initSession]
+    [initSession, currentProvider, currentModel, sessionId]
   )
 
   const retryProvider = useCallback(() => {
@@ -623,6 +634,9 @@ export function useChat(): UseChatReturn {
             updateToolResult(event.tool_result ?? '', event.elapsed_ms ?? 0)
             // Allow a fresh assistant bubble for the post-tool response.
             isStreamingAssistant = false
+            // Reset thinking flag so a new ThinkingCard is opened if the LLM
+            // reasons again after the tool result (double-think fix).
+            isStreamingThinking = false
             break
 
           case 'error':
@@ -911,6 +925,9 @@ export function useChat(): UseChatReturn {
         case 'tool_result':
           updateToolResult(event.tool_result ?? '', event.elapsed_ms ?? 0)
           isStreamingAssistant = false
+          // Reset thinking flag so a new ThinkingCard is opened if the LLM
+          // reasons again after the tool result (double-think fix).
+          isStreamingThinking = false
           break
 
         case 'error':
