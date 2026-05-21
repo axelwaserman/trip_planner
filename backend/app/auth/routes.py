@@ -132,7 +132,7 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect username or password",
-        )
+        ) from None
     if not repo.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

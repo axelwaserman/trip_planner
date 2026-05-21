@@ -8,8 +8,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from app.auth.routes import get_current_active_user
 from app.auth.models import User
+from app.auth.routes import get_current_active_user
 from app.chat import ChatService
 from app.chat.models import (
     ChatRequest,
@@ -21,7 +21,7 @@ from app.chat.models import (
     SessionCreateRequest,
 )
 from app.config import settings
-from app.llm.errors import ProbeError, ProbeErrorCode
+from app.llm.errors import ProbeErrorCode
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.providers.models import (
     ProviderInfo,

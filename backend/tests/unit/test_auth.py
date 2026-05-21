@@ -4,12 +4,12 @@ from datetime import timedelta
 
 import pytest
 
+from app.auth.repository import EnvUserRepository
 from app.auth.routes import (
     create_access_token,
     get_current_active_user,
     get_current_user,
 )
-from app.auth.repository import EnvUserRepository
 
 # ---------------------------------------------------------------------------
 # EnvUserRepository — user loading (replaces load_users_from_env tests)
@@ -18,8 +18,6 @@ from app.auth.repository import EnvUserRepository
 
 def test_load_users_from_env_parses_single_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """Parses a single user:pass pair correctly."""
-    from app.auth.models import UserNotFoundError
-
     monkeypatch.setenv("AUTH_USERS", "alice:secret")
     repo = EnvUserRepository()
     user = repo.get_user("alice")

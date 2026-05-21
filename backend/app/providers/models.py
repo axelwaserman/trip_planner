@@ -63,5 +63,3 @@ class ProviderRefreshResponse(BaseModel):
     """Response shape for POST /api/providers/refresh (D-06)."""
 
     providers: list[ProviderRefreshEntry] = Field(..., description="One entry per local provider class.")
-
-
