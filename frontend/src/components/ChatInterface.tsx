@@ -183,15 +183,15 @@ export function ChatInterface() {
   }
 
   return (
-    <Flex direction="column" h="100vh" bg="gray.50">
+    <Flex direction="column" h="100vh" bg="bg.canvas">
       {/* Header */}
-      <Box bg="white" borderBottom="1px" borderColor="gray.200" p={4}>
+      <Box bg="bg.surface" borderBottom="1px" borderColor="border.subtle" p={4}>
         <Flex justify="space-between" align="center" mb={2}>
           <Box>
             <Text fontSize="xl" fontWeight="bold">
               Trip Planning Assistant
             </Text>
-            <Text fontSize="sm" color="gray.600">
+            <Text fontSize="sm" color="fg.secondary">
               Ask me anything about planning your trip!
             </Text>
           </Box>
@@ -308,10 +308,10 @@ export function ChatInterface() {
         <Stack gap={4} maxW="4xl" mx="auto">
           {messages.length === 0 ? (
             <Box textAlign="center" py={20}>
-              <Text fontSize="lg" color="gray.500" mb={2}>
+              <Text fontSize="lg" color="fg.secondary" mb={2}>
                 Welcome! How can I help you plan your trip today?
               </Text>
-              <Text fontSize="sm" color="gray.400">
+              <Text fontSize="sm" color="fg.muted">
                 Try asking about destinations, activities, or travel tips!
               </Text>
             </Box>
@@ -340,33 +340,33 @@ export function ChatInterface() {
               return (
                 <Flex key={idx} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}>
                   <Box
-                    bg={msg.role === 'user' ? 'blue.500' : 'white'}
-                    color={msg.role === 'user' ? 'white' : 'gray.800'}
+                    bg={msg.role === 'user' ? 'accent.solid' : 'bg.surface'}
+                    color={msg.role === 'user' ? 'white' : 'fg.primary'}
                     px={4}
                     py={3}
                     rounded="lg"
                     maxW="80%"
                     boxShadow="sm"
                     borderWidth={msg.role === 'assistant' ? '1px' : '0'}
-                    borderColor="gray.200"
+                    borderColor="border.subtle"
                   >
                     {msg.role === 'assistant' ? (
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={{
                           table: ({ children }) => (
-                            <Box as="table" w="full" my={2} borderWidth="1px" borderColor="gray.300">
+                            <Box as="table" w="full" my={2} borderWidth="1px" borderColor="border.subtle">
                               {children}
                             </Box>
                           ),
-                          thead: ({ children }) => <Box as="thead" bg="gray.50">{children}</Box>,
+                          thead: ({ children }) => <Box as="thead" bg="bg.canvas">{children}</Box>,
                           th: ({ children }) => (
-                            <Box as="th" px={3} py={2} borderWidth="1px" borderColor="gray.300" fontWeight="semibold" textAlign="left">
+                            <Box as="th" px={3} py={2} borderWidth="1px" borderColor="border.subtle" fontWeight="semibold" textAlign="left">
                               {children}
                             </Box>
                           ),
                           td: ({ children }) => (
-                            <Box as="td" px={3} py={2} borderWidth="1px" borderColor="gray.300">
+                            <Box as="td" px={3} py={2} borderWidth="1px" borderColor="border.subtle">
                               {children}
                             </Box>
                           ),
@@ -375,7 +375,7 @@ export function ChatInterface() {
                           ol: ({ children }) => <Box as="ol" pl={5} my={2}>{children}</Box>,
                           li: ({ children }) => <Text as="li" mb={1}>{children}</Text>,
                           code: ({ children }) => (
-                            <Box as="code" bg="gray.100" px={1} rounded="sm" fontFamily="mono" fontSize="sm">
+                            <Box as="code" bg="bg.canvas" px={1} rounded="sm" fontFamily="mono" fontSize="sm">
                               {children}
                             </Box>
                           ),
@@ -393,8 +393,8 @@ export function ChatInterface() {
           )}
           {isAwaitingFirstChunk && (
             <Flex justify="flex-start">
-              <Box bg="white" px={4} py={3} rounded="lg" borderWidth="1px" borderColor="gray.200">
-                <Text color="gray.500">Thinking...</Text>
+              <Box bg="bg.surface" px={4} py={3} rounded="lg" borderWidth="1px" borderColor="border.subtle">
+                <Text color="fg.secondary">Thinking...</Text>
               </Box>
             </Flex>
           )}
@@ -403,7 +403,7 @@ export function ChatInterface() {
       </Box>
 
       {/* Input */}
-      <Box bg="white" borderTop="1px" borderColor="gray.200" p={4}>
+      <Box bg="bg.surface" borderTop="1px" borderColor="border.subtle" p={4}>
         <form onSubmit={handleSubmit}>
           <Flex gap={2} maxW="4xl" mx="auto">
             <Input
@@ -412,11 +412,11 @@ export function ChatInterface() {
               placeholder="Type your message..."
               size="lg"
               disabled={isLoading}
-              bg="white"
+              bg="bg.surface"
             />
             <Button
               type="submit"
-              colorScheme="blue"
+              colorPalette="accent"
               size="lg"
               loading={isLoading}
               disabled={isLoading}
