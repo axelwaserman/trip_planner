@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.exceptions import FlightSearchError
-from app.models import BookingClass, Flight, FlightQuery, SortBy
+from app.flights.models import BookingClass, Flight, FlightQuery, SortBy
 
 
 class FlightAPIClient(ABC):

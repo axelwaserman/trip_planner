@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.models import (
+from app.flights.models import (
     Flight,
     FlightQuery,
     FlightResult,

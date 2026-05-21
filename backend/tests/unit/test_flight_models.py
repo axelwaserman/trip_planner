@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.models import Flight, FlightQuery
+from app.flights.models import Flight, FlightQuery
 from tests.fixtures.flights import create_mock_flight, create_mock_flight_query
 
 # Deterministic date constants — avoids freezegun dependency.

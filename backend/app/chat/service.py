@@ -31,6 +31,9 @@ from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 
 from app.chat.models import (
+    ChatHistoryMessage,
+    ChatSessionHistoryResponse,
+    ChatSessionInfo,
     ContentEvent,
     ErrorCode,
     ErrorEvent,
@@ -41,7 +44,6 @@ from app.chat.models import (
 )
 from app.exceptions import APIError
 from app.llm.log_scrubbing import _scrub
-from app.models import ChatHistoryMessage, ChatSessionHistoryResponse, ChatSessionInfo
 from app.tools.flight_search import search_flights
 
 if TYPE_CHECKING:

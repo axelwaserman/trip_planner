@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.tools import tool
 
 from app.exceptions import FlightSearchError
-from app.models import (
+from app.flights.models import (
     CarrierInfo,
     Flight,
     FlightEndpoint,
