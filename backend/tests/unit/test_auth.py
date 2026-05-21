@@ -176,3 +176,22 @@ async def test_get_current_active_user_raises_400_for_disabled_user() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await get_current_active_user(disabled_user)
     assert exc_info.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Timing equalisation mechanism — _DUMMY_HASH
+# ---------------------------------------------------------------------------
+
+
+def test_login_unknown_user_dummy_hash_is_precomputed_argon2() -> None:
+    """_DUMMY_HASH must be a non-empty pre-computed Argon2 hash.
+
+    Login must call verify_password even for unknown users to equalise timing
+    and prevent username enumeration. This test guards that the mechanism exists:
+    _DUMMY_HASH is exported from app.auth.repository as a non-empty Argon2 hash
+    string that can be passed to verify_password in the unknown-user branch.
+    """
+    from app.auth.repository import _DUMMY_HASH
+
+    assert _DUMMY_HASH, "_DUMMY_HASH must be a non-empty pre-computed Argon2 hash"
+    assert _DUMMY_HASH.startswith("$argon2"), "_DUMMY_HASH must be an Argon2 hash"
