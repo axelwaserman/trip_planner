@@ -4,13 +4,13 @@ milestone: v1.5
 milestone_name: Re-platform
 status: completed
 stopped_at: Phase 4.2 marked complete; v1 Working Demo milestone closed
-last_updated: "2026-05-21T08:01:15.321Z"
+last_updated: "2026-05-21T08:12:15.720Z"
 last_activity: 2026-05-20
 progress:
   total_phases: 16
   completed_phases: 4
   total_plans: 26
-  completed_plans: 22
+  completed_plans: 23
   percent: 25
 ---
 
@@ -29,7 +29,7 @@ Phase: 04.2 (unbreak-the-app) — COMPLETE
 Status: Phase 4.2 complete — v1 Working Demo milestone done (Phases 4.2–4.8 all shipped)
 Last activity: 2026-05-20
 
-Progress: [█████████░] 85%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [█████████░] 85%
 - Trend: n/a — first GSD-tracked phase is 4.2
 
 *Updated after each plan completion.*
+| Phase 04.9 P02 | 20m | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,7 @@ Recent decisions affecting current work:
 - 2026-05-15 (PR #6 review): Phase 4.1, REQ-auth-backend, and REQ-ci-cd-pipeline reclassified as **Partial / Broken**; their unfinished slices reopened as REQ-login-page (4.2), REQ-llm-provider-ui-fix (4.2), and REQ-ci-reset (4.3).
 - Phase 4.1 (shipped, partial): Provider + model selection is per-session and persisted in localStorage; selecting a different provider creates a new session rather than mutating the active one — but the in-browser model selector does not produce a working session today.
 - PR #3 (shipped): `ChatInterface.tsx` decomposition uses the **hooks-shape** variant (`parseSSE` + `useSSEStream` + `useChat`); the reducer-based variant is superseded.
+- [Phase ?]: Phase 4.9-02: UserRepository Protocol structural typing — Phase 5 swaps EnvUserRepository for PostgresUserRepository by overriding one FastAPI dependency
 
 ### Pending Todos
 
@@ -116,6 +118,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-05-21T08:01:15.316Z
+Last session: 2026-05-21T08:12:08.914Z
 Stopped at: Phase 4.2 marked complete; v1 Working Demo milestone closed
 Resume file: None

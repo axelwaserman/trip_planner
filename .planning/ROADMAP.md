@@ -232,7 +232,7 @@ Plans:
 **Plans**: 5 plans across 4 waves
 Plans:
 - [x] 04.9-01-PLAN.md — Wave 1: Model split — create 4 domain model files + update 9 production + 5 test import sites + delete app/models.py
-- [ ] 04.9-02-PLAN.md — Wave 2: UserRepository Protocol + EnvUserRepository + DI wiring in main.py + unit tests
+- [x] 04.9-02-PLAN.md — Wave 2: UserRepository Protocol + EnvUserRepository + DI wiring in main.py + unit tests
 - [ ] 04.9-03-PLAN.md — Wave 3: Frontend bugs A — sidebar overflow, empty-session guard, font harmonization, double-think reset
 - [ ] 04.9-04-PLAN.md — Wave 3: Frontend bugs B — settings URL error (ProviderCard), LM Studio stale cache (routes.py TTL bypass)
 - [ ] 04.9-05-PLAN.md — Wave 4: react-stack SKILL.md + CLAUDE.md skill-routing table
@@ -307,7 +307,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.6. Vendor-Neutral Tool JSON | v1 | 2/2 | Complete   | 2026-05-18 |
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 4/4 | Complete   | 2026-05-19 |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
-| 4.9. Pre-Phase-5 Prep | v1.5 | 1/5 | In Progress|  |
+| 4.9. Pre-Phase-5 Prep | v1.5 | 2/5 | In Progress|  |
 | 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 6. PydanticAI Migration | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
