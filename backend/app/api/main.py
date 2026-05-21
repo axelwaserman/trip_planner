@@ -1,9 +1,12 @@
 """FastAPI application for Trip Planner."""
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+
+logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import auth, routes
@@ -72,7 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Shutdown: cleanup expired sessions
     cleaned_up = chat_service.cleanup_expired_sessions(max_age_seconds=0)
-    print(f"Cleaned up {cleaned_up} sessions on shutdown")
+    logger.info("Cleaned up %d sessions on shutdown", cleaned_up)
 
     # D-10: best-effort filter cleanup. Failure to remove must not raise on shutdown.
     uninstall_log_scrubber(log_scrubber)
