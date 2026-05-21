@@ -982,7 +982,8 @@ export function useChat(): UseChatReturn {
         ...prev,
         isStreaming: false,
         isAwaitingFirstChunk: false,
-        hasError: false,
+        // Do NOT force hasError: false here — the error event handler
+        // may have set it to reflect a failed retry. Mirror sendMessage pattern.
       }))
     }
   }, [sessionId, currentProvider, currentModel, initSession])
