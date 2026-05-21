@@ -10,7 +10,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
 from app.auth.exceptions import UserNotFoundError
 from app.auth.models import User
-from app.auth.repository import UserRepository, _DUMMY_HASH
+from app.auth.repository import _DUMMY_HASH, UserRepository
 from app.config import settings
 
 logger = logging.getLogger(__name__)
