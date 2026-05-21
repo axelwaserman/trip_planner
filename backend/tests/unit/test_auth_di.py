@@ -8,15 +8,16 @@ They will fail until Task 2 updates the auth route to accept the DI parameter.
 import pytest
 from fastapi import HTTPException
 
-from app.auth.routes import create_access_token, get_current_user, get_user_repository
 from app.auth.models import UserInDB
+from app.auth.repository import UserRepository
+from app.auth.routes import create_access_token, get_current_user, get_user_repository
 
 # ---------------------------------------------------------------------------
 # Stub implementation of UserRepository Protocol
 # ---------------------------------------------------------------------------
 
 
-class _AlwaysNoneRepo:
+class _AlwaysNoneRepo(UserRepository):
     """Stub UserRepository that always returns None from get_user."""
 
     def get_user(self, username: str) -> UserInDB | None:
@@ -26,7 +27,7 @@ class _AlwaysNoneRepo:
         return False
 
 
-class _KnownUserRepo:
+class _KnownUserRepo(UserRepository):
     """Stub UserRepository that returns a fixed user for username 'alice'."""
 
     def get_user(self, username: str) -> UserInDB | None:

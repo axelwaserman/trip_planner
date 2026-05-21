@@ -1,6 +1,6 @@
-"""UserRepository — Protocol + EnvUserRepository implementation.
+"""UserRepository — ABC + EnvUserRepository implementation.
 
-The UserRepository Protocol defines the interface that auth routes depend on.
+The UserRepository ABC defines the interface that auth routes depend on.
 EnvUserRepository implements it by loading users from the AUTH_USERS environment
 variable at construction time — the same logic previously inlined in auth.py.
 
@@ -11,7 +11,7 @@ will be needed at that point.
 
 import logging
 import os
-from typing import Protocol
+from abc import ABC, abstractmethod
 
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
@@ -27,24 +27,26 @@ logger = logging.getLogger(__name__)
 _password_hasher = PasswordHash([Argon2Hasher()])
 
 
-class UserRepository(Protocol):
-    """Structural protocol for user persistence backends.
+class UserRepository(ABC):
+    """Abstract base class for user persistence backends.
 
-    The auth routes depend on this Protocol; concrete implementations
+    The auth routes depend on this ABC; concrete implementations
     (EnvUserRepository, future PostgresUserRepository) are injected via
     FastAPI's dependency override mechanism.
     """
 
+    @abstractmethod
     def get_user(self, username: str) -> UserInDB | None:
         """Return UserInDB for *username*, or None if not found."""
         ...
 
+    @abstractmethod
     def verify_password(self, plain: str, hashed: str) -> bool:
         """Return True if *plain* matches *hashed*."""
         ...
 
 
-class EnvUserRepository:
+class EnvUserRepository(UserRepository):
     """UserRepository backed by the AUTH_USERS environment variable.
 
     Loads users once at construction time. Intended as the Phase 4.x user

@@ -126,8 +126,9 @@ async def test_get_current_user_raises_401_for_invalid_token() -> None:
     from fastapi import HTTPException
 
     from app.auth.models import UserInDB
+    from app.auth.repository import UserRepository
 
-    class _NeverFindsUser:
+    class _NeverFindsUser(UserRepository):
         def get_user(self, username: str) -> UserInDB | None:
             return None
 
@@ -145,8 +146,9 @@ async def test_get_current_user_raises_401_for_unknown_user(monkeypatch: pytest.
     from fastapi import HTTPException
 
     from app.auth.models import UserInDB
+    from app.auth.repository import UserRepository
 
-    class _NeverFindsUser:
+    class _NeverFindsUser(UserRepository):
         def get_user(self, username: str) -> UserInDB | None:
             return None
 
