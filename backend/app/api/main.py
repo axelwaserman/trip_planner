@@ -11,7 +11,7 @@ from app.api.routes import routes
 from app.auth import routes as auth_routes
 from app.auth.repository import EnvUserRepository
 from app.chat import ChatService
-from app.config import Settings, settings
+from app.config import settings
 from app.llm.factory import LLMProviderFactory
 from app.llm.log_scrubbing import ApiKeyScrubber, install_log_scrubber, uninstall_log_scrubber
 from app.tools.flight_client import MockFlightAPIClient
@@ -42,8 +42,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # it reaches a handler's formatter. Phase 8's structlog migration replaces
     # this with a processor.
     log_scrubber: ApiKeyScrubber = install_log_scrubber()
-
-    settings = Settings()
 
     # Initialize flight client
     flight_client = MockFlightAPIClient(seed=42)
