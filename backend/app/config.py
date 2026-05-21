@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 logger = logging.getLogger(__name__)
 
 _DEFAULT_JWT_SECRET = "changeme"
+_DEFAULT_AUTH_USERS = "admin:admin"
 
 
 class Settings(BaseSettings):
@@ -71,13 +72,18 @@ class Settings(BaseSettings):
     )
 
     def model_post_init(self, __context: object) -> None:
-        """Emit a warning when the JWT secret is still the insecure default."""
+        """Emit warnings when insecure defaults are still in use."""
         if self.jwt_secret == _DEFAULT_JWT_SECRET:
             logger.warning(
                 "JWT_SECRET is set to the default value '%s'. "
                 "Set the JWT_SECRET environment variable to a strong random secret "
                 "before running in production.",
                 _DEFAULT_JWT_SECRET,
+            )
+        if self.auth_users == _DEFAULT_AUTH_USERS:
+            logger.warning(
+                "AUTH_USERS is set to the default 'admin:admin'. "
+                "Set the AUTH_USERS environment variable before running in production.",
             )
 
     def get_available_providers(self) -> dict[str, dict[str, list[str] | bool]]:
