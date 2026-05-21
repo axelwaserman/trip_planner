@@ -8,7 +8,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
-from app.auth.models import User
+from app.auth.models import User, UserNotFoundError
 from app.auth.repository import UserRepository
 from app.config import settings
 
@@ -84,10 +84,11 @@ async def get_current_user(
     except jwt.PyJWTError:
         raise credentials_exception from None
 
-    user = repo.get_user(username)
-    if user is None:
-        raise credentials_exception
-    return user
+    try:
+        user_in_db = repo.get_user(username)
+    except UserNotFoundError:
+        raise credentials_exception from None
+    return user_in_db
 
 
 async def get_current_active_user(
@@ -125,8 +126,14 @@ async def login(
     Raises:
         HTTPException 400: Credentials are incorrect.
     """
-    user = repo.get_user(form_data.username)
-    if user is None or not repo.verify_password(form_data.password, user.hashed_password):
+    try:
+        user = repo.get_user(form_data.username)
+    except UserNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect username or password",
+        )
+    if not repo.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect username or password",

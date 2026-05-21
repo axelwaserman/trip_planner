@@ -8,6 +8,7 @@ import pytest
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 
+from app.auth.models import UserNotFoundError
 from app.auth.repository import EnvUserRepository
 
 # ---------------------------------------------------------------------------
@@ -31,17 +32,17 @@ def test_get_user_returns_correct_userinfo(monkeypatch: pytest.MonkeyPatch) -> N
     assert len(user.hashed_password) > 0
 
 
-def test_get_user_returns_none_for_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
-    """EnvUserRepository.get_user returns None for an unknown username.
+def test_get_user_raises_for_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """EnvUserRepository.get_user raises UserNotFoundError for an unknown username.
 
     Arrange: AUTH_USERS env var contains only "alice:secret".
     Act: Call get_user("unknown").
-    Assert: Returns None.
+    Assert: Raises UserNotFoundError.
     """
     monkeypatch.setenv("AUTH_USERS", "alice:secret")
     repo = EnvUserRepository()
-    result = repo.get_user("unknown")
-    assert result is None
+    with pytest.raises(UserNotFoundError, match="unknown"):
+        repo.get_user("unknown")
 
 
 # ---------------------------------------------------------------------------

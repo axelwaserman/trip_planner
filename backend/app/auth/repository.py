@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 
-from app.auth.models import UserInDB
+from app.auth.models import UserInDB, UserNotFoundError
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,12 @@ class UserRepository(ABC):
     """
 
     @abstractmethod
-    def get_user(self, username: str) -> UserInDB | None:
-        """Return UserInDB for *username*, or None if not found."""
+    def get_user(self, username: str) -> UserInDB:
+        """Return UserInDB for *username*.
+
+        Raises:
+            UserNotFoundError: When *username* does not exist.
+        """
         ...
 
     @abstractmethod
@@ -60,9 +64,16 @@ class EnvUserRepository(UserRepository):
     def __init__(self) -> None:
         self._users: dict[str, UserInDB] = _load_users_from_env()
 
-    def get_user(self, username: str) -> UserInDB | None:
-        """Return UserInDB for *username*, or None if not found."""
-        return self._users.get(username)
+    def get_user(self, username: str) -> UserInDB:
+        """Return UserInDB for *username*.
+
+        Raises:
+            UserNotFoundError: When *username* does not exist.
+        """
+        user = self._users.get(username)
+        if user is None:
+            raise UserNotFoundError(username)
+        return user
 
     def verify_password(self, plain: str, hashed: str) -> bool:
         """Return True if *plain* matches *hashed* using Argon2."""

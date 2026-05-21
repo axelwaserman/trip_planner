@@ -8,7 +8,7 @@ They will fail until Task 2 updates the auth route to accept the DI parameter.
 import pytest
 from fastapi import HTTPException
 
-from app.auth.models import UserInDB
+from app.auth.models import UserInDB, UserNotFoundError
 from app.auth.repository import UserRepository
 from app.auth.routes import create_access_token, get_current_user, get_user_repository
 
@@ -18,10 +18,10 @@ from app.auth.routes import create_access_token, get_current_user, get_user_repo
 
 
 class _AlwaysNoneRepo(UserRepository):
-    """Stub UserRepository that always returns None from get_user."""
+    """Stub UserRepository that always raises UserNotFoundError from get_user."""
 
-    def get_user(self, username: str) -> UserInDB | None:
-        return None
+    def get_user(self, username: str) -> UserInDB:
+        raise UserNotFoundError(username)
 
     def verify_password(self, plain: str, hashed: str) -> bool:
         return False
@@ -30,14 +30,14 @@ class _AlwaysNoneRepo(UserRepository):
 class _KnownUserRepo(UserRepository):
     """Stub UserRepository that returns a fixed user for username 'alice'."""
 
-    def get_user(self, username: str) -> UserInDB | None:
+    def get_user(self, username: str) -> UserInDB:
         if username == "alice":
             return UserInDB(
                 username="alice",
                 hashed_password="$argon2id$v=19$m=65536,t=2,p=1$fakehash",
                 disabled=False,
             )
-        return None
+        raise UserNotFoundError(username)
 
     def verify_password(self, plain: str, hashed: str) -> bool:
         return plain == "secret"
@@ -64,9 +64,9 @@ def test_get_user_repository_placeholder_raises_runtime_error() -> None:
 
 
 async def test_get_current_user_rejects_missing_user() -> None:
-    """get_current_user raises 401 when the injected repo returns None.
+    """get_current_user raises 401 when the injected repo raises UserNotFoundError.
 
-    Arrange: A stub repo that always returns None; a valid JWT for "ghost".
+    Arrange: A stub repo that always raises UserNotFoundError; a valid JWT for "ghost".
     Act: Call get_current_user(token, repo=_AlwaysNoneRepo()).
     Assert: HTTPException with status_code=401 is raised.
     """

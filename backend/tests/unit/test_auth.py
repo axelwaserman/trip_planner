@@ -18,10 +18,11 @@ from app.auth.repository import EnvUserRepository
 
 def test_load_users_from_env_parses_single_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """Parses a single user:pass pair correctly."""
+    from app.auth.models import UserNotFoundError
+
     monkeypatch.setenv("AUTH_USERS", "alice:secret")
     repo = EnvUserRepository()
     user = repo.get_user("alice")
-    assert user is not None
     # hashed password must NOT be the plain password
     assert user.hashed_password != "secret"
 
@@ -29,26 +30,29 @@ def test_load_users_from_env_parses_single_user(monkeypatch: pytest.MonkeyPatch)
 def test_load_users_from_env_parses_multiple_users(monkeypatch: pytest.MonkeyPatch) -> None:
     """Parses comma-separated user:pass pairs."""
     monkeypatch.setenv("AUTH_USERS", "alice:secret,bob:hunter2")
-    # We test by looking up both users
+    # We test by looking up both users — get_user raises UserNotFoundError if absent.
     repo = EnvUserRepository()
-    assert repo.get_user("alice") is not None
-    assert repo.get_user("bob") is not None
+    assert repo.get_user("alice").username == "alice"
+    assert repo.get_user("bob").username == "bob"
 
 
 def test_load_users_from_env_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Falls back to admin:admin when AUTH_USERS is not set."""
     monkeypatch.delenv("AUTH_USERS", raising=False)
     repo = EnvUserRepository()
-    assert repo.get_user("admin") is not None
+    assert repo.get_user("admin").username == "admin"
 
 
 def test_load_users_from_env_ignores_malformed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skips entries that don't have exactly one colon."""
+    from app.auth.models import UserNotFoundError
+
     monkeypatch.setenv("AUTH_USERS", "alice:secret,badentry,bob:hunter2")
     repo = EnvUserRepository()
-    assert repo.get_user("alice") is not None
-    assert repo.get_user("bob") is not None
-    assert repo.get_user("badentry") is None
+    assert repo.get_user("alice").username == "alice"
+    assert repo.get_user("bob").username == "bob"
+    with pytest.raises(UserNotFoundError):
+        repo.get_user("badentry")
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +129,12 @@ async def test_get_current_user_raises_401_for_invalid_token() -> None:
     """get_current_user raises HTTP 401 when the token is garbage."""
     from fastapi import HTTPException
 
-    from app.auth.models import UserInDB
+    from app.auth.models import UserInDB, UserNotFoundError
     from app.auth.repository import UserRepository
 
     class _NeverFindsUser(UserRepository):
-        def get_user(self, username: str) -> UserInDB | None:
-            return None
+        def get_user(self, username: str) -> UserInDB:
+            raise UserNotFoundError(username)
 
         def verify_password(self, plain: str, hashed: str) -> bool:
             return False
@@ -145,12 +149,12 @@ async def test_get_current_user_raises_401_for_unknown_user(monkeypatch: pytest.
     """get_current_user raises HTTP 401 when the username is not in the store."""
     from fastapi import HTTPException
 
-    from app.auth.models import UserInDB
+    from app.auth.models import UserInDB, UserNotFoundError
     from app.auth.repository import UserRepository
 
     class _NeverFindsUser(UserRepository):
-        def get_user(self, username: str) -> UserInDB | None:
-            return None
+        def get_user(self, username: str) -> UserInDB:
+            raise UserNotFoundError(username)
 
         def verify_password(self, plain: str, hashed: str) -> bool:
             return False
