@@ -7,9 +7,8 @@ Pydantic v2 native discriminated-union validation and mypy-strict narrowing.
 
 Also hosts the chat session and message DTOs previously in ``app.models``:
 ``SessionCreateRequest``, ``SessionCreateError``, ``ChatRequest``,
-``RetryRequest``, ``ChatResponse``, ``ChatSessionInfo``,
-``ChatSessionsListResponse``, ``ChatHistoryMessage``,
-``ChatSessionHistoryResponse``.
+``RetryRequest``, ``ChatSessionInfo``, ``ChatSessionsListResponse``,
+``ChatHistoryMessage``, ``ChatSessionHistoryResponse``.
 
 Analog: :mod:`app.llm.errors` (``ProbeErrorCode`` + ``ProbeError`` pattern).
 """
@@ -188,13 +187,6 @@ class RetryRequest(BaseModel):
         ...,
         description="Session id whose last tool invocation should be replayed.",
     )
-
-
-class ChatResponse(BaseModel):
-    """Response model for chat endpoint (deprecated - use streaming)."""
-
-    response: str = Field(..., description="Agent's response message")
-    session_id: str = Field(..., description="Session ID for this conversation")
 
 
 class ChatSessionInfo(BaseModel):
