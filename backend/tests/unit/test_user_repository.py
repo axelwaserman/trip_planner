@@ -8,7 +8,7 @@ import pytest
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 
-from app.auth.models import UserNotFoundError
+from app.auth.exceptions import UserNotFoundError
 from app.auth.repository import EnvUserRepository
 
 # ---------------------------------------------------------------------------

@@ -43,7 +43,7 @@ def test_load_users_from_env_falls_back_to_default(monkeypatch: pytest.MonkeyPat
 
 def test_load_users_from_env_ignores_malformed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skips entries that don't have exactly one colon."""
-    from app.auth.models import UserNotFoundError
+    from app.auth.exceptions import UserNotFoundError
 
     monkeypatch.setenv("AUTH_USERS", "alice:secret,badentry,bob:hunter2")
     repo = EnvUserRepository()
@@ -127,7 +127,8 @@ async def test_get_current_user_raises_401_for_invalid_token() -> None:
     """get_current_user raises HTTP 401 when the token is garbage."""
     from fastapi import HTTPException
 
-    from app.auth.models import UserInDB, UserNotFoundError
+    from app.auth.exceptions import UserNotFoundError
+    from app.auth.models import UserInDB
     from app.auth.repository import UserRepository
 
     class _NeverFindsUser(UserRepository):
@@ -147,7 +148,8 @@ async def test_get_current_user_raises_401_for_unknown_user(monkeypatch: pytest.
     """get_current_user raises HTTP 401 when the username is not in the store."""
     from fastapi import HTTPException
 
-    from app.auth.models import UserInDB, UserNotFoundError
+    from app.auth.exceptions import UserNotFoundError
+    from app.auth.models import UserInDB
     from app.auth.repository import UserRepository
 
     class _NeverFindsUser(UserRepository):

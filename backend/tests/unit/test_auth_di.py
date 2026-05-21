@@ -8,7 +8,8 @@ They will fail until Task 2 updates the auth route to accept the DI parameter.
 import pytest
 from fastapi import HTTPException
 
-from app.auth.models import UserInDB, UserNotFoundError
+from app.auth.exceptions import UserNotFoundError
+from app.auth.models import UserInDB
 from app.auth.repository import UserRepository
 from app.auth.routes import create_access_token, get_current_user, get_user_repository
 

@@ -16,7 +16,8 @@ from abc import ABC, abstractmethod
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 
-from app.auth.models import UserInDB, UserNotFoundError
+from app.auth.exceptions import UserNotFoundError
+from app.auth.models import UserInDB
 from app.config import settings
 
 logger = logging.getLogger(__name__)
