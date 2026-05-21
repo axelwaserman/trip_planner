@@ -5,7 +5,6 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
@@ -28,8 +27,6 @@ from app.providers.models import (
     ProviderInfo,
     ProviderRefreshEntry,
     ProviderRefreshResponse,
-    ProviderTestRequest,
-    ProviderTestResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -533,122 +530,6 @@ async def refresh_providers(
         )
 
     return ProviderRefreshResponse(providers=entries)
-
-
-async def _test_openai_key(api_key: str) -> ProbeError | None:
-    """OpenAI: GET /v1/models is auth-required and zero-cost. Returns None on success.
-
-    api_key NEVER appears in any log line, exception detail, or response body
-    on any path — only ProbeError.message + hint surface.
-    """
-    headers = {"Authorization": f"Bearer {api_key}"}
-    try:
-        async with httpx.AsyncClient(timeout=settings.provider_probe_timeout_seconds) as client:
-            response = await client.get("https://api.openai.com/v1/models", headers=headers)
-        if response.status_code == 401:
-            return ProbeError(
-                error=ProbeErrorCode.INVALID_API_KEY,
-                message="OpenAI rejected this API key.",
-                hint="Check the key in /settings/providers and re-paste from your OpenAI dashboard.",
-            )
-        if response.status_code == 403:
-            return ProbeError(
-                error=ProbeErrorCode.INVALID_API_KEY,
-                message="OpenAI rejected this API key (403 Forbidden).",
-                hint="Check org-level permissions in your OpenAI dashboard.",
-            )
-        if response.status_code == 429:
-            # Rate-limited but key is valid — mirror Anthropic pattern (A3).
-            return None
-        response.raise_for_status()
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
-        return ProbeError(
-            error=ProbeErrorCode.PROVIDER_UNREACHABLE,
-            message="Can't reach OpenAI right now.",
-            hint="Try again in a moment.",
-        )
-    return None
-
-
-async def _test_anthropic_key(api_key: str, model: str) -> ProbeError | None:
-    """Anthropic: POST /v1/messages with max_tokens=1 (RESEARCH.md A2 — billable but cheap).
-
-    401 → invalid_api_key; 429 → ok (rate-limited but key valid per A3);
-    network error → provider_unreachable.
-    api_key NEVER appears in any log line, exception detail, or response body.
-    """
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    body = {
-        "model": model,
-        "max_tokens": 1,
-        "messages": [{"role": "user", "content": "x"}],
-    }
-    try:
-        async with httpx.AsyncClient(timeout=settings.provider_probe_timeout_seconds) as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=body,
-            )
-        if response.status_code == 401:
-            return ProbeError(
-                error=ProbeErrorCode.INVALID_API_KEY,
-                message="Anthropic rejected this API key.",
-                hint="Check the key in /settings/providers and re-paste from your Anthropic console.",
-            )
-        if response.status_code == 429:
-            # Rate-limited but key is valid (researcher A3).
-            return None
-        response.raise_for_status()
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
-        return ProbeError(
-            error=ProbeErrorCode.PROVIDER_UNREACHABLE,
-            message="Can't reach Anthropic right now.",
-            hint="Try again in a moment.",
-        )
-    return None
-
-
-@router.post(
-    "/api/providers/{provider}/test",
-    response_model=ProviderTestResponse,
-)
-async def test_provider_connection(
-    provider: str,
-    body: ProviderTestRequest,
-    _current_user: Annotated[User, Depends(get_current_active_user)],
-) -> ProviderTestResponse:
-    """Live cloud key validation — the opt-in 'Test connection' button (D-14).
-
-    Outbound call costs are minimal but documented in the UI tooltip
-    (researcher A2 — Anthropic max_tokens=1 produces a billable single-token reply).
-    api_key NEVER appears in logs, exceptions, or response bodies on any path.
-    """
-    if provider == "openai":
-        probe_error = await _test_openai_key(body.api_key)
-    elif provider == "anthropic":
-        probe_error = await _test_anthropic_key(
-            body.api_key,
-            model=body.model or settings.anthropic_model,
-        )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Provider {provider!r} does not support live test (cloud providers only).",
-        )
-
-    if probe_error is not None:
-        probe_status = (
-            status.HTTP_502_BAD_GATEWAY
-            if probe_error.error == ProbeErrorCode.PROVIDER_UNREACHABLE
-            else status.HTTP_400_BAD_REQUEST
-        )
-        raise HTTPException(status_code=probe_status, detail=probe_error.model_dump())
-    return ProviderTestResponse(status="ok")
 
 
 @router.get("/api/chat/sessions", response_model=ChatSessionsListResponse)

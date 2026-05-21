@@ -10,10 +10,7 @@ Key properties (per ``04.5-CONTEXT.md`` decisions):
 - **D-13** — :meth:`AnthropicProvider.validate_config` performs **key-presence
   only** validation by default. It returns
   :attr:`~app.llm.errors.ProbeErrorCode.MISSING_API_KEY` when ``self._api_key``
-  is ``None`` or an empty string. It makes **no outbound HTTP call** — that is
-  reserved for the opt-in ``POST /api/providers/{provider}/test`` endpoint
-  landing in a later plan, which emits the new
-  :attr:`~app.llm.errors.ProbeErrorCode.INVALID_API_KEY` value.
+  is ``None`` or an empty string. It makes **no outbound HTTP call**.
 - **D-04** — :meth:`AnthropicProvider.list_models` returns a **curated** static
   list. Cloud providers do not perform live discovery in 4.5; the three model
   identifiers below mirror ``Settings.get_available_providers()["anthropic"]

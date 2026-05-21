@@ -1,6 +1,6 @@
 """Provider domain models.
 
-Pydantic models for the provider discovery, refresh, and test endpoints
+Pydantic models for the provider discovery and refresh endpoints
 (Plan 04.5-06b).  Also hosts ``SessionCreateError`` — the structured probe
 failure envelope surfaced via ``HTTPException.detail`` on
 ``POST /api/chat/session`` when the chosen provider/model fails its
@@ -10,9 +10,7 @@ All models follow the Data Model Pattern: validators enforce invariants;
 no business logic or external I/O.
 """
 
-from typing import Literal
-
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from app.llm.errors import ProbeErrorCode
 
@@ -67,37 +65,3 @@ class ProviderRefreshResponse(BaseModel):
     providers: list[ProviderRefreshEntry] = Field(..., description="One entry per local provider class.")
 
 
-class ProviderTestRequest(BaseModel):
-    """Request payload for POST /api/providers/{provider}/test (D-14).
-
-    api_key length is bounded to 256 chars (mirrors SessionCreateRequest's
-    validator) so pathological inputs cannot exhaust memory or downstream
-    cloud APIs. Whitespace is stripped before length validation.
-    """
-
-    api_key: str = Field(..., min_length=1, description="Cloud provider API key to validate.")
-    model: str | None = Field(
-        default=None,
-        description="Optional model id; required for the Anthropic test path (researcher A8).",
-    )
-
-    @field_validator("api_key")
-    @classmethod
-    def _strip_and_bound_api_key(cls, v: str) -> str:
-        """Strip whitespace, raise on empty-after-strip, cap length at 256 chars."""
-        stripped = v.strip()
-        if not stripped:
-            raise ValueError("api_key must not be empty after whitespace stripping")
-        if len(stripped) > 256:
-            raise ValueError("api_key exceeds maximum length (256 chars)")
-        return stripped
-
-
-class ProviderTestResponse(BaseModel):
-    """Success response for POST /api/providers/{provider}/test (D-14).
-
-    Failure paths raise HTTPException with a ProbeError detail; this model
-    is only emitted on a 200 success.
-    """
-
-    status: Literal["ok"] = Field(..., description="Always 'ok' on the success path.")
