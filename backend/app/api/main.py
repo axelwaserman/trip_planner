@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import routes
 from app.auth import routes as auth_routes
-from app.auth.repository import EnvUserRepository
+from app.auth.repository import EnvUserRepository, UserRepository
 from app.chat import ChatService
 from app.config import settings
 from app.llm.factory import LLMProviderFactory
@@ -108,7 +108,7 @@ async def get_llm_factory_override(request: Request) -> LLMProviderFactory:
     return request.app.state.llm_factory  # type: ignore[no-any-return]
 
 
-async def get_user_repository_override(request: Request) -> EnvUserRepository:
+async def get_user_repository_override(request: Request) -> UserRepository:
     """Get the UserRepository from app state (Phase 4.9-02 DI wiring)."""
     return request.app.state.user_repo  # type: ignore[no-any-return]
 
