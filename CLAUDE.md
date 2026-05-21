@@ -121,4 +121,14 @@ Use these **tech-specific skills** when working in the relevant stack:
 
 - `/fastapi` — FastAPI, Pydantic v2, SQLAlchemy async, uv patterns; use whenever adding endpoints, fixing 422 errors, configuring CORS, or touching auth/DI
 - `/chakra-ui` — Chakra UI v3 components, theming, slot recipes; use whenever editing frontend components that use `@chakra-ui/react`
+- `/react-stack` — React 19 + Vite 5 + TypeScript + Vitest; use whenever editing hooks, components, lib utilities, or writing Vitest tests
 - `/pydantic-ai-agent-builder` — multi-agent AI systems and orchestration; use if the LangChain layer is being redesigned or extended
+
+## Skill Routing
+
+| Work Type | Command | Use When |
+|-----------|---------|----------|
+| FastAPI routes, Pydantic models, SQLAlchemy, uv, JWT auth | `/fastapi` | Adding endpoints, fixing 422 errors, configuring DI, auth routes, alembic migrations |
+| Chakra UI v3 components, theming, slot recipes | `/chakra-ui` | Editing frontend components using `@chakra-ui/react` |
+| React 19 + Vite 5 + TypeScript + Vitest | `/react-stack` | Editing hooks, components, lib utilities, writing Vitest tests |
+| PydanticAI agents, multi-agent orchestration | `/pydantic-ai-agent-builder` | Phase 6 PydanticAI migration, agent tool design |
