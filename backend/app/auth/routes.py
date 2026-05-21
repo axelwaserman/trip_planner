@@ -10,7 +10,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
 from app.auth.exceptions import UserNotFoundError
 from app.auth.models import User
-from app.auth.repository import UserRepository
+from app.auth.repository import UserRepository, _DUMMY_HASH
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -130,6 +130,8 @@ async def login(
     try:
         user = repo.get_user(form_data.username)
     except UserNotFoundError:
+        # Run a dummy verify to equalise timing — prevents username enumeration.
+        repo.verify_password(form_data.password, _DUMMY_HASH)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect username or password",

@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 # invalidate all hashed passwords stored in AUTH_USERS.
 _password_hasher = PasswordHash([Argon2Hasher()])
 
+# Pre-computed hash used for constant-time comparison when a username is not found.
+# This prevents username enumeration via response-time differences.
+_DUMMY_HASH: str = _password_hasher.hash("__dummy__")
+
 
 class UserRepository(ABC):
     """Abstract base class for user persistence backends.
