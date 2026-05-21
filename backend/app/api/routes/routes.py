@@ -551,6 +551,15 @@ async def _test_openai_key(api_key: str) -> ProbeError | None:
                 message="OpenAI rejected this API key.",
                 hint="Check the key in /settings/providers and re-paste from your OpenAI dashboard.",
             )
+        if response.status_code == 403:
+            return ProbeError(
+                error=ProbeErrorCode.INVALID_API_KEY,
+                message="OpenAI rejected this API key (403 Forbidden).",
+                hint="Check org-level permissions in your OpenAI dashboard.",
+            )
+        if response.status_code == 429:
+            # Rate-limited but key is valid — mirror Anthropic pattern (A3).
+            return None
         response.raise_for_status()
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
         return ProbeError(
