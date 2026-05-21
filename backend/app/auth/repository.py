@@ -84,6 +84,14 @@ class EnvUserRepository(UserRepository):
         """Return True if *plain* matches *hashed* using Argon2."""
         return _password_hasher.verify(plain, hashed)
 
+    def add_user(self, user: UserInDB) -> None:
+        """Seed a user directly — for testing and local dev only."""
+        self._users[user.username] = user
+
+    def remove_user(self, username: str) -> None:
+        """Remove a seeded user — for test teardown only."""
+        self._users.pop(username, None)
+
 
 def _load_users_from_env() -> dict[str, UserInDB]:
     """Build the in-memory user dict from the AUTH_USERS environment variable.

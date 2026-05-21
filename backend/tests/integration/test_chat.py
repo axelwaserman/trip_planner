@@ -212,6 +212,7 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
     from pwdlib.hashers.argon2 import Argon2Hasher
 
     from app.auth.models import UserInDB
+    from app.auth.repository import EnvUserRepository
 
     # Arrange — user A (admin) creates a session
     session_response = client.post("/api/chat/session", headers=auth_headers)
@@ -219,16 +220,11 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
     session_id = session_response.json()["session_id"]
 
     # Register a second user (user B) in the EnvUserRepository for this test.
-    # We inject directly into app.state.user_repo._users so get_current_active_user
-    # can validate the token without restarting the lifespan.
+
     hasher = PasswordHash([Argon2Hasher()])
     user_b_name = "user_b_test_cross_user"
-    user_repo = client.app.state.user_repo
-    user_repo._users[user_b_name] = UserInDB(
-        username=user_b_name,
-        hashed_password=hasher.hash("testpw"),
-        disabled=False,
-    )
+    user_repo: EnvUserRepository = client.app.state.user_repo
+    user_repo.add_user(UserInDB(username=user_b_name, hashed_password=hasher.hash("testpw"), disabled=False))
     try:
         user_b_token = create_access_token({"sub": user_b_name})
         user_b_headers = {"Authorization": f"Bearer {user_b_token}"}
@@ -244,7 +240,7 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
         assert response.status_code == 404
     finally:
         # Clean up user B from the store to avoid polluting other tests
-        user_repo._users.pop(user_b_name, None)
+        user_repo.remove_user(user_b_name)
 
 
 def test_retry_endpoint_returns_422_when_no_last_tool_invocation(
