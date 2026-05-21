@@ -137,8 +137,9 @@ class MockFlightAPIClient(FlightAPIClient):
         Returns:
             List of mock flights matching criteria, sorted and paginated
         """
-        # Generate 3-8 flights for realistic results
-        num_flights = self._rng.randint(max(3, limit), limit)
+        # Generate up to `limit` flights; floor at min(3, limit) so small limits
+        # (e.g. limit=1) still work — randint requires lo <= hi.
+        num_flights = self._rng.randint(min(3, limit), limit)
         flights = self._generate_flights(query, num_flights)
 
         # Apply filters
