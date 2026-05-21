@@ -21,7 +21,7 @@ def two_users(client: TestClient) -> Generator[None]:
     from pwdlib.hashers.argon2 import Argon2Hasher
 
     from app.auth.models import UserInDB
-    from app.auth.repository import EnvUserRepository
+    from app.auth.repository import EnvUserRepository  # noqa: TC001
 
     hasher = PasswordHash([Argon2Hasher()])
     user_repo: EnvUserRepository = client.app.state.user_repo

@@ -212,7 +212,7 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
     from pwdlib.hashers.argon2 import Argon2Hasher
 
     from app.auth.models import UserInDB
-    from app.auth.repository import EnvUserRepository
+    from app.auth.repository import EnvUserRepository  # noqa: TC001
 
     # Arrange — user A (admin) creates a session
     session_response = client.post("/api/chat/session", headers=auth_headers)
