@@ -4,14 +4,11 @@ TDD RED phase: These tests import from app.auth.repository which does not exist 
 They are expected to fail with ImportError until Task 2 creates the module.
 """
 
-import os
-
 import pytest
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 
 from app.auth.repository import EnvUserRepository
-
 
 # ---------------------------------------------------------------------------
 # get_user

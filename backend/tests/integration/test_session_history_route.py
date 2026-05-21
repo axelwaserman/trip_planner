@@ -24,27 +24,32 @@ def client() -> Generator[TestClient]:
 
 
 @pytest.fixture
-def two_users() -> Generator[None]:
-    """Seed alice + bob — same shape as test_session.py::two_users."""
+def two_users(client: TestClient) -> Generator[None]:
+    """Seed alice + bob into the running EnvUserRepository.
+
+    Same pattern as test_session.py::two_users — injects into
+    ``app.state.user_repo._users`` after lifespan startup.
+    """
     from pwdlib import PasswordHash
     from pwdlib.hashers.argon2 import Argon2Hasher
 
-    from app.api.routes import auth as auth_module
+    from app.auth.models import UserInDB
 
     hasher = PasswordHash([Argon2Hasher()])
-    auth_module._users_db["alice"] = auth_module.UserInDB(
+    user_repo = client.app.state.user_repo
+    user_repo._users["alice"] = UserInDB(
         username="alice",
         hashed_password=hasher.hash("alicepass"),
         disabled=False,
     )
-    auth_module._users_db["bob"] = auth_module.UserInDB(
+    user_repo._users["bob"] = UserInDB(
         username="bob",
         hashed_password=hasher.hash("bobpass"),
         disabled=False,
     )
     yield
-    auth_module._users_db.pop("alice", None)
-    auth_module._users_db.pop("bob", None)
+    user_repo._users.pop("alice", None)
+    user_repo._users.pop("bob", None)
 
 
 def _login(client: TestClient, username: str, password: str) -> dict[str, str]:

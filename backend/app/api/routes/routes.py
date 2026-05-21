@@ -9,7 +9,8 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from app.api.routes.auth import User, get_current_active_user
+from app.api.routes.auth import get_current_active_user
+from app.auth.models import User
 from app.chat import ChatService
 from app.chat.models import (
     ChatRequest,

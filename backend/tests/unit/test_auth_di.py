@@ -5,15 +5,11 @@ UserRepository rather than the module-global _users_db dict.
 They will fail until Task 2 updates the auth route to accept the DI parameter.
 """
 
-from typing import TYPE_CHECKING
-
 import pytest
 from fastapi import HTTPException
 
-from app.auth.models import User, UserInDB
-from app.auth.repository import UserRepository
 from app.api.routes.auth import create_access_token, get_current_user, get_user_repository
-
+from app.auth.models import UserInDB
 
 # ---------------------------------------------------------------------------
 # Stub implementation of UserRepository Protocol

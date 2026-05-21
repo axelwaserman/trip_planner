@@ -1,4 +1,4 @@
-"""Unit tests for auth module — JWT + pwdlib password hashing."""
+"""Unit tests for auth module — JWT + password helpers."""
 
 from datetime import timedelta
 
@@ -8,49 +8,51 @@ from app.api.routes.auth import (
     create_access_token,
     get_current_active_user,
     get_current_user,
-    load_users_from_env,
-    verify_password,
 )
+from app.auth.repository import EnvUserRepository
 
 # ---------------------------------------------------------------------------
-# load_users_from_env
+# EnvUserRepository — user loading (replaces load_users_from_env tests)
 # ---------------------------------------------------------------------------
 
 
 def test_load_users_from_env_parses_single_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """Parses a single user:pass pair correctly."""
     monkeypatch.setenv("AUTH_USERS", "alice:secret")
-    users = load_users_from_env()
-    assert "alice" in users
+    repo = EnvUserRepository()
+    user = repo.get_user("alice")
+    assert user is not None
     # hashed password must NOT be the plain password
-    assert users["alice"].hashed_password != "secret"
+    assert user.hashed_password != "secret"
 
 
 def test_load_users_from_env_parses_multiple_users(monkeypatch: pytest.MonkeyPatch) -> None:
     """Parses comma-separated user:pass pairs."""
     monkeypatch.setenv("AUTH_USERS", "alice:secret,bob:hunter2")
-    users = load_users_from_env()
-    assert set(users.keys()) == {"alice", "bob"}
+    # We test by looking up both users
+    repo = EnvUserRepository()
+    assert repo.get_user("alice") is not None
+    assert repo.get_user("bob") is not None
 
 
 def test_load_users_from_env_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Falls back to admin:admin when AUTH_USERS is not set."""
     monkeypatch.delenv("AUTH_USERS", raising=False)
-    users = load_users_from_env()
-    assert "admin" in users
+    repo = EnvUserRepository()
+    assert repo.get_user("admin") is not None
 
 
 def test_load_users_from_env_ignores_malformed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skips entries that don't have exactly one colon."""
     monkeypatch.setenv("AUTH_USERS", "alice:secret,badentry,bob:hunter2")
-    users = load_users_from_env()
-    assert "alice" in users
-    assert "bob" in users
-    assert "badentry" not in users
+    repo = EnvUserRepository()
+    assert repo.get_user("alice") is not None
+    assert repo.get_user("bob") is not None
+    assert repo.get_user("badentry") is None
 
 
 # ---------------------------------------------------------------------------
-# verify_password
+# EnvUserRepository — verify_password
 # ---------------------------------------------------------------------------
 
 
@@ -59,9 +61,10 @@ def test_verify_password_returns_true_for_correct_password() -> None:
     from pwdlib import PasswordHash
     from pwdlib.hashers.argon2 import Argon2Hasher
 
+    repo = EnvUserRepository()
     ph = PasswordHash([Argon2Hasher()])
     hashed = ph.hash("mypassword")
-    assert verify_password("mypassword", hashed) is True
+    assert repo.verify_password("mypassword", hashed) is True
 
 
 def test_verify_password_returns_false_for_wrong_password() -> None:
@@ -69,9 +72,10 @@ def test_verify_password_returns_false_for_wrong_password() -> None:
     from pwdlib import PasswordHash
     from pwdlib.hashers.argon2 import Argon2Hasher
 
+    repo = EnvUserRepository()
     ph = PasswordHash([Argon2Hasher()])
     hashed = ph.hash("correct")
-    assert verify_password("wrong", hashed) is False
+    assert repo.verify_password("wrong", hashed) is False
 
 
 # ---------------------------------------------------------------------------
@@ -121,19 +125,37 @@ async def test_get_current_user_raises_401_for_invalid_token() -> None:
     """get_current_user raises HTTP 401 when the token is garbage."""
     from fastapi import HTTPException
 
+    from app.auth.models import UserInDB
+
+    class _NeverFindsUser:
+        def get_user(self, username: str) -> UserInDB | None:
+            return None
+
+        def verify_password(self, plain: str, hashed: str) -> bool:
+            return False
+
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user("not.a.valid.token")
+        await get_current_user("not.a.valid.token", _NeverFindsUser())
     assert exc_info.value.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_get_current_user_raises_401_for_unknown_user() -> None:
+async def test_get_current_user_raises_401_for_unknown_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """get_current_user raises HTTP 401 when the username is not in the store."""
-    token = create_access_token({"sub": "ghost_user_not_in_store"})
     from fastapi import HTTPException
 
+    from app.auth.models import UserInDB
+
+    class _NeverFindsUser:
+        def get_user(self, username: str) -> UserInDB | None:
+            return None
+
+        def verify_password(self, plain: str, hashed: str) -> bool:
+            return False
+
+    token = create_access_token({"sub": "ghost_user_not_in_store"})
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user(token)
+        await get_current_user(token, _NeverFindsUser())
     assert exc_info.value.status_code == 401
 
 

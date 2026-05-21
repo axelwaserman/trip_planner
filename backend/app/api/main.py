@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import auth, routes
+from app.auth.repository import EnvUserRepository
 from app.chat import ChatService
 from app.config import Settings
 from app.llm.factory import LLMProviderFactory
@@ -59,6 +60,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.chat_service = chat_service
     app.state.llm_factory = llm_factory
 
+    # Phase 4.9-02: UserRepository via DI — replaced by PostgresUserRepository in Phase 5.
+    app.state.user_repo = EnvUserRepository()
+
     # D-05 + D-06: discovery cache + per-entry timestamps for TTL gating.
     # Populated by POST /api/providers/refresh and read by GET /api/providers.
     app.state.provider_models_cache = {}
@@ -102,8 +106,14 @@ async def get_llm_factory_override(request: Request) -> LLMProviderFactory:
     return request.app.state.llm_factory  # type: ignore[no-any-return]
 
 
+async def get_user_repository_override(request: Request) -> EnvUserRepository:
+    """Get the UserRepository from app state (Phase 4.9-02 DI wiring)."""
+    return request.app.state.user_repo  # type: ignore[no-any-return]
+
+
 app.dependency_overrides[routes.get_chat_service] = get_chat_service_override
 app.dependency_overrides[routes.get_llm_factory] = get_llm_factory_override
+app.dependency_overrides[auth.get_user_repository] = get_user_repository_override
 
 # Include router
 app.include_router(routes.router)
