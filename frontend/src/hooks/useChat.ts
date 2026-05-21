@@ -933,8 +933,10 @@ export function useChat(): UseChatReturn {
         case 'error':
           if (event.retryable) {
             updateToolError(event)
+            setSession(submitSessionId, (prev) => ({ ...prev, hasError: true }))
           } else {
             toaster.create({ title: event.message, type: 'error', duration: 5000 })
+            setSession(submitSessionId, (prev) => ({ ...prev, hasError: true }))
             if (event.error_code === 'session_error') {
               const settings = loadProviderSettings() ?? DEFAULT_PROVIDER_SETTINGS
               const merged: ProviderSettings = {
