@@ -1,108 +1,36 @@
-# Current Focus: Phase 3 Complete, Planning Next Steps
+# Current Focus: Phase 4.9 Complete — Ready to Plan Phase 5
 
-**Status**: ✅ Phase 3 COMPLETE  
-**Date**: 2025-11-14  
-**Next Phase**: Phase 4 - LLM Provider Flexibility & UI Polish
-
----
-
-## Recent Completions (2025-11-13 → 2025-11-14)
-
-### ✅ Tool Visibility & Streaming
-- Frontend tool call/result cards with expandable details
-- Thinking/reasoning display with ThinkingCard component
-- Fixed SSE event structure (type field, flat tool metadata)
-- All event types working: content, thinking, tool_call, tool_result
-
-### ✅ Session Management
-- Session lifecycle API: POST/DELETE `/api/chat/session`
-- Multi-tab support with independent sessions
-- Frontend initializes session on mount
-- Session cleanup with expiration tracking
-- **Note**: Already implemented properly with ChatService managing `_histories` dict, no global store anti-pattern
-
-### ✅ Configuration Cleanup
-- Removed .env files
-- Model config consolidated in config.py
-- Using `init_chat_model()` with `reasoning=True` for qwen3:4b
-- Future-ready for Anthropic/OpenAI integration
+**Status**: Phase 4.9 (Pre-Phase-5 Prep) complete  
+**Date**: 2026-05-20  
+**Next phase**: Phase 5 — Postgres + Redis + docker-compose
 
 ---
 
-## Current Architecture Status
+## What is done
 
-**Working Well**:
-- ✅ Streaming SSE with tool visibility
-- ✅ Session management (per-instance, not global)
-- ✅ LangChain 1.0 with `bind_tools()` pattern
-- ✅ Abstract Client Pattern for FlightAPIClient
-- ✅ Pydantic models for all data structures
-- ✅ 56/76 tests passing (20 E2E tests skipped by default)
+- **v0 Foundation + Mock Demo** (Phases 1–3): shipped 2025-11-06 → 2025-11-14
+- **v1 Working Demo** (Phases 4.2–4.8): app unbroken, CI reset, mock LLM in tests, real LLM provider abstraction (cloud + dynamic Ollama), vendor-neutral tool JSON, discriminated StreamEvent hierarchy, Pydantic validators + test hygiene
+- **Phase 4.9 Pre-Phase-5 Prep**: models.py split into domain modules, UserRepository protocol extracted, CLAUDE.md skill-routing table added, 6 frontend bugs fixed
 
-**What Changed from Original Pre-Phase 4 Plan**:
-- Session management already exists (ChatService stores sessions in `_histories`)
-- No global `_global_chat_store` exists - was a misunderstanding
-- Frontend already handles session creation/management
-- `init_chat_model()` already being used (not ChatOllama directly)
+The codebase is on clean foundations: `just check` passes, default `pytest` is fast and offline, auth routes decoupled from internals, domain models in `auth/`, `chat/`, `providers/`, `flights/`.
 
----
+## What is next
 
-## Phase 4 Priorities (Reassessed)
+**Phase 5: Postgres + Redis + docker-compose**
 
-Based on current codebase state, here's what's actually needed:
+Goal: a single `docker compose up` brings up backend + frontend + Postgres + Redis. In-memory session history and the `AUTH_USERS` env-seed are replaced by PG-backed storage with `psycopg` async + SQLModel ORM.
 
-### High Priority (Next Sprint)
-1. **LLM Provider UI & Configuration** (4-6h)
-   - Frontend dropdown to select provider (Ollama/OpenAI/Anthropic)
-   - Config API endpoint to list available models per provider
-   - Pass provider choice via session metadata
-   - Update config.py to support multiple providers with API keys
+Start with `/gsd-discuss-phase` before planning — Phase 5 has a required pre-phase spike (verify `postgresql+psycopg://` async URI with SQLModel).
 
-2. **Structured Tool Output** (2-3h)
-   - Return JSON objects instead of formatted strings from tools
-   - Update tool result display to render structured data nicely
-   - Support tables, lists, and nested objects in ToolResultCard
+## Sequencing risks for Phase 5 planning
 
-3. **Error Handling & User Feedback** (2-3h)
-   - Better error messages in UI (API errors, session errors, tool errors)
-   - Loading states for tool execution
-   - Retry mechanism for failed tool calls
-   - Toast notifications for errors
+Before locking the Phase 5 plan, review these concerns from STATE.md Blockers:
 
-### Medium Priority
-4. **Frontend State Management** (3-4h)
-   - Replace useState with useReducer for complex message state
-   - Centralize event handling logic
-   - Better TypeScript types for message variants
+1. **LangChain → PydanticAI rework risk**: Phase 5 builds PG-backed message history against LangChain's `BaseChatMessageHistory` shape. Phase 6 then swaps the agent runtime to PydanticAI which uses a different `ModelMessage` shape — the `Message` SQLModel will likely need rework. Same risk at the provider layer: Phase 4.5's `LLMProvider` Protocol mirrors LangChain's `BaseChatModel`; PydanticAI is `Agent`-shaped. Consider keeping the `Message` table generic (JSON `payload` column with a discriminator) to reduce Phase 6 migration cost, or revisit whether to swap Phase 6 forward of Phase 5.
 
-5. **Testing & Polish** (2-3h)
-   - Add tests for new SSE event handling
-   - E2E tests for tool visibility
-   - Frontend component tests with React Testing Library
+2. **User-data migration gap**: Phase 4.2 keeps `AUTH_USERS` env-seed; Phase 5 retires it via a PG bootstrap script. The migration story is unspecified — do existing JWTs invalidate? do passwords carry over? Define this concretely before the Phase 5 plan is locked (suggested: rotate `jwt_secret` at Phase 5 boot; bootstrap script re-seeds usernames + re-hashes passwords from the env, then unsets the var).
 
-### Low Priority (Can Wait)
-6. **Structured Logging** (1-2h)
-   - Add request_id to all log entries
-   - Structured JSON logging with correlation IDs
+## Full detail
 
-7. **Performance Optimization**
-   - Debounce message sending
-   - Virtual scrolling for large message lists
-   - Message caching
-
----
-
-## Next Immediate Steps
-
-1. Review and update ROADMAP.md to reflect current state
-2. Choose first task from Phase 4 priorities
-3. Create focused task document for chosen work
-
----
-
-## Notes
-
-- E2E tests are skipped by default due to LLM dependency (run with `just test-e2e`)
-- Session management is already solid - no refactor needed
-- Focus shifted from "fixing technical debt" to "adding features"
-- Core architecture is sound, ready for Phase 4 enhancements
+- `.planning/STATE.md` — current milestone, blockers, deferred items
+- `.planning/ROADMAP.md` — authoritative phase list and success criteria
