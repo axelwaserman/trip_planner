@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
 status: in_progress
-stopped_at: Phase 4.9 complete; ready to plan Phase 5
-last_updated: "2026-05-20T00:00:00.000Z"
+stopped_at: Phase 4.9 complete; ready to plan Phase 5 (PydanticAI Migration — resequenced ahead of Postgres on 2026-06-02 per PR #20 review)
+last_updated: "2026-06-02T00:00:00.000Z"
 last_activity: 2026-05-21
 progress:
   total_phases: 16
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** A user can authenticate via a real login page, pick an LLM provider (a local Ollama model discovered from the host, or a cloud provider via API key), hold a natural conversation with the agent, watch it reason and call travel tools live, and trust that the results are structured, sanitized, and rendered usefully.
-**Current focus:** Phase 5 — Postgres + Redis + docker-compose (next up)
+**Current focus:** Phase 5 — **PydanticAI Migration** (next up; resequenced ahead of the PG re-platform on 2026-06-02 per PR #20 review)
 
 ## Current Position
 
@@ -67,8 +67,9 @@ Progress: [███████░░░] 69% (11/16 phases complete)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- 2026-05-15 (PR #6 review): Promote Postgres + Redis + docker-compose into v1 (Phase 5); replaces in-memory `_histories` and `AUTH_USERS` env-seed with `psycopg` async + `sqlmodel` ORM and a single `docker compose up`. ADR-006.
-- 2026-05-15 (PR #6 review): Migrate from LangChain to PydanticAI in Phase 6 — rationale: lighter and easier to test; LangChain currently works so the migration is sequenced after the PG+compose re-platform. ADR-001 → Superseded; ADR-007.
+- **2026-06-02 (PR #20 review): Resequence Phase 5 ↔ Phase 6 — PydanticAI migration now lands first (Phase 5), Postgres + Redis + docker-compose lands second (Phase 6).** Rationale: agent surface is still small (one `ChatService` + four providers), so doing PydanticAI first folds three pending reworks (LangChain → PydanticAI, `LLMProvider` Protocol → ABC, `_flight_client` back-door → DI) into one change and lets Phase 6's `Message` SQLModel target PydanticAI's `ModelMessage` from the start instead of being retrofitted. The `REQ-p5-*` requirement IDs keep their `p5` prefix as historical schedule labels.
+- 2026-05-15 (PR #6 review): Promote Postgres + Redis + docker-compose into v1 (now Phase 6 after the 2026-06-02 swap); replaces in-memory `_histories` and `AUTH_USERS` env-seed with `psycopg` async + `sqlmodel` ORM and a single `docker compose up`. ADR-006.
+- 2026-05-15 (PR #6 review): Migrate from LangChain to PydanticAI (now Phase 5 after the 2026-06-02 swap) — rationale: lighter and easier to test. ADR-001 → Superseded; ADR-007.
 - 2026-05-15 (PR #6 review): Drop rate limiting from v1 hardening (ADR-009). `slowapi` and the Redis-backed rate-limiter v2 row are obsolete.
 - 2026-05-15 (PR #6 review): Outbound HTTP uses **`pyreqwest`** (not `aiohttp`/`httpx`); database access uses **`psycopg` async + `sqlmodel`** ORM. ADR-008.
 - 2026-05-15 (PR #6 review): LLM provider abstraction must support **dynamic Ollama model discovery from the host** AND **real cloud LLMs via API key** (OpenAI + Anthropic). Stub-only providers are unacceptable.
@@ -79,7 +80,7 @@ Recent decisions affecting current work:
 - 2026-05-15 (PR #6 review): Phase 4.1, REQ-auth-backend, and REQ-ci-cd-pipeline reclassified as **Partial / Broken**; their unfinished slices reopened as REQ-login-page (4.2), REQ-llm-provider-ui-fix (4.2), and REQ-ci-reset (4.3).
 - Phase 4.1 (shipped, partial): Provider + model selection is per-session and persisted in localStorage; selecting a different provider creates a new session rather than mutating the active one — but the in-browser model selector does not produce a working session today.
 - PR #3 (shipped): `ChatInterface.tsx` decomposition uses the **hooks-shape** variant (`parseSSE` + `useSSEStream` + `useChat`); the reducer-based variant is superseded.
-- [Phase ?]: Phase 4.9-02: UserRepository Protocol structural typing — Phase 5 swaps EnvUserRepository for PostgresUserRepository by overriding one FastAPI dependency
+- [Phase ?]: Phase 4.9-02: UserRepository Protocol structural typing — Phase 6 swaps EnvUserRepository for PostgresUserRepository by overriding one FastAPI dependency
 
 ### Pending Todos
 
@@ -93,12 +94,12 @@ None yet.
 
 - ~~**Critical**: app non-functional in the browser — no login page (every `/api/*` returns 401) and the in-UI model selector does not produce a working session.~~ **Resolved in Phase 4.2.**
 - ~~**Critical**: CI runs nightly E2E with no useful signal and runs Ollama in E2E rather than auth flow + real travel APIs.~~ **Resolved in Phase 4.3.**
-- ADR transitions queued: ADR-001 (LangChain) → Superseded by ADR-007 (PydanticAI) in Phase 6; ADR-002 (Global Chat Store) → Obsolete once Phase 5 lands PG-backed history; ADR-008 (`pyreqwest`) lands in Phase 7.
-- Phase 5 retires the `AUTH_USERS` env-seeded user store. Phase 4.2's quick-and-dirty login keeps it as the user source for now; the cleanup happens at Phase 5.
+- ADR transitions queued: ADR-001 (LangChain) → Superseded by ADR-007 (PydanticAI) in **Phase 5** *(swapped from Phase 6 on 2026-06-02)*; ADR-002 (Global Chat Store) → Obsolete once **Phase 6** lands PG-backed history *(swapped from Phase 5)*; ADR-008 (`pyreqwest`) lands in Phase 7.
+- Phase 6 retires the `AUTH_USERS` env-seeded user store *(was Phase 5 before the 2026-06-02 swap)*. Phase 4.2's quick-and-dirty login keeps it as the user source until then.
 - Coverage debt: backend coverage is at the 60% CI floor — 80% target lands in Phase 8 (`REQ-backend-test-coverage-60` + `REQ-coverage-ratchet-80`).
 - Phase 8 gap: security headers + Chakra-aware `rehype-sanitize` not yet shipped (`REQ-security-headers`). Note: rate limiting is **not** part of v1 (ADR-009); the previous "REQ-security-hardening" line item in older drafts has been split, and the rate-limit slice deleted.
-- **Sequencing risk** (caught by 2026-05-15 follow-up review): Phase 5 builds PG-backed message history against LangChain's `BaseChatMessageHistory` shape, then Phase 6 swaps the agent runtime to PydanticAI which uses a different `ModelMessage` shape — the `Message` SQLModel will likely need rework. Same risk at the provider layer: Phase 4.5's `LLMProvider` Protocol mirrors LangChain's `BaseChatModel`; PydanticAI is `Agent`-shaped. Phase 4.5 + Phase 5 success criteria carry rework-risk notes; revisit ordering before planning Phase 5.
-- **User-data migration gap**: Phase 4.2 keeps `AUTH_USERS` env-seed; Phase 5 retires it via a PG bootstrap script. The migration story (do existing JWTs invalidate? do passwords carry over?) is unspecified — to be defined when Phase 5 is planned.
+- ~~**Sequencing risk** (caught by 2026-05-15 follow-up review): Phase 5 builds PG-backed message history against LangChain's `BaseChatMessageHistory` shape, then Phase 6 swaps the agent runtime to PydanticAI which uses a different `ModelMessage` shape — the `Message` SQLModel will likely need rework.~~ **Resolved on 2026-06-02 by swapping Phase 5 ↔ Phase 6 per PR #20 review** — PydanticAI now lands first, so the `Message` table is shaped against `ModelMessage` directly with no forward-migration debt.
+- **User-data migration gap**: Phase 4.2 keeps `AUTH_USERS` env-seed; **Phase 6** retires it via a PG bootstrap script *(was Phase 5 before the 2026-06-02 swap)*. The migration story (do existing JWTs invalidate? do passwords carry over?) is unspecified — to be defined when Phase 6 is planned.
 
 ## Deferred Items
 
@@ -118,6 +119,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-05-20T00:00:00.000Z
-Stopped at: Phase 4.9 complete; ready to plan Phase 5
+Last session: 2026-06-02T00:00:00.000Z
+Stopped at: Phase 4.9 complete; ready to plan Phase 5 (PydanticAI Migration — resequenced 2026-06-02 per PR #20 review)
 Resume file: None

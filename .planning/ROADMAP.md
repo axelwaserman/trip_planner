@@ -2,13 +2,13 @@
 
 ## Overview
 
-Trip Planner is an AI-powered chat agent that calls travel tools live and surfaces structured, sanitized results to a React + Chakra UI v3 frontend. Phases 1-3 shipped end-to-end; Phase 4.1 + auth + CI shipped *partially* (UI without working wiring; backend without login UI; CI with the wrong trigger schedule). Phases 4.2-4.8 completed the v1 working demo arc: unbreaking the app, resetting CI, mocking Ollama out of default tests, making the LLM provider abstraction real (cloud + dynamic Ollama), redesigning the tool JSON contract to map onto real travel APIs, layering errors / discriminated `StreamEvent` / Pydantic validators. Next: re-platform onto Postgres + Redis + docker-compose, then migrate from LangChain to PydanticAI, then ship the real flight API, then harden the HTTP layer (no rate limiting in v1).
+Trip Planner is an AI-powered chat agent that calls travel tools live and surfaces structured, sanitized results to a React + Chakra UI v3 frontend. Phases 1-3 shipped end-to-end; Phase 4.1 + auth + CI shipped *partially* (UI without working wiring; backend without login UI; CI with the wrong trigger schedule). Phases 4.2-4.8 completed the v1 working demo arc: unbreaking the app, resetting CI, mocking Ollama out of default tests, making the LLM provider abstraction real (cloud + dynamic Ollama), redesigning the tool JSON contract to map onto real travel APIs, layering errors / discriminated `StreamEvent` / Pydantic validators. Next: migrate from LangChain to PydanticAI **before** the PG re-platform (smaller agent surface = cheaper migration; keeps the eventual `Message` SQLModel from being shaped against LangChain's `BaseChatMessageHistory`), then re-platform onto Postgres + Redis + docker-compose, then ship the real flight API, then harden the HTTP layer (no rate limiting in v1).
 
 ## Milestones
 
 - ✅ **v0 Foundation + Mock Demo** — Phases 1-3 (shipped 2025-11-06 → 2025-11-14); 4.1 partial (shipped 2026-05-13, UI without working wiring)
 - ✅ **v1 Working Demo** — Phases 4.2-4.8 (complete; unbreak → CI reset → mock chat → real provider abstraction → vendor-neutral tool JSON → errors + StreamEvent → validators)
-- 🚧 **v1.5 Re-platform** — Phase 5 Postgres + Redis + docker-compose → Phase 6 PydanticAI migration
+- 🚧 **v1.5 Re-platform** — Phase 5 PydanticAI migration → Phase 6 Postgres + Redis + docker-compose
 - 🚧 **v2 Production** — Phase 7 Real Flight API (`pyreqwest` + Amadeus) → Phase 8 Hardening (security headers + structlog + coverage; **no rate limiting**)
 - 📋 **post-v1** — see REQUIREMENTS.md v2 section
 
@@ -31,8 +31,8 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [x] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts. (completed 2026-05-19)
 - [x] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`. (completed 2026-05-19)
 - [x] **Phase 4.9: Pre-Phase-5 Prep** — split monolithic `models.py` into domain modules (auth, chat, providers, flights); extract `UserRepository` interface; add TypeScript/React skill + CLAUDE.md skill routing; fix 6 frontend bugs (empty-session new-session, font harmonization, second thinking block, settings URL error, LM Studio stale cache, sidebar overflow). (completed 2026-05-21)
-- [ ] **Phase 5: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Session`/`Message` tables; named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
-- [ ] **Phase 6: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; ADR-001 → Superseded.
+- [ ] **Phase 5: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; convert `LLMProvider`/`BoundProvider` from `typing.Protocol` to `abc.ABC`; ADR-001 → Superseded. **Resequenced ahead of Postgres** (PR #20 review, 2026-06-02): the agent surface is still small, so doing PydanticAI first avoids shaping the Phase 6 `Message` SQLModel against LangChain's `BaseChatMessageHistory` and folds the Protocol→ABC tech debt into the same change.
+- [ ] **Phase 6: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Conversation`/`Message` tables (the `Message` shape now targets PydanticAI's `ModelMessage` directly, no JSON-payload escape hatch needed); named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
 - [ ] **Phase 7: Real Flight API** — Amadeus client behind existing `FlightAPIClient` ABC; **outbound HTTP via `pyreqwest`**; reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests.
 - [ ] **Phase 8: Production Hardening (slim)** — CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy headers; Chakra-aware `rehype-sanitize`; `structlog` + `RequestLoggingMiddleware`; backend coverage 60 → 80; frontend `{ branches: 70, lines: 80 }`. **No rate limiting** (ADR-009).
 
@@ -237,16 +237,29 @@ Plans:
 - [x] 04.9-04-PLAN.md — Wave 3: Frontend bugs B — settings URL error (ProviderCard), LM Studio stale cache (routes.py TTL bypass)
 - [x] 04.9-05-PLAN.md — Wave 4: react-stack SKILL.md + CLAUDE.md skill-routing table
 
-### Phase 5: Postgres + Redis + docker-compose
-**Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
+### Phase 5: PydanticAI Migration
+**Goal**: The chat agent runs on PydanticAI rather than LangChain — lighter, easier to test — preserving the **frontend-facing** SSE event contract from Phase 4.7. The internal extraction of thinking + tool_call chunks is rewritten against PydanticAI's stream surface. Done **before** the PG re-platform (resequenced 2026-06-02 per PR #20 review) so the eventual `Message` SQLModel is shaped against PydanticAI's `ModelMessage` from the start, not retrofitted.
 **Depends on**: Phase 4.9
-**Requirements**: REQ-postgres-redis-compose, REQ-p5-conversation-rename, REQ-p5-db-seed, REQ-p5-stream-event-abc, REQ-p5-session-create-request-split, REQ-p5-flight-client-di, REQ-p5-provider-info-split
+**Requirements**: REQ-pydantic-ai-migration, REQ-p5-stream-event-abc
+**Backward-compat scope**: the discriminated `StreamEvent` union (`ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent`) over the wire is preserved unchanged. Inside `ChatService`, the LangChain-specific `chunk.additional_kwargs["reasoning_content"]` extraction is replaced by the equivalent PydanticAI accessor — this is **not** a verbatim port. `LLMProvider` Protocol from Phase 4.5 has its `bind_tools` member retired; the surface is also converted from `typing.Protocol` to `abc.ABC` in the same change (closes the "Known Tech Debt" entry in ARCHITECTURE.md). `OllamaProvider`/`OpenAIProvider`/`AnthropicProvider`/`LMStudioProvider` are reshaped around PydanticAI `Model` + `Agent`.
+**Success Criteria** (what must be TRUE):
+  1. `ChatService` orchestrates a PydanticAI `Agent` per session; tool registration moves from LangChain `@tool` to PydanticAI's tool API. The `search_flights._flight_client` attribute-injection back-door is replaced by passing the client through PydanticAI's per-agent dependency mechanism.
+  2. The discriminated `StreamEvent` union over the SSE wire is preserved — frontend requires no changes; backend extraction is rewritten. As part of the rewrite, `StreamEvent` is refactored from a discriminated-union alias into a proper `StreamEvent(ABC)` base class with `ContentEvent`/`ThinkingEvent`/`ToolCallEvent`/`ToolResultEvent`/`ErrorEvent` as concrete subclasses (closes REQ-p5-stream-event-abc — bundled here because the producer is being rewritten anyway).
+  3. `LLMProvider` and `BoundProvider` are converted from `typing.Protocol` to `abc.ABC` (project rule per `/dignified-python`); concrete providers are explicit subclasses.
+  4. `langchain`, `langchain-core`, `langchain-ollama`, `langchain-openai`, `langchain-anthropic` are removed from `pyproject.toml`; `pydantic-ai` is added; `uv lock` reflects the swap.
+  5. The `MockLLMStream` fixture (Phase 4.4) is updated to drive the PydanticAI agent surface; default `pytest` remains fast and offline.
+  6. ADR-001 transitions Locked → Superseded; ADR-007 (PydanticAI) becomes Locked.
+
+### Phase 6: Postgres + Redis + docker-compose
+**Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
+**Depends on**: Phase 5
+**Requirements**: REQ-postgres-redis-compose, REQ-p5-conversation-rename, REQ-p5-db-seed, REQ-p5-session-create-request-split, REQ-p5-flight-client-di, REQ-p5-provider-info-split
 **Pre-phase spike** (do this in the discuss phase, not the plan phase): verify `postgresql+psycopg://` async URI works with SQLModel async session out of the box on SQLAlchemy ≥ 2.0. SQLModel historically targeted `asyncpg`; if `psycopg` async needs custom adapter glue, surface that before locking the model layer.
-**Rework risk**: `Message` SQLModel built around LangChain's `BaseChatMessageHistory` shape will need a column/shape revision when Phase 6 swaps in PydanticAI's `ModelMessage` history. Either keep the table generic (JSON `payload` column with a discriminator) or accept the Phase 6 migration cost.
-**User-data migration**: existing JWTs issued under the Phase 4.2 `AUTH_USERS` env-seed are invalidated at Phase 5 boot (rotate `jwt_secret`); the bootstrap script re-seeds the same usernames into PG with the same passwords (read once from the env, hashed via `pwdlib`, then env unset). Define this concretely in the Phase 5 plan.
+**Resequencing note**: this phase used to be Phase 5; Phase 5 (PydanticAI) was promoted ahead of it on 2026-06-02 per PR #20 review. The previous "Phase 6 rework risk" — `Message` SQLModel shaped against LangChain's `BaseChatMessageHistory` and needing a forward migration to PydanticAI's `ModelMessage` — is now eliminated: PydanticAI lands first, so the `Message` table is designed against `ModelMessage` from the start. The `REQ-p5-*` requirement IDs retain their `p5` prefix as historical schedule labels — they still belong to this phase, only the ordering changed.
+**User-data migration**: existing JWTs issued under the Phase 4.2 `AUTH_USERS` env-seed are invalidated at this phase's boot (rotate `jwt_secret`); the bootstrap script re-seeds the same usernames into PG with the same passwords (read once from the env, hashed via `pwdlib`, then env unset). Define this concretely in the Phase 6 plan.
 **Success Criteria** (what must be TRUE):
   1. `docker-compose.yml` defines services for `backend`, `frontend`, `postgres`, `redis`, with named volumes for PG data and Redis snapshot. `docker compose up` brings the full stack up reproducibly. Restarting compose preserves data via the named volumes (acceptance test: write a row, `docker compose down`, `docker compose up`, read the row back).
-  2. Backend uses `psycopg` async driver + `sqlmodel` for `User`, `Session`, and `Message` models. Migrations (alembic or sqlmodel-native) bring up a fresh DB from empty.
+  2. Backend uses `psycopg` async driver + `sqlmodel` for `User`, `Conversation`, and `Message` models. The `Message` table targets PydanticAI's `ModelMessage` shape directly. Migrations (alembic or sqlmodel-native) bring up a fresh DB from empty.
   3. `ChatService` history is Postgres-backed; users move from `AUTH_USERS` env-seed to a PG `users` table seeded by an idempotent bootstrap script — the `AUTH_USERS` env-var workaround is retired.
   4. `OLLAMA_BASE_URL` defaults to `host.docker.internal:11434` inside compose; the host's local Ollama remains reachable.
   5. CORS hard-coding in `api/main.py` is removed — the compose network collapses backend + frontend onto a single origin via the proxy. Any non-compose deployment defers CORS to Phase 8's `settings.cors_origins`.
@@ -255,23 +268,9 @@ Plans:
 **Carry-forward from Phase 4.9 review** (scoped into this phase):
 - REQ-p5-conversation-rename: rename `session` → `conversation`; add account-less → authenticated migration
 - REQ-p5-db-seed: replace `EnvUserRepository` with Postgres-backed seeding; remove env-file user loading
-- REQ-p5-stream-event-abc: `StreamEvent` discriminated union → proper ABC hierarchy
 - REQ-p5-session-create-request-split: split `SessionCreateRequest` by SRP into target + credentials
-- REQ-p5-flight-client-di: replace `_flight_client` attribute injection with `Depends(get_flight_client)`
+- REQ-p5-flight-client-di: replace `_flight_client` attribute injection with `Depends(get_flight_client)` *(may already be closed by Phase 5's PydanticAI dependency rewire — confirm at plan time)*
 - REQ-p5-provider-info-split: split `ProviderInfo` into `LocalProviderInfo` / `CloudProviderInfo`
-
-### Phase 6: PydanticAI Migration
-**Goal**: The chat agent runs on PydanticAI rather than LangChain — lighter, easier to test — preserving the **frontend-facing** SSE event contract from Phase 4.7. The internal extraction of thinking + tool_call chunks is rewritten against PydanticAI's stream surface.
-**Depends on**: Phase 5
-**Requirements**: REQ-pydantic-ai-migration
-**Backward-compat scope**: the discriminated `StreamEvent` union (`ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent`) over the wire is preserved unchanged. Inside `ChatService`, the LangChain-specific `chunk.additional_kwargs["reasoning_content"]` extraction is replaced by the equivalent PydanticAI accessor — this is **not** a verbatim port. `LLMProvider` Protocol from Phase 4.5 has its `bind_tools` member retired; `OllamaProvider`/`OpenAIProvider`/`AnthropicProvider` are reshaped around PydanticAI `Model` + `Agent`. The Phase 5 `Message` SQLModel is migrated forward (or retro-fitted) to PydanticAI's `ModelMessage` shape.
-**Success Criteria** (what must be TRUE):
-  1. `ChatService` orchestrates a PydanticAI `Agent` per session; tool registration moves from LangChain `@tool` to PydanticAI's tool API.
-  2. The discriminated `StreamEvent` union over the SSE wire is preserved — frontend requires no changes; backend extraction is rewritten.
-  3. `langchain`, `langchain-core`, `langchain-ollama` are removed from `pyproject.toml`; `pydantic-ai` is added; `uv lock` reflects the swap.
-  4. The `MockLLMStream` fixture (Phase 4.4) is updated to drive the PydanticAI agent surface; default `pytest` remains fast and offline.
-  5. The Phase 5 `Message` table either fits PydanticAI's `ModelMessage` shape via a migration or has been kept generic enough (JSON `payload` + discriminator) that no migration is needed — explicitly stated either way in the phase plan.
-  6. ADR-001 transitions Locked → Superseded; ADR-007 (PydanticAI) becomes Locked.
 
 ### Phase 7: Real Flight API
 **Goal**: The agent calls Amadeus through the existing `FlightAPIClient` ABC, with `pyreqwest` for outbound HTTP, retry + circuit breaker, and clean error mapping; the mock remains the test default.
@@ -316,8 +315,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 4/4 | Complete   | 2026-05-19 |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
-| 5. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
-| 6. PydanticAI Migration | v1.5 | 0 / TBD | Not started | - |
+| 5. PydanticAI Migration | v1.5 | 0 / TBD | Not started | - |
+| 6. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
@@ -326,4 +325,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 All 23 v1 requirements (3 validated + 3 partial-reopened + 17 active) map to exactly one phase. See `REQUIREMENTS.md` Traceability table for the full ID-to-phase mapping. No orphans; no duplicates.
 
 ---
-*Roadmap created: 2026-05-14 by `gsd-roadmapper`. Last updated: 2026-05-20 — Phase 4.9 plans determined (5 plans, 4 waves).*
+*Roadmap created: 2026-05-14 by `gsd-roadmapper`. Last updated: 2026-06-02 — PR #20 review resequenced Phase 5 ↔ Phase 6: PydanticAI now lands before Postgres so the `Message` SQLModel is shaped against `ModelMessage` directly and the Protocol→ABC tech debt closes in the same change.*

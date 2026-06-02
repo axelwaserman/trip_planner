@@ -1,5 +1,11 @@
 # Trip Planner - Development Roadmap
 
+> ⚠️ **STALE / SUPERSEDED (2026-06-02)** — This file was last refreshed in 2025-11-14 and
+> describes only the v0 (Phases 1–3) phase plan. The authoritative roadmap is now
+> [`.planning/ROADMAP.md`](.planning/ROADMAP.md), which tracks the v1 milestone
+> (Phases 4.2–8) including the 2026-06-02 swap that puts **Phase 5 = PydanticAI Migration**
+> and **Phase 6 = Postgres + Redis + docker-compose**. Retained here for the v0 history only.
+
 **Last Updated**: 2025-11-14
 
 ## Current Status

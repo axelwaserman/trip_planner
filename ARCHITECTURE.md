@@ -4,7 +4,7 @@
 
 ## Core Design Principles
 
-1. **Async-First**: All I/O operations use `async/await` (FastAPI, LangChain, aiohttp)
+1. **Async-First**: All I/O operations use `async/await` (FastAPI, LangChain, `pyreqwest` per ADR-008 — never `requests`, `aiohttp`, or `httpx`)
 2. **Type Safety**: Full mypy strict mode, explicit type hints everywhere
 3. **Dependency Injection**: FastAPI `Depends()` for clients and services
 4. **SOLID Principles**: Abstract clients, service layer, domain models
@@ -535,21 +535,24 @@ async def test_search_flights(mock_flight_client):
     assert len(results) > 0
 ```
 
-**Testing Streaming**:
+**Testing Streaming** (mirrors `tests/integration/test_chat_service_flow.py`):
 ```python
-# tests/test_chat_streaming.py
-async def test_chat_stream_with_tool():
-    async with httpx.AsyncClient() as client:
-        async with client.stream("POST", "/api/chat/stream", json=request) as response:
-            events = []
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    events.append(json.loads(line[6:]))
-            
-            # Assert event types
-            assert any(e["event_type"] == "tool_call" for e in events)
-            assert any(e["event_type"] == "tool_result" for e in events)
+def test_post_chat_streams_tool_events(client: TestClient, auth_headers: dict[str, str]) -> None:
+    response = client.post(
+        "/api/chat",
+        json={"message": "Find flights", "session_id": session_id},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+    body = response.text
+    assert '"type":"tool_call"' in body
+    assert '"type":"tool_result"' in body
+    assert '"type":"content"' in body
 ```
+
+Use FastAPI's `TestClient` rather than rolling an HTTP client by hand — it speaks SSE directly and avoids pinning the docs to any HTTP library (today `httpx` is still in the tree; ADR-008 migrates outbound HTTP to `pyreqwest`).
 
 ---
 
@@ -691,7 +694,7 @@ async def test_chat_stream_with_tool():
 - **ruff** - Linting and formatting
 - **mypy** - Static type checking (strict mode)
 - **uvicorn** - ASGI server
-- **httpx** - Async HTTP client (provider probes)
+- **`pyreqwest`** - Outbound HTTP client per ADR-008 (target; lands Phase 7 alongside real travel APIs). Provider probes and integration tests currently still use `httpx` and will migrate as part of ADR-008 — never add `aiohttp` or `requests`.
 
 ### Frontend
 - **React** 18+ - UI library
