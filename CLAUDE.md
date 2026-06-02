@@ -65,7 +65,7 @@ The `get_chat_service` dependency is overridden to pull from `app.state`, keepin
 
 **Named patterns** (see `ARCHITECTURE.md` for examples):
 - *Data Model Pattern*: Pydantic models in `models.py`; no business logic except validators
-- *Abstract Client Pattern*: `BaseAPIClient → FlightAPIClient → MockFlightAPIClient` in `tools/flight_client.py`
+- *Abstract Client Pattern*: `FlightAPIClient` ABC → `MockFlightAPIClient` in `tools/flight_client.py`
 - *Functional Service Pattern*: stateless logic as pure `async def` functions
 - *Dependency Injection Pattern*: FastAPI `Depends()` for routes; singletons via `app.state`
 
@@ -94,7 +94,7 @@ The `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.e2e`, and `@p
 ## Key constraints
 
 - `mypy` runs in strict mode — no bare `type: ignore` without a comment explaining why
-- All I/O must be `async def`; use `aiohttp[speedups]` for HTTP (never `requests`), no sync file I/O in async paths
+- All I/O must be `async def`; outbound HTTP uses `pyreqwest` (ADR-008) — never `requests`, never `aiohttp`, never `httpx`. No sync file I/O in async paths.
 - `ruff` line length is 120; `isort` first-party prefix is `app`
 - Comments explain *why*, not *what* — never restate what the code already says
 - Public APIs get docstrings (Args, Returns, Raises)
@@ -126,6 +126,7 @@ Use these **tech-specific skills** when working in the relevant stack:
 - `/chakra-ui` — Chakra UI v3 components, theming, slot recipes; use whenever editing frontend components that use `@chakra-ui/react`
 - `/react-stack` — React 19 + Vite 5 + TypeScript + Vitest; use whenever editing hooks, components, lib utilities, or writing Vitest tests
 - `/pydantic-ai-agent-builder` — multi-agent AI systems and orchestration; use if the LangChain layer is being redesigned or extended
+- `/dignified-python` — production Python standards (modern type syntax, ABC-vs-Protocol, pathlib); **always activate when discussing backend architecture or implementation**
 
 ## Skill Routing
 
@@ -135,3 +136,4 @@ Use these **tech-specific skills** when working in the relevant stack:
 | Chakra UI v3 components, theming, slot recipes | `/chakra-ui` | Editing frontend components using `@chakra-ui/react` |
 | React 19 + Vite 5 + TypeScript + Vitest | `/react-stack` | Editing hooks, components, lib utilities, writing Vitest tests |
 | PydanticAI agents, multi-agent orchestration | `/pydantic-ai-agent-builder` | Phase 6 PydanticAI migration, agent tool design |
+| Backend architecture, ABC interfaces, Python idioms | `/dignified-python` | Any backend architectural discussion or implementation; adding/modifying ABCs; reviewing Python code |

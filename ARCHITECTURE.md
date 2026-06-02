@@ -745,7 +745,7 @@ backend/
 │   │   ├── errors.py        # ProbeErrorCode (StrEnum) + ProbeError
 │   │   ├── factory.py       # LLMProviderFactory + SessionLLMConfig
 │   │   ├── log_scrubbing.py # ApiKeyScrubber log filter
-│   │   ├── protocol.py      # LLMProvider + BoundProvider Protocols
+│   │   ├── protocol.py      # LLMProvider + BoundProvider (uses typing.Protocol — see "Known Tech Debt" below)
 │   │   └── providers/
 │   │       ├── anthropic.py # AnthropicProvider
 │   │       ├── lmstudio.py  # LMStudioProvider
@@ -755,7 +755,7 @@ backend/
 │   │   └── models.py        # ProviderInfo, SessionCreateError, ProviderRefreshResponse
 │   ├── services/            # (empty — reserved for future functional services)
 │   └── tools/
-│       ├── flight_client.py # BaseAPIClient → FlightAPIClient → MockFlightAPIClient
+│       ├── flight_client.py # FlightAPIClient ABC → MockFlightAPIClient
 │       ├── flight_search.py # @tool search_flights
 │       └── retry.py         # Retry decorator
 ├── tests/
@@ -774,6 +774,22 @@ frontend/
 │   └── main.tsx
 └── vite.config.ts           # Proxy to backend API
 ```
+
+---
+
+## Known Tech Debt
+
+### `app/llm/protocol.py` uses `typing.Protocol`
+
+The `LLMProvider` and `BoundProvider` interfaces in `app/llm/protocol.py` are defined as `typing.Protocol` (with `@runtime_checkable`), not `abc.ABC`. This pre-dates the project rule documented in `CLAUDE.md`:
+
+> Abstract interfaces use `ABC`, never `Protocol`. Python abstract base classes are the project convention; `typing.Protocol` is reserved for third-party duck-typing compatibility only.
+
+**Why it stayed**: at the time `protocol.py` was authored (Phase 4.5), the rule was a global Python pattern (`~/.claude/rules/python/patterns.md`) preferring Protocols. The repo-local rule reversing this came later via the `/dignified-python` skill.
+
+**Migration plan**: convert both Protocols to ABCs as part of the Phase 6 PydanticAI migration — `bind_tools` retires from the interface at that point anyway, so the rework is a natural fit. Activate `/dignified-python` when doing the conversion.
+
+**Until then**: do NOT add new `typing.Protocol`-based interfaces. New abstract types must be ABCs (see `app/auth/repository.py::UserRepository` and `app/tools/flight_client.py::FlightAPIClient` for the canonical pattern in this repo).
 
 ---
 
