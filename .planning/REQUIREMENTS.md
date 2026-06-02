@@ -30,7 +30,7 @@ These three are reopened: backend code exists but the user-facing surface is inc
 
 #### Phase 4.2 — Unbreak the App
 
-- [ ] **REQ-login-page**: A React login route (`/login`) renders a Chakra UI form, calls `POST /token`, stores the resulting JWT, and redirects authenticated users to the chat. A protected-route wrapper redirects unauthenticated users back to `/login`. The current `AUTH_USERS=user1:pass1,...` env-var workaround stays in place — Postgres-seeded users are deferred to Phase 5. Logout clears the token. The chat page shows the logged-in user.
+- [ ] **REQ-login-page**: A React login route (`/login`) renders a Chakra UI form, calls `POST /token`, stores the resulting JWT, and redirects authenticated users to the chat. A protected-route wrapper redirects unauthenticated users back to `/login`. The current `AUTH_USERS=user1:pass1,...` env-var workaround stays in place — Postgres-seeded users are deferred to Phase 6. Logout clears the token. The chat page shows the logged-in user.
 - [ ] **REQ-llm-provider-ui-fix**: Selecting a provider/model in the dropdown reliably creates a session (`POST /api/chat/session`) and the next chat turn uses that session. Failure modes (provider not configured, Ollama unreachable, cloud API key missing) surface a deterministic error message in the UI rather than a silent broken state. Acceptance: with Ollama running and one local model present, a fresh user can log in, pick a provider+model, and complete one chat turn end-to-end.
 
 #### Phase 4.3 — CI Reset + Lint/DI Migration
@@ -45,7 +45,7 @@ These three are reopened: backend code exists but the user-facing surface is inc
 
 #### Phase 4.5 — LLM Provider Abstraction (real cloud + dynamic Ollama)
 
-- [ ] **REQ-llm-provider-abstraction**: `LLMProvider` Protocol with `ainvoke`, `astream`, `bind_tools`, `get_provider_name`, `validate_config`. Implementations: `OllamaProvider` performs **dynamic model discovery** by hitting Ollama's `GET /api/tags` against `OLLAMA_BASE_URL` (no hard-coded model list); `OpenAIProvider` and `AnthropicProvider` are **real**, not stubs, and accept API keys from env vars or session payload. `LLMProviderFactory` builds a provider from session-scoped config. `ChatService` accepts a provider via DI rather than a bare `BaseChatModel`. `validate_config` surfaces missing API keys as clear 400 errors at session creation. Each real cloud provider has a happy-path acceptance test, gated on the corresponding API key being present in the test environment (skipped in default PR CI). **Rework risk**: the Protocol surface mirrors LangChain's `BaseChatModel`; Phase 6 (PydanticAI) is `Agent`-shaped and will retire `bind_tools` from the Protocol — accept the rework or revisit ordering.
+- [ ] **REQ-llm-provider-abstraction**: `LLMProvider` Protocol with `ainvoke`, `astream`, `bind_tools`, `get_provider_name`, `validate_config`. Implementations: `OllamaProvider` performs **dynamic model discovery** by hitting Ollama's `GET /api/tags` against `OLLAMA_BASE_URL` (no hard-coded model list); `OpenAIProvider` and `AnthropicProvider` are **real**, not stubs, and accept API keys from env vars or session payload. `LLMProviderFactory` builds a provider from session-scoped config. `ChatService` accepts a provider via DI rather than a bare `BaseChatModel`. `validate_config` surfaces missing API keys as clear 400 errors at session creation. Each real cloud provider has a happy-path acceptance test, gated on the corresponding API key being present in the test environment (skipped in default PR CI). **Rework risk**: the Protocol surface mirrors LangChain's `BaseChatModel`; Phase 5 (PydanticAI) is `Agent`-shaped and will retire `bind_tools` from the Protocol and convert it to an ABC at the same time. *(Resequenced 2026-06-02 — was originally Phase 6.)*
 
 #### Phase 4.6 — Vendor-Neutral Tool JSON
 
@@ -68,27 +68,31 @@ These three are reopened: backend code exists but the user-facing surface is inc
 - [ ] **REQ-pydantic-validators**: Add **additional** field/model validators enforcing business rules — `Flight.arrival > Flight.departure`; `FlightQuery.departure_date >= today`; `FlightQuery.origin != FlightQuery.destination`. Note: `FlightQuery` already enforces `return_date > departure_date` via `validate_dates` (`backend/app/models.py:60-72`); this requirement is additive and must not replace or duplicate that existing validator. Invalid data rejected at the model boundary with a clear 422 response.
 - [ ] **REQ-test-fixture-dedup**: Extract `create_mock_flight()` into `backend/tests/fixtures/flights.py` and `parse_sse_events()` into `backend/tests/utils/sse.py`. Refactor existing tests to consume them. Delete orphaned `frontend/src/components/ToolCallCard.tsx` and `ToolResultCard.tsx` (superseded by `ToolExecutionCard`).
 
-#### Phase 5 — Postgres + Redis + docker-compose
+#### Phase 5 — PydanticAI Migration
 
-- [ ] **REQ-postgres-redis-compose**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes. Restarting compose preserves data via the named volumes (acceptance test: write a row, `docker compose down`, `docker compose up`, read the row back). Backend uses **`psycopg` async driver** + **`sqlmodel`** for `User`, `Session`, and `Message` models. **Pre-phase spike**: verify `postgresql+psycopg://` async URI works with SQLModel async session out-of-the-box on SQLAlchemy ≥ 2.0 — SQLModel historically targeted `asyncpg`, so adapter glue may be required. Migrations use `alembic` (or `sqlmodel`-native migration if it suffices). `ChatService._histories` is replaced by a Postgres-backed history store; the `Message` table either accepts a Phase 6 forward-migration to PydanticAI's `ModelMessage` shape, or is kept generic (JSON `payload` + discriminator) so no migration is needed — the phase plan must state which. **User-data migration**: existing JWTs from Phase 4.2 are invalidated at Phase 5 boot via `jwt_secret` rotation; the bootstrap script re-seeds the same usernames from the `AUTH_USERS` env var into PG with the same passwords (hashed via `pwdlib`, then env unset). Redis is wired in for ephemeral state (e.g., active-stream tracking) but not used for rate limiting (which is dropped from v1). `OLLAMA_BASE_URL` defaults to `host.docker.internal:11434` inside compose. CORS is resolved by the compose network — the previous hard-coded `allow_origins=["http://localhost:5173"]` becomes irrelevant when frontend + backend share an origin via the proxy. The `just install` and `just backend` commands document the compose path.
+> **Resequenced 2026-06-02 (PR #20 review):** PydanticAI now lands *before* Postgres. Rationale: agent surface is still small, so doing PydanticAI first folds three pending reworks (LangChain → PydanticAI, Protocol → ABC, `_flight_client` back-door → DI) into one change and lets Phase 6's `Message` SQLModel be shaped against PydanticAI's `ModelMessage` from the start instead of being retrofitted.
 
-#### Phase 5 — Architectural Carry-Forward from Phase 4.9 Review
+- [ ] **REQ-pydantic-ai-migration**: Replace LangChain `init_chat_model` + `bind_tools()` with PydanticAI `Agent`. The discriminated `StreamEvent` union over the SSE wire (from Phase 4.7) is preserved — **frontend must not need to change**. Inside `ChatService`, the LangChain-specific `chunk.additional_kwargs["reasoning_content"]` extraction is rewritten against PydanticAI's stream surface (this is not a verbatim port). `LLMProvider` and `BoundProvider` from Phase 4.5 are converted from `typing.Protocol` to `abc.ABC` (closing the ARCHITECTURE.md "Known Tech Debt" entry); `bind_tools` is retired from the interface. `OllamaProvider`/`OpenAIProvider`/`AnthropicProvider`/`LMStudioProvider` are reshaped around PydanticAI `Model` + `Agent`. `ChatService` orchestrates a PydanticAI `Agent` per session; tool registration moves from LangChain `@tool` to PydanticAI's tool API; the `search_flights._flight_client` attribute-injection back-door is replaced by PydanticAI's per-agent dependency mechanism. `langchain`, `langchain-core`, `langchain-ollama`, `langchain-openai`, `langchain-anthropic` are removed from `pyproject.toml`; `pydantic-ai` is added. The `MockLLMStream` fixture from Phase 4.4 is updated to drive the new agent surface. ADR-001 transitions Locked → Superseded; ADR-007 (PydanticAI) becomes Locked.
+
+- [ ] **REQ-p5-stream-event-abc**: Refactor the `StreamEvent` discriminated-union alias into a proper `StreamEvent(ABC)` base class with `ContentEvent`, `ThinkingEvent`, `ToolCallEvent`, `ToolResultEvent`, `ErrorEvent` as concrete subclasses. The `Annotated[..., Field(discriminator="type")]` union and the per-class `type: Literal[...]` instance fields are implementation details that leak Pydantic internals into consumers — encapsulate them behind the ABC. **Pulled into Phase 5** because the producer (`ChatService.chat_stream`) is being rewritten against PydanticAI's stream surface anyway — the ABC refactor is a natural fit for the same change.
+
+#### Phase 6 — Postgres + Redis + docker-compose
+
+- [ ] **REQ-postgres-redis-compose**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes. Restarting compose preserves data via the named volumes (acceptance test: write a row, `docker compose down`, `docker compose up`, read the row back). Backend uses **`psycopg` async driver** + **`sqlmodel`** for `User`, `Conversation`, and `Message` models — the `Message` shape targets PydanticAI's `ModelMessage` directly (no JSON-payload escape hatch needed; PydanticAI lands in Phase 5). **Pre-phase spike**: verify `postgresql+psycopg://` async URI works with SQLModel async session out-of-the-box on SQLAlchemy ≥ 2.0 — SQLModel historically targeted `asyncpg`, so adapter glue may be required. Migrations use `alembic` (or `sqlmodel`-native migration if it suffices). `ChatService._histories` is replaced by a Postgres-backed history store. **User-data migration**: existing JWTs from Phase 4.2 are invalidated at Phase 6 boot via `jwt_secret` rotation; the bootstrap script re-seeds the same usernames from the `AUTH_USERS` env var into PG with the same passwords (hashed via `pwdlib`, then env unset). Redis is wired in for ephemeral state (e.g., active-stream tracking) but not used for rate limiting (which is dropped from v1). `OLLAMA_BASE_URL` defaults to `host.docker.internal:11434` inside compose. CORS is resolved by the compose network — the previous hard-coded `allow_origins=["http://localhost:5173"]` becomes irrelevant when frontend + backend share an origin via the proxy. The `just install` and `just backend` commands document the compose path.
+
+#### Phase 6 — Architectural Carry-Forward from Phase 4.9 Review
+
+> The `REQ-p5-*` IDs retain their `p5` prefix as historical schedule labels (originally scheduled for the old Phase 5). They still belong to this phase; only the phase number changed.
 
 - [ ] **REQ-p5-conversation-rename**: Rename the `session` concept throughout the codebase to `conversation` (or `chat`) and reserve `session` for user navigation sessions (browser/JWT lifetime). Define distinct data structures for account-less conversations (pre-login) and authenticated ones, plus a migration mechanism that promotes an account-less conversation to an authenticated user's history upon login — persisting the message history without data loss.
 
 - [ ] **REQ-p5-db-seed**: Replace `EnvUserRepository` with `PostgresUserRepository` as the only user backend. Add a `SEED_DEMO_USERS=true` config flag that pre-populates Postgres with test/demo users at startup (read once from `AUTH_USERS` env, hashed via `pwdlib`, then env unset). This makes `EnvUserRepository` redundant — remove it entirely.
 
-- [ ] **REQ-p5-stream-event-abc**: Refactor the `StreamEvent` discriminated-union alias into a proper `StreamEvent(ABC)` base class with `ContentEvent`, `ThinkingEvent`, `ToolCallEvent`, `ToolResultEvent`, `ErrorEvent` as concrete subclasses. The `Annotated[..., Field(discriminator="type")]` union and the per-class `type: Literal[...]` instance fields are implementation details that leak Pydantic internals into consumers — encapsulate them behind the ABC.
-
 - [ ] **REQ-p5-session-create-request-split**: Split `SessionCreateRequest` into two models respecting SRP: `ConversationTarget(provider, model)` for identifying what to talk to, and `ProviderCredentials(base_url, api_key)` for how to reach it. The SSRF/length validators move to `ProviderCredentials`. Update all session-creation call sites.
 
-- [ ] **REQ-p5-flight-client-di**: Replace the back-door `search_flights._flight_client = flight_client` attribute injection with a proper FastAPI `Depends(get_flight_client)` dependency. Requires refactoring the LangChain `@tool` into a class-based tool or a request-scoped factory that receives the client via DI.
+- [ ] **REQ-p5-flight-client-di**: Replace the back-door `search_flights._flight_client = flight_client` attribute injection with a proper FastAPI `Depends(get_flight_client)` dependency. **Note**: this may already be closed by Phase 5's PydanticAI dependency rewire — confirm at plan time and either drop the requirement or scope it to the residual FastAPI route plumbing.
 
 - [ ] **REQ-p5-provider-info-split**: Split `ProviderInfo` into `LocalProviderInfo(available, models, base_url: str)` and `CloudProviderInfo(available, models, api_key_configured: bool)` subclasses of a `ProviderInfo` base. Update the `GET /api/providers` response schema and the frontend type definitions accordingly.
-
-#### Phase 6 — PydanticAI Migration
-
-- [ ] **REQ-pydantic-ai-migration**: Replace LangChain `init_chat_model` + `bind_tools()` with PydanticAI `Agent`. The discriminated `StreamEvent` union over the SSE wire (from Phase 4.7) is preserved — **frontend must not need to change**. Inside `ChatService`, the LangChain-specific `chunk.additional_kwargs["reasoning_content"]` extraction is rewritten against PydanticAI's stream surface (this is not a verbatim port). `LLMProvider` Protocol from Phase 4.5 has its `bind_tools` member retired; `OllamaProvider`/`OpenAIProvider`/`AnthropicProvider` are reshaped around PydanticAI `Model` + `Agent`. The Phase 5 `Message` SQLModel either fits PydanticAI's `ModelMessage` shape via a forward migration, or was kept generic enough (JSON `payload` + discriminator) that no migration is needed — the phase plan must state which. `ChatService` orchestrates a PydanticAI `Agent` per session; tool registration moves from LangChain `@tool` to PydanticAI's tool API. `langchain`, `langchain-core`, `langchain-ollama` are removed from `pyproject.toml`; `pydantic-ai` is added. The `MockLLMStream` fixture from Phase 4.4 is updated to drive the new agent surface. ADR-001 transitions Locked → Superseded; ADR-007 (PydanticAI) becomes Locked.
 
 #### Phase 7 — Real Flight API
 
@@ -124,7 +128,7 @@ Acknowledged but deferred. Not in the active roadmap; tracked here for visibilit
 
 ### Architecture Pivots
 
-- **ARCH-01**: DSPy integration (PydanticAI is the v1 architectural pivot — see Phase 6)
+- **ARCH-01**: DSPy integration (PydanticAI is the v1 architectural pivot — see Phase 5)
 
 ## Out of Scope
 
@@ -133,18 +137,18 @@ Explicitly excluded from v1 with reasoning. Listed here so they are not silently
 | Feature | Reason |
 |---------|--------|
 | Rate limiting (`slowapi` or otherwise) | Demo-grade traffic does not warrant it (ADR-009). Revisit only if a public deployment surface materializes. |
-| Session-management refactor (`SessionStore` ABC, replace global `_global_chat_store`) | **Premise was wrong** (no global store ever existed) and is now also **superseded** by Phase 5's Postgres-backed history. |
+| Session-management refactor (`SessionStore` ABC, replace global `_global_chat_store`) | **Premise was wrong** (no global store ever existed) and is now also **superseded** by Phase 6's Postgres-backed history. |
 | DI lifespan refactor (replace `@lru_cache` with `app.state`) | **Premise was wrong.** Singletons already live in `app.state`; no `@lru_cache` factories exist. |
 | Default-config `rehype-sanitize` drop-in (pre-phase-4-refactor Task 10) | Superseded by the Chakra-aware custom `sanitizeConfig.ts` (Phase 8 / REQ-security-headers). |
 | Reducer-based `ChatInterface` decomposition (pre-phase-4-refactor Task 5) | Superseded by the hooks-shape decomposition shipped in PR #3. |
 | JWT token revocation / deny-list | Mitigated by 60-min token expiry and `jwt_secret` rotation on breach. Deferred to v2. |
 | `openapi-typescript` codegen | Premature until API contract stabilizes after Phase 4.6. Deferred to v2. |
 | Playwright frontend E2E | Defer until after Phase 4 component refactor stabilizes. Deferred to v2. |
-| User registration endpoint | Internal/demo project; users seeded from `AUTH_USERS` env (Phase 4.2) then PG-seeded (Phase 5). Deferred to v2. |
+| User registration endpoint | Internal/demo project; users seeded from `AUTH_USERS` env (Phase 4.2) then PG-seeded (Phase 6). Deferred to v2. |
 | Redis-backed rate limiter | Rate limiting itself is dropped from v1 (ADR-009). |
 | Additional travel tools (hotels, restaurants, weather) | v1 covers flights only; deferred to v2. |
 | Multi-city / multi-leg trip planning | v1 covers single origin/destination/date; deferred to v2. |
-| DSPy migration | Not in v1 scope (PydanticAI is the v1 architectural pivot, in Phase 6). |
+| DSPy migration | Not in v1 scope (PydanticAI is the v1 architectural pivot, in Phase 5). |
 | GraphQL API migration | Not in v1 scope; deferred indefinitely. |
 
 ## Traceability
@@ -175,14 +179,14 @@ Each v1 requirement maps to exactly one phase. **Validated** requirements are li
 | REQ-frontend-bug-fixes | Phase 4.9 | Pending |
 | REQ-pydantic-validators | Phase 4.8 | Pending |
 | REQ-test-fixture-dedup | Phase 4.8 | Pending |
-| REQ-postgres-redis-compose | Phase 5 | Pending |
-| REQ-p5-conversation-rename | Phase 5 | Pending |
-| REQ-p5-db-seed | Phase 5 | Pending |
+| REQ-pydantic-ai-migration | Phase 5 | Pending |
 | REQ-p5-stream-event-abc | Phase 5 | Pending |
-| REQ-p5-session-create-request-split | Phase 5 | Pending |
-| REQ-p5-flight-client-di | Phase 5 | Pending |
-| REQ-p5-provider-info-split | Phase 5 | Pending |
-| REQ-pydantic-ai-migration | Phase 6 | Pending |
+| REQ-postgres-redis-compose | Phase 6 | Pending |
+| REQ-p5-conversation-rename | Phase 6 | Pending |
+| REQ-p5-db-seed | Phase 6 | Pending |
+| REQ-p5-session-create-request-split | Phase 6 | Pending |
+| REQ-p5-flight-client-di | Phase 6 | Pending |
+| REQ-p5-provider-info-split | Phase 6 | Pending |
 | REQ-real-flight-api | Phase 7 | Pending |
 | REQ-security-headers | Phase 8 | Pending |
 | REQ-structured-logging | Phase 8 | Pending |
@@ -198,4 +202,5 @@ Each v1 requirement maps to exactly one phase. **Validated** requirements are li
 
 ---
 *Requirements defined: 2026-05-14*
-*Last updated: 2026-05-15 after PR #6 review (and follow-up adversarial pass) — v1 expanded to include Postgres+compose (Phase 5), PydanticAI migration (Phase 6), and a vendor-neutral tool JSON contract (Phase 4.6); rate limiting dropped; `aiohttp` → `pyreqwest`; `slow` marker scheduled for removal in Phase 4.4; ruff line length 100→120 and Annotated DI migration scheduled for Phase 4.3.*
+*Last updated: 2026-06-02 after PR #20 review — Phase 5 ↔ Phase 6 swapped: PydanticAI migration (REQ-pydantic-ai-migration, REQ-p5-stream-event-abc) now lands at Phase 5, before Postgres+compose at Phase 6. The `REQ-p5-*` IDs keep their `p5` prefix as historical schedule labels.*
+*Earlier: 2026-05-15 after PR #6 review (and follow-up adversarial pass) — v1 expanded to include Postgres+compose, PydanticAI migration, and a vendor-neutral tool JSON contract (Phase 4.6); rate limiting dropped; `aiohttp` → `pyreqwest`; `slow` marker scheduled for removal in Phase 4.4; ruff line length 100→120 and Annotated DI migration scheduled for Phase 4.3.*

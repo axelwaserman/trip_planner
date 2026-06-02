@@ -118,5 +118,5 @@ jobs:
 |-------|----------|
 | After Phase 4 | Add `npm run test:coverage` step to frontend job |
 | After Phase 4 | Add frontend coverage threshold enforcement |
-| After Phase 5 | Add `docker build` verification job |
+| After Phase 6 | Add `docker build` verification job (compose lands in Phase 6 post-2026-06-02 swap) |
 | Later | Add deploy job triggered on merge to `master` |

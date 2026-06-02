@@ -1,5 +1,12 @@
 # Trip Planner: Implementation Plan
 
+> ⚠️ **SUPERSEDED (2026-06-02)** — This document uses the legacy engineering-phase numbering
+> (Phase 0 Bug Fixes → Phase 6 Coverage 80%). The product-phase numbering scheme in
+> `.planning/ROADMAP.md` is now authoritative (Phases 1–8, with the 2026-06-02 swap putting
+> PydanticAI = Phase 5 and Postgres + Redis + docker-compose = Phase 6). Engineering items
+> are folded into the product-phase tree; there is no parallel "engineering Phase N" track.
+> Retained for historical reference only.
+
 > Generated: 2026-05-13
 > Last updated: 2026-05-13
 > Based on: `.planning/codebase/` analysis + adversarial review + CI/CD plan + skills audit

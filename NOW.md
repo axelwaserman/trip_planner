@@ -1,108 +1,51 @@
-# Current Focus: Phase 3 Complete, Planning Next Steps
+# Current Focus: Phase 4.9 Complete — Ready to Plan Phase 5 (PydanticAI Migration)
 
-**Status**: ✅ Phase 3 COMPLETE  
-**Date**: 2025-11-14  
-**Next Phase**: Phase 4 - LLM Provider Flexibility & UI Polish
-
----
-
-## Recent Completions (2025-11-13 → 2025-11-14)
-
-### ✅ Tool Visibility & Streaming
-- Frontend tool call/result cards with expandable details
-- Thinking/reasoning display with ThinkingCard component
-- Fixed SSE event structure (type field, flat tool metadata)
-- All event types working: content, thinking, tool_call, tool_result
-
-### ✅ Session Management
-- Session lifecycle API: POST/DELETE `/api/chat/session`
-- Multi-tab support with independent sessions
-- Frontend initializes session on mount
-- Session cleanup with expiration tracking
-- **Note**: Already implemented properly with ChatService managing `_histories` dict, no global store anti-pattern
-
-### ✅ Configuration Cleanup
-- Removed .env files
-- Model config consolidated in config.py
-- Using `init_chat_model()` with `reasoning=True` for qwen3:4b
-- Future-ready for Anthropic/OpenAI integration
+**Status**: Phase 4.9 (Pre-Phase-5 Prep) complete
+**Date**: 2026-06-02
+**Next phase**: **Phase 5 — PydanticAI Migration** (resequenced ahead of Postgres per PR #20 review)
 
 ---
 
-## Current Architecture Status
+## What is done
 
-**Working Well**:
-- ✅ Streaming SSE with tool visibility
-- ✅ Session management (per-instance, not global)
-- ✅ LangChain 1.0 with `bind_tools()` pattern
-- ✅ Abstract Client Pattern for FlightAPIClient
-- ✅ Pydantic models for all data structures
-- ✅ 56/76 tests passing (20 E2E tests skipped by default)
+- **v0 Foundation + Mock Demo** (Phases 1–3): shipped 2025-11-06 → 2025-11-14
+- **v1 Working Demo** (Phases 4.2–4.8): app unbroken, CI reset, mock LLM in tests, real LLM provider abstraction (cloud + dynamic Ollama), vendor-neutral tool JSON, discriminated StreamEvent hierarchy, Pydantic validators + test hygiene
+- **Phase 4.9 Pre-Phase-5 Prep**: models.py split into domain modules, UserRepository protocol extracted, CLAUDE.md skill-routing table added, 6 frontend bugs fixed
 
-**What Changed from Original Pre-Phase 4 Plan**:
-- Session management already exists (ChatService stores sessions in `_histories`)
-- No global `_global_chat_store` exists - was a misunderstanding
-- Frontend already handles session creation/management
-- `init_chat_model()` already being used (not ChatOllama directly)
+The codebase is on clean foundations: `just check` passes, default `pytest` is fast and offline, auth routes decoupled from internals, domain models in `auth/`, `chat/`, `providers/`, `flights/`.
 
----
+## What is next
 
-## Phase 4 Priorities (Reassessed)
+**Phase 5: PydanticAI Migration** *(was Phase 6 — promoted ahead of Postgres on 2026-06-02 per PR #20 review)*
 
-Based on current codebase state, here's what's actually needed:
+Goal: port `ChatService` from LangChain `bind_tools()` to a PydanticAI `Agent` per session, preserving the SSE `StreamEvent` wire contract so the frontend doesn't change. Bundle in:
 
-### High Priority (Next Sprint)
-1. **LLM Provider UI & Configuration** (4-6h)
-   - Frontend dropdown to select provider (Ollama/OpenAI/Anthropic)
-   - Config API endpoint to list available models per provider
-   - Pass provider choice via session metadata
-   - Update config.py to support multiple providers with API keys
+- Convert `LLMProvider` and `BoundProvider` from `typing.Protocol` to `abc.ABC` (closes the ARCHITECTURE.md "Known Tech Debt" entry).
+- Rewire `search_flights._flight_client` attribute injection to PydanticAI's per-agent dependency mechanism.
+- Refactor `StreamEvent` discriminated-union alias into a proper `StreamEvent(ABC)` hierarchy (REQ-p5-stream-event-abc — pulled into Phase 5 because the producer is being rewritten anyway).
+- Drop `langchain*` deps; add `pydantic-ai`. ADR-001 → Superseded; ADR-007 → Locked.
 
-2. **Structured Tool Output** (2-3h)
-   - Return JSON objects instead of formatted strings from tools
-   - Update tool result display to render structured data nicely
-   - Support tables, lists, and nested objects in ToolResultCard
+Start with `/gsd-discuss-phase` before planning. Then activate `/pydantic-ai-agent-builder` and `/dignified-python` for the implementation.
 
-3. **Error Handling & User Feedback** (2-3h)
-   - Better error messages in UI (API errors, session errors, tool errors)
-   - Loading states for tool execution
-   - Retry mechanism for failed tool calls
-   - Toast notifications for errors
+## Why this order (Phase 5 = PydanticAI before Phase 6 = Postgres)
 
-### Medium Priority
-4. **Frontend State Management** (3-4h)
-   - Replace useState with useReducer for complex message state
-   - Centralize event handling logic
-   - Better TypeScript types for message variants
+The original sequencing put Postgres first and PydanticAI second. PR #20 review flipped it. Reasons:
 
-5. **Testing & Polish** (2-3h)
-   - Add tests for new SSE event handling
-   - E2E tests for tool visibility
-   - Frontend component tests with React Testing Library
+1. **Cheaper now than later.** `ChatService.chat_stream()` plus four provider classes is the entire LangChain footprint. The migration cost grows monotonically as more agent logic accretes — doing it before persistence is the cheapest moment.
+2. **No more `Message` shape gamble.** The previous plan made Phase 6 (Postgres) build a `Message` SQLModel against LangChain's `BaseChatMessageHistory`, with a forward-migration to PydanticAI's `ModelMessage` deferred. With PydanticAI first, the table is shaped against `ModelMessage` from the start — no migration, no JSON-payload escape hatch.
+3. **Folds three reworks into one.** The Protocol→ABC tech debt in `app/llm/protocol.py`, the `bind_tools` retirement, and the `_flight_client` attribute-injection back-door all close in the same change.
 
-### Low Priority (Can Wait)
-6. **Structured Logging** (1-2h)
-   - Add request_id to all log entries
-   - Structured JSON logging with correlation IDs
+## Sequencing risks for Phase 5 (PydanticAI) planning
 
-7. **Performance Optimization**
-   - Debounce message sending
-   - Virtual scrolling for large message lists
-   - Message caching
+1. **PydanticAI streaming surface differs from LangChain.** The `chunk.additional_kwargs["reasoning_content"]` extraction in `ChatService` is LangChain-specific. The PydanticAI rewrite is not a verbatim port — confirm during the discuss phase that thinking-token surfacing works on Ollama qwen3 through PydanticAI before locking the plan.
+2. **`MockLLMStream` fixture has to be rebuilt.** The Phase 4.4 fixture is shaped against LangChain's chunk types. Default `pytest` must remain fast and offline, so the new fixture has to drive PydanticAI's agent surface end-to-end without reaching for a real model.
 
----
+## Sequencing risks for Phase 6 (Postgres) planning *(unchanged from before, but the Phase 5↔6 swap removes the headline risk)*
 
-## Next Immediate Steps
+1. ~~LangChain → PydanticAI rework risk on the `Message` table~~ — **resolved by the resequencing.** The table now targets PydanticAI's `ModelMessage` from the start.
+2. **User-data migration gap**: Phase 4.2 keeps `AUTH_USERS` env-seed; Phase 6 retires it via a PG bootstrap script. The migration story is unspecified — do existing JWTs invalidate? do passwords carry over? Define this concretely before the Phase 6 plan is locked (suggested: rotate `jwt_secret` at Phase 6 boot; bootstrap script re-seeds usernames + re-hashes passwords from the env, then unsets the var).
 
-1. Review and update ROADMAP.md to reflect current state
-2. Choose first task from Phase 4 priorities
-3. Create focused task document for chosen work
+## Full detail
 
----
-
-## Notes
-
-- E2E tests are skipped by default due to LLM dependency (run with `just test-e2e`)
-- Session management is already solid - no refactor needed
-- Focus shifted from "fixing technical debt" to "adding features"
-- Core architecture is sound, ready for Phase 4 enhancements
+- `.planning/STATE.md` — current milestone, blockers, deferred items
+- `.planning/ROADMAP.md` — authoritative phase list and success criteria
