@@ -73,6 +73,4 @@ def test_pydantic_floor_at_least_2_12() -> None:
     match = re.search(r">=\s*(\d+)\.(\d+)", spec)
     assert match, f"pydantic spec missing >= floor: {spec!r}"
     major, minor = int(match.group(1)), int(match.group(2))
-    assert (major, minor) >= (2, 12), (
-        f"pydantic floor must be >=2.12 (Pitfall 8); got {spec!r}"
-    )
+    assert (major, minor) >= (2, 12), f"pydantic floor must be >=2.12 (Pitfall 8); got {spec!r}"

@@ -64,10 +64,11 @@ async def test_o3_mini_emits_thinking_events_against_live_openai() -> None:
                 continue
             async with stream_method(agent_run.ctx) as stream:
                 async for event in stream:
-                    if isinstance(event, PartStartEvent) and isinstance(event.part, ThinkingPart):
-                        saw_thinking = True
-                    elif isinstance(event, PartDeltaEvent) and isinstance(
-                        event.delta, ThinkingPartDelta
+                    if (
+                        isinstance(event, PartStartEvent)
+                        and isinstance(event.part, ThinkingPart)
+                        or isinstance(event, PartDeltaEvent)
+                        and isinstance(event.delta, ThinkingPartDelta)
                     ):
                         saw_thinking = True
     assert saw_thinking, "o3-mini must emit at least one ThinkingPart-derived event"

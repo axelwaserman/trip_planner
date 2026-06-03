@@ -39,12 +39,8 @@ async def test_chat_stream_emits_content_events_for_greeting() -> None:
 
     # History: one ModelRequest (with UserPromptPart) and one ModelResponse (with TextPart).
     msgs = await service._conversation_store.load(session_id)
-    user_msgs = [
-        p for m in msgs if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, UserPromptPart)
-    ]
-    assistant_msgs = [
-        p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)
-    ]
+    user_msgs = [p for m in msgs if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, UserPromptPart)]
+    assistant_msgs = [p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)]
     assert len(user_msgs) == 1
     assert str(user_msgs[0].content) == "Hello"
     assert len(assistant_msgs) == 1

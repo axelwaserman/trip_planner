@@ -55,6 +55,4 @@ def test_search_flights_first_param_is_runcontext() -> None:
     first_param = next(iter(sig.parameters.values()))
     assert first_param.name == "ctx"
     annotation_str = str(first_param.annotation)
-    assert "RunContext" in annotation_str, (
-        f"first param annotation must reference RunContext; got {annotation_str!r}"
-    )
+    assert "RunContext" in annotation_str, f"first param annotation must reference RunContext; got {annotation_str!r}"

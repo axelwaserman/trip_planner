@@ -38,7 +38,6 @@ def test_no_langchain_imports_in_app_tree() -> None:
                     if alias.name.startswith("langchain"):
                         offenders.append((str(rel), alias.name))
 
-    assert not offenders, (
-        "Lingering langchain imports under backend/app/ — Phase 5 must remove all of:\n"
-        + "\n".join(f"  {file}: {module}" for file, module in offenders)
+    assert not offenders, "Lingering langchain imports under backend/app/ — Phase 5 must remove all of:\n" + "\n".join(
+        f"  {file}: {module}" for file, module in offenders
     )

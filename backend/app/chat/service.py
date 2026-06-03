@@ -234,9 +234,7 @@ class ChatService:
             if isinstance(msg, ModelRequest):
                 for req_part in msg.parts:
                     if isinstance(req_part, UserPromptPart):
-                        content = (
-                            req_part.content if isinstance(req_part.content, str) else str(req_part.content)
-                        )
+                        content = req_part.content if isinstance(req_part.content, str) else str(req_part.content)
                         messages.append(ChatHistoryMessage(role="user", content=content))
             elif isinstance(msg, ModelResponse):
                 for resp_part in msg.parts:
@@ -341,9 +339,7 @@ class ChatService:
                     elif Agent.is_call_tools_node(node):
                         async with node.stream(agent_run.ctx) as tool_stream:
                             async for ev in tool_stream:
-                                async for stream_event in self._handle_tool_event(
-                                    ev, session_id, tool_call_start
-                                ):
+                                async for stream_event in self._handle_tool_event(ev, session_id, tool_call_start):
                                     yield stream_event
 
             if persist_user_message and agent_run.result is not None:

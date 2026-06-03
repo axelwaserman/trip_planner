@@ -54,8 +54,7 @@ def test_tool_call_event_wire_unchanged() -> None:
         session_id="s1",
     )
     assert event.model_dump_json() == (
-        '{"type":"tool_call","tool_name":"search_flights",'
-        '"tool_args":{"origin":"LAX"},"session_id":"s1"}'
+        '{"type":"tool_call","tool_name":"search_flights","tool_args":{"origin":"LAX"},"session_id":"s1"}'
     )
 
 
@@ -68,8 +67,7 @@ def test_tool_result_event_wire_unchanged() -> None:
         session_id="s1",
     )
     assert event.model_dump_json() == (
-        '{"type":"tool_result","tool_name":"search_flights",'
-        '"tool_result":"ok","elapsed_ms":42,"session_id":"s1"}'
+        '{"type":"tool_result","tool_name":"search_flights","tool_result":"ok","elapsed_ms":42,"session_id":"s1"}'
     )
 
 
