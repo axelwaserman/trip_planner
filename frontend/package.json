@@ -9,7 +9,11 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test e2e/smoke --project=chromium",
+    "test:e2e:visual": "playwright test e2e/visual --project=chromium",
+    "test:e2e:update-baselines": "playwright test e2e/visual --project=chromium --update-snapshots"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.28.0",
@@ -25,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
+    "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.6.0",

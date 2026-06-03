@@ -56,6 +56,22 @@ fix:
 build:
     cd frontend && npm run build
 
+# Run Playwright e2e UAT (full smoke + visual regression)
+uat:
+    cd frontend && npm run test:e2e
+
+# Run Playwright SSE smoke pack only (~30s; needs backend running)
+uat-smoke:
+    cd frontend && npm run test:e2e:smoke
+
+# Run Playwright visual regression only
+uat-visual:
+    cd frontend && npm run test:e2e:visual
+
+# Refresh Playwright visual baselines after intended UI changes
+uat-baselines:
+    cd frontend && npm run test:e2e:update-baselines
+
 # Clean build artifacts
 clean:
     find . -type d -name "__pycache__" -exec rm -rf {} +
