@@ -1,13 +1,41 @@
-"""Flight search tool for LangChain agent."""
+"""Flight search tool for the PydanticAI chat agent.
+
+Phase 5 / Plan 05-04: this module retired the LangChain ``@tool`` decorator
+and the Phase 4.x monkey-patched attribute back-door. The function now reads
+its :class:`FlightAPIClient` collaborator from ``ctx.deps.flight_client`` —
+PydanticAI threads :class:`app.chat.deps.ChatDeps` through ``RunContext`` once
+per turn (D-06).
+
+Closes ARCHITECTURE.md "Monkey-Patched Tool Dependency" Known Tech Debt.
+
+``from __future__ import annotations`` is required: the ``ChatDeps`` type
+annotation flows through ``RunContext[ChatDeps]`` and is later resolved by
+PydanticAI's ``Agent`` constructor. Resolving the annotation eagerly at
+import time would create a circular import (``app.chat`` package's
+``__init__.py`` imports ``ChatService`` which imports this module). Deferred
+string annotations break the cycle; PydanticAI evaluates them when ``Agent``
+is constructed in ``ChatService.create_session``.
+"""
+
+from __future__ import annotations
 
 import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.tools import tool
+from pydantic_ai import RunContext
 
 from app.exceptions import FlightSearchError
+
+if TYPE_CHECKING:
+    # Importing :class:`ChatDeps` eagerly would resolve through
+    # ``app.chat/__init__.py``, which imports ``ChatService`` (which in turn
+    # imports this module) — a circular import. Deferring the import to the
+    # type-checking phase keeps the runtime annotation as the literal string
+    # ``"RunContext[ChatDeps]"`` (per ``from __future__ import annotations``)
+    # and lets PydanticAI resolve it lazily when ``Agent`` is constructed.
+    from app.chat.deps import ChatDeps
 from app.flights.models import (
     CarrierInfo,
     Flight,
@@ -20,9 +48,6 @@ from app.flights.models import (
     PriceInfo,
     SortBy,
 )
-
-if TYPE_CHECKING:
-    from app.tools.flight_client import FlightAPIClient
 
 
 def _extract_carrier_iata(flight: Flight) -> str:
@@ -274,8 +299,8 @@ def normalize_skyscanner_itinerary(itin: dict[str, Any]) -> FlightResult:
     )
 
 
-@tool
 async def search_flights(
+    ctx: RunContext[ChatDeps],
     origin: str,
     destination: str,
     departure_date: str,
@@ -334,12 +359,9 @@ async def search_flights(
         JSON string (FlightSearchResult.model_dump_json()) on success, or a plain error
         string on failure. Always returns a string.
     """
-    # Get the flight client from the tool's context
-    # NOTE: This will be injected when the tool is bound to the ChatService
-    client: FlightAPIClient | None = getattr(search_flights, "_flight_client", None)
-
-    if client is None:
-        return "Error: Flight search service not initialized. Please contact support."
+    # PydanticAI threads ChatDeps through RunContext per turn (D-06).
+    # The Phase 4.x attribute back-door is closed; the deps client is non-None by type.
+    client = ctx.deps.flight_client
 
     try:
         # Validate and parse inputs
