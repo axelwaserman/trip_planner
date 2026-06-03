@@ -7,13 +7,16 @@ Behaviour notes:
 
 - ``bind_tools`` constructs ``ChatOllama(..., reasoning=<bool>)`` where
   ``reasoning`` is decided at bind-time based on whether the configured model
-  name matches one of ``Settings.ollama_reasoning_model_prefixes``. qwen3 and
-  deepseek-r1 emit thinking tokens; mistral / llama3 / most others do not.
-  Passing ``reasoning=True`` to a non-thinking model yields HTTP 400 from the
-  daemon (``'"<model>" does not support thinking'``) — this gating prevents
-  that. ``app.chat.ChatService.chat_stream`` consumes the optional reasoning
-  field via ``chunk.additional_kwargs["reasoning_content"]`` regardless;
-  non-thinking models simply produce no thinking SSE events.
+  name matches one of the constructor's reasoning-prefix tuple (qwen3,
+  deepseek-r1 by default). Passing ``reasoning=True`` to a non-thinking
+  model yields HTTP 400 from the daemon (``'"<model>" does not support
+  thinking'``) — this gating prevents that. ``app.chat.ChatService.chat_stream``
+  consumes the optional reasoning field via
+  ``chunk.additional_kwargs["reasoning_content"]`` regardless; non-thinking
+  models simply produce no thinking SSE events. Phase 5 / Plan 05-03 will
+  drop this gating entirely — PydanticAI's ``OllamaModel`` profile parses
+  ``<think>`` tags natively (RESEARCH OQ-04), so the prefix tuple retires
+  alongside ``Settings.ollama_reasoning_model_prefixes``.
 
 - **Pitfall 7 (RESEARCH.md):** reasoning tokens are an Ollama-only concern in
   Phase 4.5. The :class:`app.llm.base.LLMProvider` Protocol intentionally

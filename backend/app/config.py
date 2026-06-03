@@ -69,18 +69,13 @@ class Settings(BaseSettings):
     # pulled a new model and forgot to click Refresh" UX against thrashing localhost.
     provider_models_cache_ttl_seconds: int = 60
 
-    # Reasoning-model name prefixes for Ollama. ChatOllama(reasoning=True) only
-    # works for models that emit thinking tokens (qwen3, deepseek-r1, …). Passing
-    # reasoning=True to a model that does not support it produces an HTTP 400
-    # from the daemon ('"<model>" does not support thinking'). The OllamaProvider
-    # consults this list at bind_tools() time and only sets reasoning=True when
-    # the model name starts with one of these prefixes. Defaults cover the
-    # families that ship reasoning today; override via OLLAMA_REASONING_MODEL_PREFIXES
-    # (comma-separated) if a new family lands.
-    ollama_reasoning_model_prefixes: tuple[str, ...] = (
-        "qwen3",
-        "deepseek-r1",
-    )
+    # PydanticAI dispatch knob: model identifiers matching one of these prefixes
+    # are routed through ``OpenAIResponsesModel`` (which exposes the o-series
+    # reasoning surface) instead of the default ``OpenAIChatModel`` — D-14,
+    # RESEARCH OQ-03. Wave 2 (Plan 05-03) wires this into ``OpenAIProvider``.
+    # Override via ``OPENAI_O_SERIES_MODEL_PREFIXES`` (comma-separated) if
+    # OpenAI adds a new o-series family.
+    openai_o_series_model_prefixes: tuple[str, ...] = ("o1", "o3")
 
     def model_post_init(self, __context: object) -> None:
         """Emit warnings when insecure defaults are still in use."""
