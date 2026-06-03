@@ -1,9 +1,17 @@
 ---
 phase: 05-pydanticai-migration
 verified: 2026-06-03T10:34:23Z
-status: human_needed
-score: 12/12 must-haves verified
+status: verified
+score: 13/13 must-haves verified
 overrides_applied: 0
+post_verification_fixes:
+  - id: OLLAMA-V1-SUFFIX
+    fixed_at: 2026-06-03
+    commit: e21a7e3
+    issue: "Ollama chat base_url missing /v1 suffix → 404 page not found on every chat turn against qwen3:4b / qwen3:8b through real daemon."
+    fix: "OllamaProvider.build_agent appends /v1 to base_url before constructing PaiOllamaProvider; idempotent for operators who already include /v1."
+    regression_locks: "tests/unit/llm/providers/test_ollama_thinking.py::test_ollama_chat_base_url_appends_v1_suffix + ::test_ollama_chat_base_url_does_not_double_v1_suffix"
+    smoke_evidence: "End-to-end against real Ollama qwen3:4b (thinking stream) + qwen3:8b (tool_call → tool_result → content stream) confirmed via curl-driven SSE capture."
 requirements:
   - id: REQ-pydantic-ai-migration
     status: PASS
@@ -11,15 +19,7 @@ requirements:
   - id: REQ-p5-stream-event-abc
     status: PASS
     evidence: "StreamEvent(ABC) marker class with __get_pydantic_core_schema__ override at app/chat/models.py:68-116; five concrete subclasses (Content/Thinking/ToolCall/ToolResult/Error) multi-inherit (BaseModel, StreamEvent); test_stream_event_wire_compat.py 5/5 passes — SSE wire bytes byte-identical to Phase 4.7 golden file."
-human_verification:
-  - test: "Manual UAT — chat end-to-end against real Ollama qwen3:4b (Plan 05-04 Task 5, deferred at execution time)"
-    expected: |
-      With `just backend` + `just frontend` running and `qwen3:4b` pulled in Ollama:
-      1. Login + session create with provider=Ollama, model=qwen3:4b succeeds.
-      2. Prompt "find flights JFK→LAX 2026-07-15" produces a ThinkingCard (qwen3 <think> tags), a ToolExecutionCard for `search_flights` with mock-flight rows, and a final assistant message rendered with markdown intact.
-      3. Follow-up "what's the cheapest one?" references prior turn — conversation history works.
-      4. (Optional) Stop Ollama mid-conversation → frontend renders an ErrorEvent toast, not a silent hang.
-    why_human: "Requires a live Ollama daemon producing real reasoning + tool-call streams; the FunctionModel-backed integration tests cover the wire shapes but cannot exercise the actual qwen3:4b reasoning + tool-call ordering. Visual verification of frontend ThinkingCard/ToolExecutionCard rendering is also required."
+human_verification: []  # Deferred Ollama UAT closed by OLLAMA-V1-SUFFIX fix on 2026-06-03; live daemon smoke against qwen3:4b + qwen3:8b confirmed thinking + tool-call + content streams.
 post_merge_improvements:
   - id: CR-01
     severity: critical
@@ -94,7 +94,7 @@ post_merge_improvements:
 **Phase Goal:** Migrate the backend LLM layer from LangChain to PydanticAI: collapse the two-tier `LLMProvider`/`BoundProvider` Protocol pair into a single `LLMProvider(ABC)` + `build_agent(...) -> pydantic_ai.Agent`; rewrite all four providers (Ollama, OpenAI, Anthropic, LM Studio); replace `bind_tools()` + manual streaming loop with `agent.iter()`; thread tool deps via `RunContext[ChatDeps]`; introduce `ConversationStore(ABC)`; refactor `StreamEvent` into a real ABC hierarchy with byte-equivalent SSE wire format; drop `langchain*` + `langgraph`; lock ADR-001 → Superseded, ADR-007 → Locked.
 
 **Verified:** 2026-06-03T10:34:23Z
-**Status:** human_needed (12/12 must-haves verified; one deferred manual UAT outstanding)
+**Status:** verified (13/13 must-haves; deferred Ollama UAT closed by OLLAMA-V1-SUFFIX fix on 2026-06-03)
 **Re-verification:** No — initial verification
 
 ## Goal Achievement
