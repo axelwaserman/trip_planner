@@ -25,7 +25,7 @@ decisions D-15, D-16, D-17, D-18, D-28.
 from dataclasses import dataclass
 
 from app.config import Settings
-from app.llm.protocol import LLMProvider
+from app.llm.base import LLMProvider
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.lmstudio import LMStudioProvider
 from app.llm.providers.ollama import OllamaProvider
@@ -80,7 +80,7 @@ class LLMProviderFactory:
 
         Returns:
             A concrete provider instance structurally satisfying
-            :class:`app.llm.protocol.LLMProvider`.
+            :class:`app.llm.base.LLMProvider`.
 
         Raises:
             ValueError: When ``config.provider`` is not one of the three
@@ -94,7 +94,6 @@ class LLMProviderFactory:
                     model=config.model,
                     base_url=config.base_url or self._settings.ollama_base_url,
                     probe_timeout_seconds=self._settings.provider_probe_timeout_seconds,
-                    reasoning_model_prefixes=self._settings.ollama_reasoning_model_prefixes,
                 )
             case "openai":
                 return OpenAIProvider(

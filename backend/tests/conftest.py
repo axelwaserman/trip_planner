@@ -6,8 +6,8 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.auth.routes import create_access_token
+from app.llm.base import LLMProvider
 from app.llm.factory import LLMProviderFactory
-from app.llm.protocol import BoundProvider, LLMProvider
 from app.tools.flight_client import MockFlightAPIClient
 
 
@@ -58,14 +58,17 @@ def mock_llm_factory() -> MagicMock:
     The mock factory's ``build()`` returns a mock :class:`LLMProvider` whose:
 
     - ``validate_config()`` returns ``None`` (probe success).
-    - ``bind_tools()`` returns a mock :class:`BoundProvider`.
+    - ``bind_tools()`` returns an unspec'd ``MagicMock`` standing in for the
+      tool-bound runnable (the Phase 4.5 second-tier Protocol retired in
+      plan 05-02 D-01..D-03; tests that need realistic ``astream`` behaviour
+      attach their own mock).
     - ``get_provider_name()`` returns ``"ollama"``.
     - ``list_models()`` returns ``["qwen3:4b"]``.
 
     Tests that need realistic ``astream`` behaviour can attach their own mock
     via ``factory.build.return_value.bind_tools.return_value.astream = ...``.
     """
-    bound = MagicMock(spec=BoundProvider)
+    bound = MagicMock()
     provider = MagicMock(spec=LLMProvider)
     provider.validate_config = AsyncMock(return_value=None)
     provider.bind_tools = MagicMock(return_value=bound)

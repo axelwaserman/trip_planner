@@ -4,7 +4,7 @@ Per Phase 4.5 Plan 06, ``ChatService`` no longer holds a singleton bound LLM.
 Instead, it owns a per-app :class:`app.llm.factory.LLMProviderFactory` and a
 ``self._bound_providers`` dict keyed by ``session_id``. ``create_session`` is
 ``async`` because it absorbs the 4.2 provider-probe step (now per-provider via
-:meth:`app.llm.protocol.LLMProvider.validate_config`) — the sequence is
+:meth:`app.llm.base.LLMProvider.validate_config`) — the sequence is
 ``factory.build → validate_config → bind_tools → store``.
 
 The 4.2 default fallbacks (``provider="ollama"``, ``model="qwen3:4b"``) live
@@ -51,7 +51,6 @@ if TYPE_CHECKING:
 
     from app.llm.errors import ProbeError
     from app.llm.factory import LLMProviderFactory, SessionLLMConfig
-    from app.llm.protocol import BoundProvider
     from app.tools.flight_client import FlightAPIClient
 
 
@@ -75,7 +74,11 @@ class ChatService:
         self._factory = factory
         self._histories: dict[str, InMemoryChatMessageHistory] = {}
         self._metadata: dict[str, dict[str, Any]] = {}  # Session metadata; widens to Any for last_tool_invocation
-        self._bound_providers: dict[str, BoundProvider] = {}
+        # Wave 3 (plan 05-04) replaces this dict with ``self._agents: dict[str, Agent]``;
+        # the value type is ``Any`` here because the Phase 4.5 second-tier provider
+        # Protocol retired in plan 05-02 (D-01..D-03) and the PydanticAI ``Agent``
+        # swap is Wave 3.
+        self._bound_providers: dict[str, Any] = {}
         self._last_activity: dict[str, float] = {}
 
         # Wire the tool's client dependency here so callers don't need to know internals

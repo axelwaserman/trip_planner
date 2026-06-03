@@ -1,9 +1,28 @@
-"""Chat domain event models — discriminated-union StreamEvent hierarchy (Phase 4.7).
+"""Chat domain event models — StreamEvent ABC hierarchy (Phase 5 D-15, D-16, REQ-p5-stream-event-abc).
 
-Replaces the monolithic :class:`app.models.StreamEvent` class with five
-concrete Pydantic event models plus a ``StreamEvent`` union alias. Each model
-carries only its own fields and a ``type`` discriminator literal, enabling
-Pydantic v2 native discriminated-union validation and mypy-strict narrowing.
+Phase 5 replaces the Phase 4.7 ``Annotated[..., Field(discriminator="type")]``
+union alias with a real :class:`StreamEvent` ABC base class. The five concrete
+event subclasses (``ContentEvent``, ``ThinkingEvent``, ``ToolCallEvent``,
+``ToolResultEvent``, ``ErrorEvent``) explicitly subclass it via multiple
+inheritance with :class:`pydantic.BaseModel`, making ``isinstance(event,
+StreamEvent)`` checks first-class instead of relying on union narrowing.
+
+The SSE wire format is byte-equivalent to Phase 4.7 (verified by Wave 0's
+``test_stream_event_wire_compat.py`` golden file and RESEARCH OQ-01). Each
+subclass keeps its ``Literal[...]`` discriminator and field declaration order;
+``session_id`` stays declared on each subclass (rather than hoisted into the
+ABC) because Pydantic v2 emits inherited base fields BEFORE subclass fields,
+and the Phase 4.7 wire layout puts ``session_id`` LAST. RESEARCH OQ-01's
+"hoist session_id into the base" guidance was empirically verified to break
+field order — VALIDATION.md row "SSE wire format byte-equivalent to Phase 4.7"
+takes precedence per the plan's action paragraph ("adjust whichever ordering
+keeps Wave 0's test_stream_event_wire_compat.py green").
+
+``StreamEvent`` itself is a pure marker ABC (:class:`abc.ABC`, NOT
+:class:`BaseModel`); it overrides
+:meth:`__get_pydantic_core_schema__` so that ``TypeAdapter(StreamEvent)``
+builds a discriminated union of the five subclasses on the fly. This preserves
+the Phase 4.7 ``TypeAdapter`` round-trip behaviour without a separate type alias.
 
 Also hosts the chat session and message DTOs previously in ``app.models``:
 ``SessionCreateRequest``, ``SessionCreateError``, ``ChatRequest``,
@@ -15,11 +34,18 @@ Analog: :mod:`app.llm.errors` (``ProbeErrorCode`` + ``ProbeError`` pattern).
 
 from __future__ import annotations
 
+import operator
+from abc import ABC
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from functools import reduce
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
+
+if TYPE_CHECKING:
+    from pydantic import GetCoreSchemaHandler
+    from pydantic_core import CoreSchema
 
 
 class ErrorCode(StrEnum):
@@ -39,7 +65,57 @@ class ErrorCode(StrEnum):
     stream_error = "stream_error"
 
 
-class ContentEvent(BaseModel):
+class StreamEvent(ABC):
+    """Marker ABC base for all SSE stream events (Phase 5 D-15, D-16, REQ-p5-stream-event-abc).
+
+    Replaces the Phase 4.7 ``Annotated[..., Field(discriminator="type")]``
+    union alias with a real ABC class. The five concrete subclasses
+    (:class:`ContentEvent`, :class:`ThinkingEvent`, :class:`ToolCallEvent`,
+    :class:`ToolResultEvent`, :class:`ErrorEvent`) inherit from
+    :class:`pydantic.BaseModel` AND this ABC via multiple inheritance, so
+    ``isinstance(event, StreamEvent)`` checks work first-class.
+
+    Why a pure ABC (not ``class StreamEvent(BaseModel, ABC)``):
+        - The Phase 4.7 wire layout puts ``session_id`` LAST on every
+          subclass. Pydantic v2 emits base fields BEFORE subclass fields, so
+          declaring ``session_id`` on a ``BaseModel`` base class would shift
+          the field to the second position and break wire byte-equivalence
+          (verified empirically + plan's action paragraph: "adjust whichever
+          ordering keeps Wave 0's test_stream_event_wire_compat.py green").
+        - Keeping ``StreamEvent`` as a pure ABC + multi-inheriting subclasses
+          on ``BaseModel`` preserves field order naturally — each subclass
+          declares its own fields in the canonical
+          ``type, …, session_id`` shape.
+        - :meth:`__get_pydantic_core_schema__` overrides at the ABC level so
+          ``TypeAdapter(StreamEvent)`` resolves to a discriminated union of
+          all current subclasses, preserving the Phase 4.7 round-trip
+          behaviour.
+
+    Per CLAUDE.md / D-03 this is an :class:`abc.ABC`, NOT
+    :class:`typing.Protocol` — same rule that governs :class:`LLMProvider`.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        """Return a discriminated-union schema over the five concrete subclasses.
+
+        Called once per :class:`pydantic.TypeAdapter` construction. Walks the
+        runtime ``__subclasses__`` set so newly-added event classes are picked
+        up automatically (none are expected in Phase 5 — this is just defensive).
+        """
+        sub_types = list(cls.__subclasses__())
+        if not sub_types:
+            # No concrete subclasses yet — fall through to default Pydantic
+            # behaviour (likely an `any_schema`); never the production path.
+            return handler(source_type)
+        union = reduce(operator.or_, sub_types)
+        annotated = Annotated[union, Field(discriminator="type")]
+        return handler.generate_schema(annotated)
+
+
+class ContentEvent(BaseModel, StreamEvent):
     """A content chunk emitted during LLM text generation."""
 
     type: Literal["content"] = "content"
@@ -47,7 +123,7 @@ class ContentEvent(BaseModel):
     session_id: str
 
 
-class ThinkingEvent(BaseModel):
+class ThinkingEvent(BaseModel, StreamEvent):
     """A reasoning/thinking chunk emitted during extended-thinking mode."""
 
     type: Literal["thinking"] = "thinking"
@@ -55,7 +131,7 @@ class ThinkingEvent(BaseModel):
     session_id: str
 
 
-class ToolCallEvent(BaseModel):
+class ToolCallEvent(BaseModel, StreamEvent):
     """Emitted when the LLM dispatches a tool call (before execution)."""
 
     type: Literal["tool_call"] = "tool_call"
@@ -64,7 +140,7 @@ class ToolCallEvent(BaseModel):
     session_id: str
 
 
-class ToolResultEvent(BaseModel):
+class ToolResultEvent(BaseModel, StreamEvent):
     """Emitted after a tool call completes with its result."""
 
     type: Literal["tool_result"] = "tool_result"
@@ -74,7 +150,7 @@ class ToolResultEvent(BaseModel):
     session_id: str
 
 
-class ErrorEvent(BaseModel):
+class ErrorEvent(BaseModel, StreamEvent):
     """Emitted when a tool execution or stream-level error occurs.
 
     ``retryable`` drives whether the frontend shows a retry control inline
@@ -92,14 +168,6 @@ class ErrorEvent(BaseModel):
     tool_name: str | None = None
     raw_detail: str | None = None
     session_id: str
-
-
-# DO NOT instantiate StreamEvent directly; it is a Field-discriminated union alias
-# used only for type annotations and TypeAdapter validation.
-StreamEvent = Annotated[
-    ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent,
-    Field(discriminator="type"),
-]
 
 
 # ============================================================================

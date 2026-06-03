@@ -1,22 +1,25 @@
 """Ollama provider — wraps ``langchain_ollama.ChatOllama`` with dynamic discovery.
 
-Implements :class:`app.llm.protocol.LLMProvider` structurally (no inheritance —
+Implements :class:`app.llm.base.LLMProvider` structurally (no inheritance —
 the Protocol is ``@runtime_checkable`` and satisfied via duck typing).
 
 Behaviour notes:
 
 - ``bind_tools`` constructs ``ChatOllama(..., reasoning=<bool>)`` where
   ``reasoning`` is decided at bind-time based on whether the configured model
-  name matches one of ``Settings.ollama_reasoning_model_prefixes``. qwen3 and
-  deepseek-r1 emit thinking tokens; mistral / llama3 / most others do not.
-  Passing ``reasoning=True`` to a non-thinking model yields HTTP 400 from the
-  daemon (``'"<model>" does not support thinking'``) — this gating prevents
-  that. ``app.chat.ChatService.chat_stream`` consumes the optional reasoning
-  field via ``chunk.additional_kwargs["reasoning_content"]`` regardless;
-  non-thinking models simply produce no thinking SSE events.
+  name matches one of the constructor's reasoning-prefix tuple (qwen3,
+  deepseek-r1 by default). Passing ``reasoning=True`` to a non-thinking
+  model yields HTTP 400 from the daemon (``'"<model>" does not support
+  thinking'``) — this gating prevents that. ``app.chat.ChatService.chat_stream``
+  consumes the optional reasoning field via
+  ``chunk.additional_kwargs["reasoning_content"]`` regardless; non-thinking
+  models simply produce no thinking SSE events. Phase 5 / Plan 05-03 will
+  drop this gating entirely — PydanticAI's ``OllamaModel`` profile parses
+  ``<think>`` tags natively (RESEARCH OQ-04), so the prefix tuple retires
+  alongside ``Settings.ollama_reasoning_model_prefixes``.
 
 - **Pitfall 7 (RESEARCH.md):** reasoning tokens are an Ollama-only concern in
-  Phase 4.5. The :class:`app.llm.protocol.LLMProvider` Protocol intentionally
+  Phase 4.5. The :class:`app.llm.base.LLMProvider` Protocol intentionally
   does **NOT** abstract reasoning. Cloud providers (OpenAI/Anthropic) do not
   emit ``reasoning_content``; abstracting it across providers would force
   shape-faking we don't want.
@@ -39,20 +42,21 @@ Behaviour notes:
 """
 
 from collections.abc import Sequence
+from typing import Any
 
 import httpx
 from langchain_core.tools import BaseTool
 from langchain_ollama import ChatOllama
 
+from app.llm.base import LLMProvider  # noqa: F401  # imported for Wave 2 explicit subclassing
 from app.llm.errors import ProbeError, ProbeErrorCode
-from app.llm.protocol import BoundProvider
 
 
-class OllamaProvider:
+class OllamaProvider(LLMProvider):
     """Local Ollama provider with dynamic ``/api/tags`` discovery.
 
-    Satisfies :class:`app.llm.protocol.LLMProvider` structurally; the four
-    members below match the Protocol signatures exactly.
+    Phase 5 D-03: explicitly subclasses :class:`app.llm.base.LLMProvider`
+    (the ABC); the four abstract methods below match the ABC contract.
 
     The constructor takes its full configuration as arguments — no
     ``app.config.settings`` import — so the factory can hand in either the
@@ -134,7 +138,7 @@ class OllamaProvider:
         }
         return sorted(available)
 
-    def bind_tools(self, tools: Sequence[BaseTool]) -> BoundProvider:
+    def bind_tools(self, tools: Sequence[BaseTool]) -> Any:
         """Construct a tool-bound runnable that streams via ``ChatOllama``.
 
         ``reasoning=`` is gated on ``_model_supports_reasoning()`` — we only
@@ -144,18 +148,30 @@ class OllamaProvider:
         so we just don't ask in the first place. See module docstring +
         Pitfall 7.
 
-        The returned ``Runnable[LanguageModelInput, AIMessage]`` structurally
-        satisfies :class:`BoundProvider` (it has ``ainvoke`` + ``astream``);
-        mypy can't statically verify that match because LangChain's
-        ``Runnable`` is a generic class, not a Protocol — hence the targeted
-        ``type: ignore``.
+        Wave 2 / Plan 05-03 replaces the body of this method with
+        ``build_agent`` (returning a PydanticAI ``Agent``). The current
+        return-type annotation is ``Any`` so the module imports cleanly
+        mid-wave; the LangChain body itself stays in place until Wave 2
+        rewrites it.
         """
         llm = ChatOllama(
             model=self._model,
             base_url=self._base_url,
             reasoning=self._model_supports_reasoning(),
         )
-        # mypy can't statically prove Runnable[LanguageModelInput, AIMessage]
-        # matches the BoundProvider Protocol; @runtime_checkable confirms it
-        # at runtime via the conformance test (Plan 06).
-        return llm.bind_tools(list(tools))  # type: ignore[return-value]
+        # The explicit ``Any`` return-type annotation here is a transitional
+        # knob — Wave 2 swaps this method for ``build_agent`` returning
+        # ``pydantic_ai.Agent``.
+        return llm.bind_tools(list(tools))
+
+    def build_agent(self, tools: Sequence[Any], deps_type: type[Any]) -> Any:
+        """Wave 2 stub — Plan 05-03 replaces the body with the real PydanticAI implementation.
+
+        Required to satisfy the :class:`app.llm.base.LLMProvider` ABC contract so
+        ``OllamaProvider`` is instantiable mid-wave. The Phase 4.5 ``bind_tools``
+        path above continues to serve ``ChatService`` until Wave 3.
+
+        Raises:
+            NotImplementedError: Always, until Plan 05-03 lands the body.
+        """
+        raise NotImplementedError("OllamaProvider.build_agent is implemented in Wave 2 / Plan 05-03")

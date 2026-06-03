@@ -1,6 +1,6 @@
 """LM Studio provider — wraps :class:`langchain_openai.ChatOpenAI` against a local LM Studio daemon.
 
-Implements :class:`app.llm.protocol.LLMProvider` structurally (no inheritance —
+Implements :class:`app.llm.base.LLMProvider` structurally (no inheritance —
 the Protocol is ``@runtime_checkable`` and satisfied via duck typing). Peer of
 :class:`app.llm.providers.ollama.OllamaProvider` (local, dynamic discovery) and
 :class:`app.llm.providers.openai.OpenAIProvider` (ChatOpenAI delegate, cloud).
@@ -42,21 +42,22 @@ Cross-reference: :meth:`bind_tools` is structurally symmetric with
 """
 
 from collections.abc import Sequence
+from typing import Any
 
 import httpx
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
+from app.llm.base import LLMProvider  # noqa: F401  # imported for Wave 2 explicit subclassing
 from app.llm.errors import ProbeError, ProbeErrorCode
-from app.llm.protocol import BoundProvider
 
 
-class LMStudioProvider:
+class LMStudioProvider(LLMProvider):
     """Local LM Studio provider with dynamic ``${base_url}/models`` discovery.
 
-    Satisfies :class:`app.llm.protocol.LLMProvider` structurally; the four
-    members below match the Protocol signatures exactly.
+    Phase 5 D-03: explicitly subclasses :class:`app.llm.base.LLMProvider`
+    (the ABC); the four abstract methods below match the ABC contract.
 
     The constructor takes its full configuration as arguments — no
     :mod:`app.config` import — so the factory hands in either the payload's
@@ -141,7 +142,7 @@ class LMStudioProvider:
             return []
         return sorted({entry["id"] for entry in data if isinstance(entry, dict) and entry.get("id")})
 
-    def bind_tools(self, tools: Sequence[BaseTool]) -> BoundProvider:
+    def bind_tools(self, tools: Sequence[BaseTool]) -> Any:
         """Construct a tool-bound runnable that streams from the LM Studio daemon.
 
         Constructs ``ChatOpenAI(model=..., base_url=self._base_url,
@@ -150,11 +151,9 @@ class LMStudioProvider:
         at construction). Because ``base_url`` overrides the destination,
         the sentinel never reaches ``api.openai.com``.
 
-        The returned ``Runnable[LanguageModelInput, AIMessage]`` structurally
-        satisfies :class:`BoundProvider` (it has ``ainvoke`` + ``astream``);
-        mypy can't statically verify that match because LangChain's
-        ``Runnable`` is a generic class, not a Protocol — hence the targeted
-        ``type: ignore``.
+        Wave 2 / Plan 05-03 replaces this method with ``build_agent`` returning
+        a PydanticAI ``Agent``; the return-type annotation is ``Any`` here so
+        the module imports cleanly mid-wave.
         """
         # ChatOpenAI types ``api_key`` as ``SecretStr | Callable | None``; the
         # sentinel literal must be wrapped to satisfy mypy strict. The literal
@@ -165,7 +164,18 @@ class LMStudioProvider:
             base_url=self._base_url,
             api_key=SecretStr("lm-studio"),  # sentinel; D-17, RESEARCH.md Pitfall 3
         )
-        # mypy can't statically prove Runnable[LanguageModelInput, AIMessage]
-        # matches the BoundProvider Protocol; @runtime_checkable confirms it
-        # at runtime via the conformance test (Plan 06).
-        return llm.bind_tools(list(tools))  # type: ignore[return-value]
+        # The explicit ``Any`` return-type annotation here is the transitional
+        # knob until Wave 2 swaps this method for ``build_agent``.
+        return llm.bind_tools(list(tools))
+
+    def build_agent(self, tools: Sequence[Any], deps_type: type[Any]) -> Any:
+        """Wave 2 stub — Plan 05-03 replaces the body with the real PydanticAI implementation.
+
+        Required to satisfy the :class:`app.llm.base.LLMProvider` ABC contract so
+        ``LMStudioProvider`` is instantiable mid-wave. The Phase 4.5 ``bind_tools``
+        path above continues to serve ``ChatService`` until Wave 3.
+
+        Raises:
+            NotImplementedError: Always, until Plan 05-03 lands the body.
+        """
+        raise NotImplementedError("LMStudioProvider.build_agent is implemented in Wave 2 / Plan 05-03")
