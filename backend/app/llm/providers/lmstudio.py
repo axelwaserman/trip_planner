@@ -1,26 +1,21 @@
-"""LM Studio provider — wraps :class:`langchain_openai.ChatOpenAI` against a local LM Studio daemon.
+"""LM Studio provider — wraps PydanticAI's ``OpenAIChatModel`` against a local LM Studio daemon.
 
-Implements :class:`app.llm.base.LLMProvider` structurally (no inheritance —
-the Protocol is ``@runtime_checkable`` and satisfied via duck typing). Peer of
-:class:`app.llm.providers.ollama.OllamaProvider` (local, dynamic discovery) and
-:class:`app.llm.providers.openai.OpenAIProvider` (ChatOpenAI delegate, cloud).
+Phase 5 / Plan 05-03 rewrite (Wave 2): the Phase 4.5 LangChain ``bind_tools`` body
+retires. :meth:`build_agent` now constructs a ``pydantic_ai.Agent`` backed by
+``OpenAIChatModel(model, provider=PaiOpenAIProvider(base_url=...))``. PydanticAI's
+``OpenAIProvider`` auto-fills the ``"api-key-not-set"`` placeholder when
+``base_url`` is set and ``OPENAI_API_KEY`` is unset (Phase 4.5 ``"lm-studio"``
+sentinel retired).
 
 Design notes:
 
 - **D-15 — first-class provider class.** LM Studio is a peer of Ollama / OpenAI /
-  Anthropic, not a hidden adapter. The factory match block (Plan 06 + 04b)
-  dispatches ``"lmstudio"`` to this class.
+  Anthropic, not a hidden adapter. The factory match block dispatches
+  ``"lmstudio"`` to this class.
 
-- **D-16 — ChatOpenAI delegation.** LM Studio exposes an OpenAI-compatible REST
-  surface; the provider re-uses :class:`langchain_openai.ChatOpenAI` with a
+- **D-16 — OpenAI-compatible delegation.** LM Studio exposes an OpenAI-compatible
+  REST surface; the provider re-uses PydanticAI's ``OpenAIChatModel`` with a
   custom ``base_url`` pointing at the local daemon. No second SDK dependency.
-
-- **D-17 — no API key in v1.** The provider's ``__init__`` does NOT accept an
-  ``api_key``. The sentinel string ``"lm-studio"`` is mandatory at
-  ``ChatOpenAI`` construction (the OpenAI SDK validator rejects empty/None
-  api_key — RESEARCH.md Pitfall 3) but it is never sent to ``api.openai.com``
-  because ``base_url`` overrides the destination. Settings has NO
-  ``lmstudio_api_key`` field for the same reason.
 
 - **D-18 — discovery via GET ${base_url}/models.** ``list_models`` hits the
   OpenAI-compatible ``/models`` endpoint (the daemon's ``/v1`` prefix is
@@ -36,20 +31,20 @@ Design notes:
   :attr:`Settings.provider_probe_timeout_seconds` when the session payload's
   ``base_url`` is ``None``. Mirrors the OllamaProvider precedent.
 
-Cross-reference: :meth:`bind_tools` is structurally symmetric with
-:meth:`app.llm.providers.openai.OpenAIProvider.bind_tools` — only the
-``base_url`` and the sentinel ``api_key`` differ.
+Cross-reference: :meth:`build_agent` is structurally symmetric with
+:meth:`app.llm.providers.openai.OpenAIProvider.build_agent` for the
+non-o-series branch — only the ``base_url`` differs.
 """
 
 from collections.abc import Sequence
 from typing import Any
 
 import httpx
-from langchain_core.tools import BaseTool
-from langchain_openai import ChatOpenAI
-from pydantic import SecretStr
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider as _PaiOpenAIProvider
 
-from app.llm.base import LLMProvider  # noqa: F401  # imported for Wave 2 explicit subclassing
+from app.llm.base import LLMProvider
 from app.llm.errors import ProbeError, ProbeErrorCode
 
 
@@ -65,7 +60,7 @@ class LMStudioProvider(LLMProvider):
     (applied symmetrically to local providers).
     """
 
-    def __init__(self, model: str, base_url: str, probe_timeout_seconds: float) -> None:
+    def __init__(self, *, model: str, base_url: str, probe_timeout_seconds: float) -> None:
         """Construct with model id, daemon base URL, and probe timeout.
 
         Args:
@@ -142,40 +137,27 @@ class LMStudioProvider(LLMProvider):
             return []
         return sorted({entry["id"] for entry in data if isinstance(entry, dict) and entry.get("id")})
 
-    def bind_tools(self, tools: Sequence[BaseTool]) -> Any:
-        """Construct a tool-bound runnable that streams from the LM Studio daemon.
+    def build_agent(self, tools: Sequence[Any], deps_type: type[Any]) -> Agent[Any, str]:
+        """Construct a PydanticAI ``Agent`` against the LM Studio daemon.
 
-        Constructs ``ChatOpenAI(model=..., base_url=self._base_url,
-        api_key="lm-studio")`` — the sentinel ``api_key`` is MANDATORY
-        (RESEARCH.md Pitfall 3 — the OpenAI SDK rejects empty/None api_key
-        at construction). Because ``base_url`` overrides the destination,
-        the sentinel never reaches ``api.openai.com``.
+        Builds an ``OpenAIChatModel`` wrapped in PydanticAI's ``OpenAIProvider``
+        with the ``base_url`` pointed at the local LM Studio daemon. The
+        Phase 4.5 ``SecretStr("lm-studio")`` sentinel retires — PydanticAI's
+        ``OpenAIProvider`` auto-fills ``"api-key-not-set"`` when ``base_url``
+        is provided and ``OPENAI_API_KEY`` is unset (RESEARCH § "LM Studio
+        Provider"). Because ``base_url`` overrides the destination, the
+        placeholder never reaches ``api.openai.com``.
 
-        Wave 2 / Plan 05-03 replaces this method with ``build_agent`` returning
-        a PydanticAI ``Agent``; the return-type annotation is ``Any`` here so
-        the module imports cleanly mid-wave.
+        Args:
+            tools: PydanticAI tool callables (each takes
+                ``ctx: RunContext[deps_type]`` as first parameter).
+            deps_type: ``ChatDeps`` dataclass passed through ``RunContext``.
+
+        Returns:
+            A PydanticAI ``Agent`` ready for ``agent.iter(...)``.
         """
-        # ChatOpenAI types ``api_key`` as ``SecretStr | Callable | None``; the
-        # sentinel literal must be wrapped to satisfy mypy strict. The literal
-        # text "lm-studio" still appears in source for grep-based traceability
-        # to D-17 / RESEARCH.md Pitfall 3.
-        llm = ChatOpenAI(
-            model=self._model,
-            base_url=self._base_url,
-            api_key=SecretStr("lm-studio"),  # sentinel; D-17, RESEARCH.md Pitfall 3
+        model = OpenAIChatModel(
+            self._model,
+            provider=_PaiOpenAIProvider(base_url=self._base_url),
         )
-        # The explicit ``Any`` return-type annotation here is the transitional
-        # knob until Wave 2 swaps this method for ``build_agent``.
-        return llm.bind_tools(list(tools))
-
-    def build_agent(self, tools: Sequence[Any], deps_type: type[Any]) -> Any:
-        """Wave 2 stub — Plan 05-03 replaces the body with the real PydanticAI implementation.
-
-        Required to satisfy the :class:`app.llm.base.LLMProvider` ABC contract so
-        ``LMStudioProvider`` is instantiable mid-wave. The Phase 4.5 ``bind_tools``
-        path above continues to serve ``ChatService`` until Wave 3.
-
-        Raises:
-            NotImplementedError: Always, until Plan 05-03 lands the body.
-        """
-        raise NotImplementedError("LMStudioProvider.build_agent is implemented in Wave 2 / Plan 05-03")
+        return Agent(model, tools=list(tools), deps_type=deps_type)

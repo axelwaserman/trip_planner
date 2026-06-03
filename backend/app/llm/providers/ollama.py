@@ -1,28 +1,16 @@
-"""Ollama provider — wraps ``langchain_ollama.ChatOllama`` with dynamic discovery.
+"""Ollama provider — wraps PydanticAI's ``OpenAIChatModel`` against an Ollama daemon.
 
-Implements :class:`app.llm.base.LLMProvider` structurally (no inheritance —
-the Protocol is ``@runtime_checkable`` and satisfied via duck typing).
+Phase 5 / Plan 05-03 rewrite (Wave 2): the Phase 4.5 LangChain ``bind_tools`` body
+retires. :meth:`build_agent` now constructs a ``pydantic_ai.Agent`` backed by
+``OpenAIChatModel(model, provider=PaiOllamaProvider(base_url=...))``. PydanticAI's
+``OllamaProvider`` inherits ``thinking_tags=('<think>', '</think>')`` from
+``qwen_model_profile`` (RESEARCH OQ-04), which is what makes qwen3's native
+``<think>`` reasoning tokens parse into ``ThinkingPart`` deltas without any
+explicit ``reasoning=True`` flag — so the Phase 4.5 ``_model_supports_reasoning``
+prefix gating retires alongside ``Settings.ollama_reasoning_model_prefixes``
+(D-12 / RESEARCH OQ-04).
 
 Behaviour notes:
-
-- ``bind_tools`` constructs ``ChatOllama(..., reasoning=<bool>)`` where
-  ``reasoning`` is decided at bind-time based on whether the configured model
-  name matches one of the constructor's reasoning-prefix tuple (qwen3,
-  deepseek-r1 by default). Passing ``reasoning=True`` to a non-thinking
-  model yields HTTP 400 from the daemon (``'"<model>" does not support
-  thinking'``) — this gating prevents that. ``app.chat.ChatService.chat_stream``
-  consumes the optional reasoning field via
-  ``chunk.additional_kwargs["reasoning_content"]`` regardless; non-thinking
-  models simply produce no thinking SSE events. Phase 5 / Plan 05-03 will
-  drop this gating entirely — PydanticAI's ``OllamaModel`` profile parses
-  ``<think>`` tags natively (RESEARCH OQ-04), so the prefix tuple retires
-  alongside ``Settings.ollama_reasoning_model_prefixes``.
-
-- **Pitfall 7 (RESEARCH.md):** reasoning tokens are an Ollama-only concern in
-  Phase 4.5. The :class:`app.llm.base.LLMProvider` Protocol intentionally
-  does **NOT** abstract reasoning. Cloud providers (OpenAI/Anthropic) do not
-  emit ``reasoning_content``; abstracting it across providers would force
-  shape-faking we don't want.
 
 - **Pitfall 4 (RESEARCH.md):** Ollama's ``/api/tags`` payload has historically
   drifted between minor versions — some daemons populate ``entry["name"]`` only,
@@ -33,22 +21,29 @@ Behaviour notes:
 
 - **Configuration injection:** the provider does NOT import ``app.config`` —
   all knobs (``model``, ``base_url``, ``probe_timeout_seconds``) are passed
-  via ``__init__``. The factory (Plan 06) is responsible for wiring
+  via ``__init__``. The factory is responsible for wiring
   ``Settings.ollama_base_url`` / ``Settings.provider_probe_timeout_seconds``
   into the constructor when the session payload's ``base_url`` is ``None``.
   This keeps the provider trivially testable and matches CLAUDE.md's
   "tunable thresholds live on Settings" rule by leaving the Settings
   ownership upstream of the provider class.
+
+- **httpx exception to ADR-008:** ``validate_config`` and ``list_models``
+  continue to use ``httpx`` for ``/api/tags`` probes. RESEARCH § "Standard
+  Stack" documents this as the explicit exception to ADR-008
+  (``pyreqwest``); the swap to ``pyreqwest`` lands in Phase 7 with the real
+  Amadeus client.
 """
 
 from collections.abc import Sequence
 from typing import Any
 
 import httpx
-from langchain_core.tools import BaseTool
-from langchain_ollama import ChatOllama
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.ollama import OllamaProvider as _PaiOllamaProvider
 
-from app.llm.base import LLMProvider  # noqa: F401  # imported for Wave 2 explicit subclassing
+from app.llm.base import LLMProvider
 from app.llm.errors import ProbeError, ProbeErrorCode
 
 
@@ -65,28 +60,25 @@ class OllamaProvider(LLMProvider):
 
     def __init__(
         self,
+        *,
         model: str,
         base_url: str,
         probe_timeout_seconds: float,
-        reasoning_model_prefixes: tuple[str, ...] = ("qwen3", "deepseek-r1"),
     ) -> None:
+        """Store per-session config.
+
+        Args:
+            model: Ollama model identifier (e.g. ``"qwen3:4b"``).
+            base_url: Ollama daemon URL (e.g. ``"http://localhost:11434"``).
+            probe_timeout_seconds: Per-request httpx timeout for
+                :meth:`list_models` and :meth:`validate_config`.
+        """
         self._model = model
         self._base_url = base_url
         self._probe_timeout = probe_timeout_seconds
-        self._reasoning_model_prefixes = reasoning_model_prefixes
-
-    def _model_supports_reasoning(self) -> bool:
-        """Whether the configured model emits thinking tokens.
-
-        Ollama's wire protocol surfaces ``reasoning=True`` as an unconditional
-        request to receive thinking-token output; daemons reject the request
-        with HTTP 400 when the model does not support it. We match the model
-        name (``qwen3:4b``, ``deepseek-r1:8b``, …) against the configured
-        prefix list — same approach OpenAI uses for their o-series detection.
-        """
-        return any(self._model.startswith(prefix) for prefix in self._reasoning_model_prefixes)
 
     def get_provider_name(self) -> str:
+        """Return the wire-level provider literal."""
         return "ollama"
 
     async def validate_config(self) -> ProbeError | None:
@@ -138,40 +130,27 @@ class OllamaProvider(LLMProvider):
         }
         return sorted(available)
 
-    def bind_tools(self, tools: Sequence[BaseTool]) -> Any:
-        """Construct a tool-bound runnable that streams via ``ChatOllama``.
+    def build_agent(self, tools: Sequence[Any], deps_type: type[Any]) -> Agent[Any, str]:
+        """Construct a PydanticAI ``Agent`` against the Ollama daemon.
 
-        ``reasoning=`` is gated on ``_model_supports_reasoning()`` — we only
-        request thinking tokens for models whose name matches the configured
-        reasoning-prefix list (qwen3, deepseek-r1, …). Models without that
-        capability would have the daemon reject the request with HTTP 400,
-        so we just don't ask in the first place. See module docstring +
-        Pitfall 7.
+        Builds an ``OpenAIChatModel`` wrapped in PydanticAI's ``OllamaProvider``
+        (the OpenAI-compatible Ollama surface). The ``Agent`` carries the
+        provider's qwen-friendly ``ModelProfile`` — ``thinking_tags`` parses
+        ``<think>`` reasoning blocks into ``ThinkingPart`` deltas natively,
+        replacing the Phase 4.5 ``reasoning=True`` flag (RESEARCH OQ-04).
 
-        Wave 2 / Plan 05-03 replaces the body of this method with
-        ``build_agent`` (returning a PydanticAI ``Agent``). The current
-        return-type annotation is ``Any`` so the module imports cleanly
-        mid-wave; the LangChain body itself stays in place until Wave 2
-        rewrites it.
+        Args:
+            tools: PydanticAI tool callables (each takes
+                ``ctx: RunContext[deps_type]`` as first parameter).
+            deps_type: ``ChatDeps`` dataclass passed through ``RunContext``
+                so tools receive the per-turn flight client / session id /
+                user id.
+
+        Returns:
+            A PydanticAI ``Agent`` ready for ``agent.iter(...)``.
         """
-        llm = ChatOllama(
-            model=self._model,
-            base_url=self._base_url,
-            reasoning=self._model_supports_reasoning(),
+        model = OpenAIChatModel(
+            self._model,
+            provider=_PaiOllamaProvider(base_url=self._base_url),
         )
-        # The explicit ``Any`` return-type annotation here is a transitional
-        # knob — Wave 2 swaps this method for ``build_agent`` returning
-        # ``pydantic_ai.Agent``.
-        return llm.bind_tools(list(tools))
-
-    def build_agent(self, tools: Sequence[Any], deps_type: type[Any]) -> Any:
-        """Wave 2 stub — Plan 05-03 replaces the body with the real PydanticAI implementation.
-
-        Required to satisfy the :class:`app.llm.base.LLMProvider` ABC contract so
-        ``OllamaProvider`` is instantiable mid-wave. The Phase 4.5 ``bind_tools``
-        path above continues to serve ``ChatService`` until Wave 3.
-
-        Raises:
-            NotImplementedError: Always, until Plan 05-03 lands the body.
-        """
-        raise NotImplementedError("OllamaProvider.build_agent is implemented in Wave 2 / Plan 05-03")
+        return Agent(model, tools=list(tools), deps_type=deps_type)
