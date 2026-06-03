@@ -32,7 +32,9 @@ if TYPE_CHECKING:
     # appends/reads list[ModelMessage] without inspecting field shape (D-11).
     from pydantic_ai.messages import ModelMessage
 
-from app.chat.models import ChatSessionInfo
+    # ChatSessionInfo is annotation-only (return type of list_for_user); moving
+    # to TYPE_CHECKING avoids the runtime cycle through app.chat.__init__.
+    from app.chat.models import ChatSessionInfo
 
 
 class ConversationStore(ABC):

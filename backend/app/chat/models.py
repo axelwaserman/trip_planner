@@ -65,7 +65,7 @@ class ErrorCode(StrEnum):
     stream_error = "stream_error"
 
 
-class StreamEvent(ABC):
+class StreamEvent(ABC):  # noqa: B024 - intentional marker ABC; see docstring "Why a pure ABC"
     """Marker ABC base for all SSE stream events (Phase 5 D-15, D-16, REQ-p5-stream-event-abc).
 
     Replaces the Phase 4.7 ``Annotated[..., Field(discriminator="type")]``
@@ -96,9 +96,7 @@ class StreamEvent(ABC):
     """
 
     @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: Any, handler: GetCoreSchemaHandler
-    ) -> CoreSchema:
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
         """Return a discriminated-union schema over the five concrete subclasses.
 
         Called once per :class:`pydantic.TypeAdapter` construction. Walks the
@@ -111,7 +109,10 @@ class StreamEvent(ABC):
             # behaviour (likely an `any_schema`); never the production path.
             return handler(source_type)
         union = reduce(operator.or_, sub_types)
-        annotated = Annotated[union, Field(discriminator="type")]
+        # mypy can't statically resolve a runtime ``__subclasses__`` walk to a
+        # type, but Pydantic v2 happily accepts the dynamic union here — the
+        # discriminated-union schema is generated at runtime per-TypeAdapter.
+        annotated = Annotated[union, Field(discriminator="type")]  # type: ignore[valid-type]
         return handler.generate_schema(annotated)
 
 

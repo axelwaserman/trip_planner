@@ -45,8 +45,6 @@ def test_qwen3_model_profile_includes_default_thinking_tags() -> None:
 
     # Read whichever attribute PydanticAI 0.8.1 exposes — public ``profile``
     # is the documented surface; ``_model_profile`` is the private fallback.
-    profile = getattr(agent.model, "profile", None) or getattr(
-        agent.model, "_model_profile", None
-    )
+    profile = getattr(agent.model, "profile", None) or getattr(agent.model, "_model_profile", None)
     assert profile is not None, "agent.model must expose a model profile"
     assert profile.thinking_tags == ("<think>", "</think>")

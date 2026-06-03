@@ -136,9 +136,7 @@ class TestConversationStorePersistence:
         service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
         session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-        _events = [
-            e async for e in service.chat_stream("synthetic retry", session_id, persist_user_message=False)
-        ]
+        _events = [e async for e in service.chat_stream("synthetic retry", session_id, persist_user_message=False)]
 
         msgs = await service._conversation_store.load(session_id)
         assert msgs == []

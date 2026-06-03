@@ -12,7 +12,6 @@ because the union alias does not satisfy ``isinstance`` checks. That's the
 expected RED state.
 """
 
-import inspect
 import typing
 
 from pydantic import TypeAdapter
@@ -51,9 +50,7 @@ def test_concrete_event_isinstance_streamevent_abc() -> None:
         StreamEvent,
     )
     assert isinstance(
-        ToolResultEvent(
-            tool_name="search_flights", tool_result="ok", elapsed_ms=1, session_id="s"
-        ),
+        ToolResultEvent(tool_name="search_flights", tool_result="ok", elapsed_ms=1, session_id="s"),
         StreamEvent,
     )
     assert isinstance(

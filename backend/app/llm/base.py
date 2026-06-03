@@ -28,17 +28,18 @@ construction.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     # pydantic_ai is added in Wave 4; using TYPE_CHECKING keeps this module
     # importable while Wave 1+2 land. The forward-ref string ``Agent[Any, str]``
     # in ``build_agent``'s signature is resolved by mypy/pyright but never
     # executed at runtime.
     from pydantic_ai import Agent
 
-from app.llm.errors import ProbeError
+    from app.llm.errors import ProbeError
 
 
 class LLMProvider(ABC):

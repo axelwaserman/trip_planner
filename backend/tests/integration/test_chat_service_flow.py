@@ -78,9 +78,9 @@ async def test_chat_stream_emits_tool_events_for_flight_query() -> None:
         and any(isinstance(p, UserPromptPart) and p.content == "Find flights LAX to JFK" for p in m.parts)
         for m in msgs
     ), "expected a ModelRequest with the user prompt"
-    assert any(
-        isinstance(m, ModelRequest) and any(isinstance(p, ToolReturnPart) for p in m.parts) for m in msgs
-    ), "expected a ToolReturnPart in some ModelRequest"
+    assert any(isinstance(m, ModelRequest) and any(isinstance(p, ToolReturnPart) for p in m.parts) for m in msgs), (
+        "expected a ToolReturnPart in some ModelRequest"
+    )
 
     # Phase 4.7 asserted "exactly 2 AIMessages" — semantic equivalence:
     # exactly 2 ModelResponse entries (one for the tool-call decision, one for the summary).
@@ -115,16 +115,8 @@ async def test_chat_stream_retains_history_across_turns() -> None:
 
     msgs = await service._conversation_store.load(session_id)
 
-    user_prompts = [
-        p
-        for m in msgs
-        if isinstance(m, ModelRequest)
-        for p in m.parts
-        if isinstance(p, UserPromptPart)
-    ]
-    assistant_texts = [
-        p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)
-    ]
+    user_prompts = [p for m in msgs if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, UserPromptPart)]
+    assistant_texts = [p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)]
 
     assert len(user_prompts) == 2
     assert {str(p.content) for p in user_prompts} == {"Hello", "Show me alternatives"}

@@ -26,9 +26,11 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic_ai import RunContext
+from pydantic_ai import (
+    RunContext,  # noqa: TC002 - PydanticAI evaluates RunContext[ChatDeps] via get_type_hints at Agent construction time; runtime import required (see module docstring)
+)
 
-from app.chat.deps import ChatDeps
+from app.chat.deps import ChatDeps  # noqa: TC001 - same reason as RunContext above; ChatDeps must be a runtime symbol
 from app.exceptions import FlightSearchError
 from app.flights.models import (
     CarrierInfo,

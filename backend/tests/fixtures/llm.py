@@ -40,11 +40,10 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import (
     AgentInfo,
     DeltaThinkingPart,
@@ -55,9 +54,16 @@ from pydantic_ai.models.function import (
 from app.chat import ChatService
 from app.chat.store import InMemoryConversationStore
 from app.llm.base import LLMProvider
-from app.llm.errors import ProbeError
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.tools.flight_client import MockFlightAPIClient
+
+if TYPE_CHECKING:
+    # ModelMessage is annotation-only on stream_function signatures; ProbeError
+    # is annotation-only on validate_config's return type. Both flagged TC0xx
+    # because runtime imports were unused beyond annotations.
+    from pydantic_ai.messages import ModelMessage
+
+    from app.llm.errors import ProbeError
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,9 +164,7 @@ def _make_stream_function(
         # Error-injection path: invoke the callable so it raises with the
         # expected exception text the ChatService should _scrub() into the
         # ErrorEvent.raw_detail.
-        async def stream_function_err(
-            messages: list[ModelMessage], agent_info: AgentInfo
-        ) -> AsyncIterator[Any]:
+        async def stream_function_err(messages: list[ModelMessage], agent_info: AgentInfo) -> AsyncIterator[Any]:
             streams()  # type: ignore[operator]  # raises
             # Unreachable; the yield satisfies the AsyncIterator return type.
             if False:  # pragma: no cover
@@ -170,9 +174,7 @@ def _make_stream_function(
 
     streams_iter: Iterator[list[Chunk]] = iter(streams)
 
-    async def stream_function(
-        messages: list[ModelMessage], agent_info: AgentInfo
-    ) -> AsyncIterator[Any]:
+    async def stream_function(messages: list[ModelMessage], agent_info: AgentInfo) -> AsyncIterator[Any]:
         try:
             chunks = next(streams_iter)
         except StopIteration:

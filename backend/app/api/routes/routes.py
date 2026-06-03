@@ -99,8 +99,12 @@ async def chat(
                 session_id=request.session_id,
                 message=request.message,
             ):
-                # Format as server-sent event
-                yield f"data: {event.model_dump_json()}\n\n"
+                # Format as server-sent event. ``event`` is typed as the
+                # ``StreamEvent`` marker ABC; the five concrete subclasses
+                # (ContentEvent, ThinkingEvent, ToolCallEvent, ToolResultEvent,
+                # ErrorEvent) all multi-inherit BaseModel and therefore expose
+                # ``model_dump_json``. mypy can't see this on the bare ABC.
+                yield f"data: {event.model_dump_json()}\n\n"  # type: ignore[attr-defined]
 
         except ValueError:
             # Defensive: the route boundary already 404s missing sessions
@@ -205,7 +209,10 @@ async def retry_tool_call(
                 session_id=request.session_id,
                 persist_user_message=False,
             ):
-                yield f"data: {event.model_dump_json()}\n\n"
+                # See note on the corresponding line in chat_stream above —
+                # StreamEvent is a marker ABC; concrete subclasses all expose
+                # model_dump_json via their BaseModel base.
+                yield f"data: {event.model_dump_json()}\n\n"  # type: ignore[attr-defined]
 
         except ValueError:
             # Defensive: narrow race where the session is deleted between the

@@ -8,17 +8,12 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "python-dotenv>=1.0.0",
-    "pydantic>=2.9.0",
+    "pydantic>=2.12",
     "pydantic-settings>=2.6.0",
-    "langchain>=0.3.0",
-    "langchain-ollama>=0.2.0",
-    "langgraph>=1.0.2",
     "httpx>=0.27.0", # For ollama API calls
     "pyjwt>=2.10.1",
     "pwdlib[argon2]>=0.3.0",
     "python-multipart>=0.0.21",
-    "langchain-openai>=1.2.1",
-    "langchain-anthropic>=1.4.3",
     "pydantic-ai>=0.8.1",
 ]
 
@@ -82,3 +77,13 @@ known-first-party = ["app"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]  # Allow assert in tests
+# Wave 0 RED stubs use ``pytest.importorskip(...)`` BEFORE app imports so test
+# collection succeeds in environments where pydantic-ai or ChatDeps don't
+# exist yet (the modules they depend on land in Wave 1+). The intentional
+# import ordering produces E402; the alternative (stuffing the importorskip
+# inside a function) defeats collection-time skipping.
+"tests/integration/llm/test_*_thinking_live.py" = ["S101", "E402"]
+"tests/unit/llm/test_protocol_abc.py" = ["S101", "E402"]
+"tests/unit/llm/test_build_agent.py" = ["S101", "E402"]
+"tests/unit/llm/providers/test_ollama_thinking.py" = ["S101", "E402"]
+"tests/unit/llm/providers/test_openai_dispatch.py" = ["S101", "E402"]
