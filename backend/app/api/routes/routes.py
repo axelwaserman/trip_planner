@@ -395,11 +395,10 @@ async def delete_session(
             detail=f"Session {session_id} not found",
         )
 
-    # Delete the session
-    chat_service._histories.pop(session_id, None)
-    chat_service._metadata.pop(session_id, None)
-    chat_service._bound_providers.pop(session_id, None)
-    chat_service._last_activity.pop(session_id, None)
+    # Phase 5 / Plan 05-04: ``_histories`` + ``_bound_providers`` retired in
+    # favour of ``_agents`` + the ``ConversationStore`` seam. ``delete_session``
+    # awaits the store and prunes the per-session dicts.
+    await chat_service.delete_session(session_id)
 
 
 @router.get("/health")

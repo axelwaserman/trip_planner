@@ -8,13 +8,15 @@ per turn (D-06).
 
 Closes ARCHITECTURE.md "Monkey-Patched Tool Dependency" Known Tech Debt.
 
-``from __future__ import annotations`` is required: the ``ChatDeps`` type
-annotation flows through ``RunContext[ChatDeps]`` and is later resolved by
-PydanticAI's ``Agent`` constructor. Resolving the annotation eagerly at
-import time would create a circular import (``app.chat`` package's
-``__init__.py`` imports ``ChatService`` which imports this module). Deferred
-string annotations break the cycle; PydanticAI evaluates them when ``Agent``
-is constructed in ``ChatService.create_session``.
+Import-cycle note: PydanticAI resolves the ``ctx: RunContext[ChatDeps]``
+annotation via :func:`typing.get_type_hints` at ``Agent`` construction time,
+which evaluates the deferred string annotation in this module's globals — so
+``ChatDeps`` must be a real runtime symbol here, not a ``TYPE_CHECKING``-only
+import. To avoid the ``app.chat`` ↔ ``app.tools.flight_search`` cycle,
+:mod:`app.chat.service` imports ``search_flights`` LAZILY inside
+:meth:`ChatService.create_session`. Importing :mod:`app.chat.deps` directly
+here is safe because ``deps.py`` itself has no transitive dependency on this
+module.
 """
 
 from __future__ import annotations
@@ -22,20 +24,12 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic_ai import RunContext
 
+from app.chat.deps import ChatDeps
 from app.exceptions import FlightSearchError
-
-if TYPE_CHECKING:
-    # Importing :class:`ChatDeps` eagerly would resolve through
-    # ``app.chat/__init__.py``, which imports ``ChatService`` (which in turn
-    # imports this module) — a circular import. Deferring the import to the
-    # type-checking phase keeps the runtime annotation as the literal string
-    # ``"RunContext[ChatDeps]"`` (per ``from __future__ import annotations``)
-    # and lets PydanticAI resolve it lazily when ``Agent`` is constructed.
-    from app.chat.deps import ChatDeps
 from app.flights.models import (
     CarrierInfo,
     Flight,
