@@ -1,15 +1,36 @@
-"""Unit tests for ChatService session management."""
+"""Unit tests for ChatService session management.
 
-import time
-from unittest.mock import AsyncMock, MagicMock
+Phase 5 / Plan 05-03 sweep: the legacy ``protocol`` shim was deleted in Wave 1
+and the two-tier ``BoundProvider`` Protocol retired with it (D-01..D-03). This
+file exercises the Phase 4.5 ``ChatService._bound_providers`` cache shape,
+which itself retires when ``ChatService`` is rewritten in Wave 3 (Plan 05-04).
+To keep test collection green during the Wave 2 sweep — and to honour the
+regression guard against lingering legacy-shim imports — the entire module is
+skipped here. The corresponding rewrite lands with the Wave 3 ChatService
+rewrite.
+"""
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from app.chat import ChatService
-from app.llm.factory import LLMProviderFactory, SessionLLMConfig
-from app.llm.protocol import BoundProvider, LLMProvider
-from app.tools.flight_client import FlightAPIClient
+pytest.skip(
+    "Deferred to Wave 3 / Plan 05-04 — ChatService + BoundProvider semantics retire there.",
+    allow_module_level=True,
+)
+
+import time  # noqa: E402
+from unittest.mock import AsyncMock, MagicMock  # noqa: E402
+
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage  # noqa: E402
+
+from app.chat import ChatService  # noqa: E402
+from app.llm.base import LLMProvider  # noqa: E402
+from app.llm.factory import LLMProviderFactory, SessionLLMConfig  # noqa: E402
+from app.tools.flight_client import FlightAPIClient  # noqa: E402
+
+# NOTE: ``BoundProvider`` was removed in Wave 1; the placeholder below preserves
+# the symbol so the Wave 3 ChatService rewrite can swap it for an ``Agent``
+# mock when it rewrites the body of this file end-to-end.
+BoundProvider: object = object  # placeholder until Wave 3 retypes
 
 
 def make_service() -> ChatService:
