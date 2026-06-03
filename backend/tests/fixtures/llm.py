@@ -1,8 +1,29 @@
 """Deterministic LLM mock for ChatService tests.
 
+Phase 5 / Plan 05-04 (Wave 3): the LangChain-backed ``MockLLM(BaseChatModel)``
+substrate retired here in favour of PydanticAI's
+:class:`pydantic_ai.models.function.FunctionModel`. The public surface — the
+``Content``/``Thinking``/``ToolCall`` chunk dataclasses, the three
+``MockLLMStream`` classmethods (``greeting``/``single_tool_call``/
+``multi_turn``), and ``make_chat_service_with_mock_llm(streams) -> ChatService``
+— is preserved per CONTEXT.md D-17 + D-18.
+
+Internals:
+- ``_MockLLMProvider(LLMProvider)`` — explicit subclass of the Phase 5 ABC
+  (D-03). Its ``build_agent`` returns a real :class:`pydantic_ai.Agent`
+  backed by ``FunctionModel(stream_function=_make_stream_function(streams))``.
+- ``_make_stream_function(streams)`` consumes one inner ``list[Chunk]`` per
+  stream invocation (RESEARCH Pitfall 7: ``single_tool_call`` therefore
+  returns TWO inner lists — one for the tool-call decision, one for the
+  post-tool summary).
+- ``streams`` may be either ``list[list[Chunk]]`` (the canonical scenario
+  shape) OR a zero-arg callable raising an exception, in which case the
+  stream_function re-raises on first invocation. The latter is the contract
+  for ``test_chat_stream_emits_error_event_on_exception`` (CONTEXT.md
+  preserved invariant: ``ErrorEvent.raw_detail = _scrub(str(exc))``).
+
 Usage:
     from tests.fixtures.llm import (
-        MockLLM,
         MockLLMStream,
         Content,
         Thinking,
@@ -10,31 +31,30 @@ Usage:
         make_chat_service_with_mock_llm,
     )
 
-    # Service-layer test (fast, no HTTP) — Phase 4.5 factory contract
     service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
     session_id, _ = await service.create_session(default_session_config(), user_id="t")
-
-    # HTTP-layer test: replace app.state.chat_service after TestClient starts
-    with TestClient(app) as client:
-        client.app.state.chat_service = make_chat_service_with_mock_llm(
-            MockLLMStream.single_tool_call(),
-        )
 """
 
+from __future__ import annotations
+
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
-from langchain_core.messages.tool import ToolCallChunk
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from langchain_core.tools import BaseTool
-from pydantic import PrivateAttr
+from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.models.function import (
+    AgentInfo,
+    DeltaThinkingPart,
+    DeltaToolCall,
+    FunctionModel,
+)
 
 from app.chat import ChatService
+from app.chat.store import InMemoryConversationStore
+from app.llm.base import LLMProvider
 from app.llm.errors import ProbeError
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.tools.flight_client import MockFlightAPIClient
@@ -66,83 +86,18 @@ class ToolCall:
 Chunk = Content | Thinking | ToolCall
 
 
-class MockLLM(BaseChatModel):
-    """Deterministic LLM mock for tests. Accepts pre-baked chunk sequences.
-
-    Each element of ``streams`` is a list of ``Chunk`` objects that will be
-    yielded on one ``astream()`` call.  The tool-call → summary flow requires
-    two inner lists: one with a ``ToolCall`` chunk (first ``astream()`` call)
-    and one with the summary ``Content`` chunks (second ``astream()`` call).
-    """
-
-    _streams_iter: Any = PrivateAttr()
-
-    def __init__(self, streams: list[list[Chunk]], **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._streams_iter = iter(streams)
-
-    @property
-    def _llm_type(self) -> str:
-        return "mock"
-
-    def _generate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        """Required by BaseChatModel abstract interface; unused in streaming tests."""
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=""))])
-
-    async def _astream(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[ChatGenerationChunk]:
-        try:
-            chunks: list[Chunk] = next(self._streams_iter)
-        except StopIteration:
-            raise RuntimeError(
-                "MockLLM exhausted: more astream() calls were made than pre-baked stream lists. "
-                "Add another inner list to the streams= argument."
-            ) from None
-        for chunk in chunks:
-            match chunk:
-                case Content(text=t):
-                    yield ChatGenerationChunk(message=AIMessageChunk(content=t))
-                case Thinking(text=t):
-                    yield ChatGenerationChunk(
-                        message=AIMessageChunk(
-                            content="",
-                            additional_kwargs={"reasoning_content": t},
-                        )
-                    )
-                case ToolCall(name=n, args=a, id=i):
-                    yield ChatGenerationChunk(
-                        message=AIMessageChunk(
-                            content="",
-                            tool_call_chunks=[ToolCallChunk(name=n, args=json.dumps(a), id=i, index=0)],
-                        )
-                    )
-
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "MockLLM":
-        """Return self — mock controls its own output regardless of bound tools."""
-        return self
-
-
 class MockLLMStream:
     """Pre-baked stream sequences for the three locked test scenarios.
 
     Each classmethod returns ``list[list[Chunk]]`` — one inner list per
-    ``astream()`` call that ``ChatService.chat_stream()`` will make.
+    ``stream_function`` invocation (RESEARCH Pitfall 7: a tool-calling turn
+    invokes the stream once per LLM hop, so ``single_tool_call`` returns TWO
+    inner lists — the tool-call decision then the post-tool summary).
     """
 
     @classmethod
     def greeting(cls) -> list[list[Chunk]]:
-        """Content-only response. One astream() call."""
+        """Content-only response. One stream_function() call."""
         return [[Content("Hello! "), Content("How can I help you plan your trip today?")]]
 
     @classmethod
@@ -152,7 +107,7 @@ class MockLLMStream:
         args: dict[str, Any] | None = None,
         summary: str = "I found 5 flights from LAX to JFK.",
     ) -> list[list[Chunk]]:
-        """Tool call → summary. Two astream() calls."""
+        """Tool call → summary. TWO stream_function() calls (Pitfall 7)."""
         default_args: dict[str, Any] = {
             "origin": "LAX",
             "destination": "JFK",
@@ -166,7 +121,7 @@ class MockLLMStream:
 
     @classmethod
     def multi_turn(cls) -> list[list[Chunk]]:
-        """References prior turn. One astream() call."""
+        """References prior turn. One stream_function() call."""
         return [[Content("Based on your earlier query, "), Content("here are more options.")]]
 
     @classmethod
@@ -175,35 +130,80 @@ class MockLLMStream:
         return chunks
 
 
-# ---------------------------------------------------------------------------
-# Phase 4.5 adapter: wrap MockLLM in an LLMProvider/BoundProvider so tests
-# that pre-date the factory contract still work without bringing back the
-# old ChatService(llm=) keyword.
-# ---------------------------------------------------------------------------
+# Type alias for the streams argument: either pre-baked chunk lists OR a
+# zero-arg callable that raises on invocation (the error-injection contract).
+StreamsArg = list[list[Chunk]] | Callable[[], None]
 
 
-class _MockBoundProvider:
-    """BoundProvider adapter — forwards astream/ainvoke to a MockLLM instance.
+def _make_stream_function(
+    streams: StreamsArg,
+) -> Callable[[list[ModelMessage], AgentInfo], AsyncIterator[Any]]:
+    """Build a PydanticAI ``stream_function`` closure over ``streams``.
 
-    The wrapped MockLLM is a real BaseChatModel subclass, so its astream
-    and ainvoke surfaces already match BoundProvider's Protocol shape.
+    Returns an ``async def stream_function(messages, agent_info)`` that
+    PydanticAI's :class:`FunctionModel` invokes once per LLM hop. The
+    closure pops one inner ``list[Chunk]`` per call and yields the
+    corresponding PydanticAI delta types:
+
+    - :class:`Content` → ``str`` (text delta)
+    - :class:`Thinking` → ``{0: DeltaThinkingPart(content=text)}``
+    - :class:`ToolCall` → ``{0: DeltaToolCall(name, json_args, tool_call_id)}``
+
+    When ``streams`` is a zero-arg callable, the function re-raises whatever
+    exception that callable throws on first invocation — used by the
+    ``test_chat_stream_emits_error_event_on_exception`` Wave 0 test to
+    verify the ``ErrorEvent.raw_detail = _scrub(str(exc))`` invariant.
+    """
+    if callable(streams):
+        # Error-injection path: invoke the callable so it raises with the
+        # expected exception text the ChatService should _scrub() into the
+        # ErrorEvent.raw_detail.
+        async def stream_function_err(
+            messages: list[ModelMessage], agent_info: AgentInfo
+        ) -> AsyncIterator[Any]:
+            streams()  # type: ignore[operator]  # raises
+            # Unreachable; the yield satisfies the AsyncIterator return type.
+            if False:  # pragma: no cover
+                yield None
+
+        return stream_function_err
+
+    streams_iter: Iterator[list[Chunk]] = iter(streams)
+
+    async def stream_function(
+        messages: list[ModelMessage], agent_info: AgentInfo
+    ) -> AsyncIterator[Any]:
+        try:
+            chunks = next(streams_iter)
+        except StopIteration:
+            raise RuntimeError(
+                "MockLLMStream exhausted: more stream_function() calls were made than "
+                "pre-baked stream lists. Add another inner list to the streams= argument."
+            ) from None
+        for chunk in chunks:
+            match chunk:
+                case Content(text=t):
+                    yield t
+                case Thinking(text=t):
+                    yield {0: DeltaThinkingPart(content=t)}
+                case ToolCall(name=n, args=a, id=i):
+                    yield {0: DeltaToolCall(name=n, json_args=json.dumps(a), tool_call_id=i)}
+
+    return stream_function
+
+
+class _MockLLMProvider(LLMProvider):
+    """:class:`LLMProvider` ABC subclass driving a ``FunctionModel``-backed Agent.
+
+    Per CONTEXT.md D-03 the provider explicitly subclasses the ABC. The
+    interesting method is :meth:`build_agent`, which returns a real
+    :class:`pydantic_ai.Agent` so tests exercise the production agent code
+    path (CONTEXT.md anti-pattern: "Don't mock at the Agent level when you
+    could mock at the Model level").
     """
 
-    def __init__(self, llm: MockLLM) -> None:
-        self._llm = llm
-
-    def astream(self, input: list[BaseMessage], **kwargs: Any) -> AsyncIterator[AIMessageChunk]:
-        return self._llm.astream(input, **kwargs)  # type: ignore[return-value]
-
-    async def ainvoke(self, input: list[BaseMessage], **kwargs: Any) -> AIMessage:
-        return await self._llm.ainvoke(input, **kwargs)
-
-
-class _MockLLMProvider:
-    """LLMProvider adapter — surfaces a MockLLM through the Phase 4.5 contract."""
-
-    def __init__(self, llm: MockLLM) -> None:
-        self._llm = llm
+    def __init__(self, streams: StreamsArg) -> None:
+        self._streams = streams
 
     def get_provider_name(self) -> str:
         return "ollama"  # Wire-level name; tests don't care about the value.
@@ -211,18 +211,12 @@ class _MockLLMProvider:
     async def validate_config(self) -> ProbeError | None:
         return None
 
-    def bind_tools(self, tools: Sequence[BaseTool]) -> Any:
-        # MockLLM controls its own output regardless of bound tools (see its
-        # bind_tools() — it just returns self). The bound wrapper exposes
-        # only astream + ainvoke as the Phase 4.5 BoundProvider Protocol
-        # requires. Phase 5 / Plan 05-04 (Wave 3) replaces this whole fixture
-        # with a FunctionModel-backed PydanticAI ``Agent``; the Wave 2 sweep
-        # only retypes the annotation so the module imports without the
-        # legacy ``protocol`` shim.
-        return _MockBoundProvider(self._llm)
-
     async def list_models(self) -> list[str]:
         return []
+
+    def build_agent(self, tools: Any, deps_type: type[Any]) -> Agent[Any, str]:
+        model = FunctionModel(stream_function=_make_stream_function(self._streams))
+        return Agent(model, tools=list(tools), deps_type=deps_type)
 
 
 def default_session_config(provider: str = "ollama", model: str = "qwen3:4b") -> SessionLLMConfig:
@@ -230,19 +224,24 @@ def default_session_config(provider: str = "ollama", model: str = "qwen3:4b") ->
     return SessionLLMConfig(provider=provider, model=model, base_url=None, api_key=None)
 
 
-def make_chat_service_with_mock_llm(streams: list[list[Chunk]]) -> ChatService:
-    """Build a ChatService whose factory yields a MockLLM-backed provider.
+def make_chat_service_with_mock_llm(streams: StreamsArg) -> ChatService:
+    """Build a ChatService whose factory yields a ``FunctionModel``-backed provider.
 
-    Phase 4.5 introduced the LLMProviderFactory abstraction; tests that need
-    a deterministic LLM stream now wrap the existing MockLLM in a tiny
-    Protocol-conforming adapter and feed it through a MagicMock factory.
-    Two upsides: (1) tests stop calling the obsolete
-    ``ChatService(llm=)`` constructor, (2) the adapter exercises the same
-    code path production sessions take (factory.build → validate_config →
-    bind_tools).
+    Phase 5 / Plan 05-04: signature preserved per D-18 (existing call sites
+    pass ``list[list[Chunk]]`` from the ``MockLLMStream`` classmethods).
+    Internals now construct an :class:`InMemoryConversationStore` and thread
+    it through ``ChatService(conversation_store=...)`` per D-08.
+
+    The ``streams`` argument additionally accepts a zero-arg callable for
+    error-injection tests (Wave 0 ``test_stream_error_event.py`` contract);
+    the type alias is reflected in :data:`StreamsArg`.
     """
     flight_client = MockFlightAPIClient(seed=42)
-    provider = _MockLLMProvider(MockLLM(streams=streams))
+    provider = _MockLLMProvider(streams)
     factory = MagicMock(spec=LLMProviderFactory)
     factory.build = MagicMock(return_value=provider)
-    return ChatService(flight_client=flight_client, factory=factory)
+    return ChatService(
+        flight_client=flight_client,
+        factory=factory,
+        conversation_store=InMemoryConversationStore(),
+    )

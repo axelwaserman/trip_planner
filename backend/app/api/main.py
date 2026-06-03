@@ -10,12 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import routes
 from app.auth import routes as auth_routes
 from app.auth.repository import EnvUserRepository, UserRepository
-from app.chat import ChatService
+from app.chat import ChatService, InMemoryConversationStore
 from app.config import settings
 from app.llm.factory import LLMProviderFactory
 from app.llm.log_scrubbing import ApiKeyScrubber, install_log_scrubber, uninstall_log_scrubber
 from app.tools.flight_client import MockFlightAPIClient
-from app.tools.flight_search import search_flights
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +28,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         - Construct the per-app :class:`LLMProviderFactory` (D-03 — replaces the
           4.2 startup-time chat-model construction; providers are built
           per-session inside :meth:`ChatService.create_session`).
-        - Initialize :class:`ChatService` with the factory.
-        - Inject ``flight_client`` into the ``search_flights`` tool.
-        - Stash both ``chat_service`` and ``llm_factory`` on ``app.state``.
+        - Construct the :class:`InMemoryConversationStore` singleton (D-08 —
+          Phase 6 swaps for ``PostgresConversationStore`` via DI).
+        - Initialize :class:`ChatService` with the factory + store.
+        - Stash ``chat_service`` and ``llm_factory`` on ``app.state``.
 
     Shutdown:
-        - Cleanup expired sessions.
+        - Cleanup expired sessions (now async — Assumption A1).
     """
     # Startup
     # D-10: install API-key scrubber FIRST so any secret accidentally captured
@@ -49,13 +49,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Construct the per-app LLM factory; providers are built per-session.
     llm_factory = LLMProviderFactory(settings)
 
-    # Inject flight_client into search_flights tool
-    search_flights._flight_client = flight_client  # type: ignore[attr-defined]
+    # Phase 5 / D-08: per-app conversation store; threaded into ChatService
+    # so Phase 6 can swap for PostgresConversationStore via DI override.
+    # Phase 4.x's monkey-patched tool-attribute back-door (D-06 anti-pattern lock)
+    # is GONE — the flight client is now threaded through PydanticAI's
+    # ``RunContext[ChatDeps]`` per chat turn.
+    conversation_store = InMemoryConversationStore()
 
-    # Initialize chat service with the factory (D-03 — no singleton bound LLM).
     chat_service = ChatService(
         flight_client=flight_client,
         factory=llm_factory,
+        conversation_store=conversation_store,
     )
 
     # Store in app state
@@ -72,8 +76,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     yield
 
-    # Shutdown: cleanup expired sessions
-    cleaned_up = chat_service.cleanup_expired_sessions(max_age_seconds=0)
+    # Shutdown: cleanup expired sessions (async since A1).
+    cleaned_up = await chat_service.cleanup_expired_sessions(max_age_seconds=0)
     logger.info("Cleaned up %d sessions on shutdown", cleaned_up)
 
     # D-10: best-effort filter cleanup. Failure to remove must not raise on shutdown.
