@@ -93,18 +93,23 @@ async def test_list_models_returns_curated_anthropic_list() -> None:
     ]
 
 
-def test_bind_tools_raises_assertion_error_when_validate_config_was_skipped() -> None:
-    """Pitfall 2 regression: ``bind_tools`` MUST refuse to construct ``ChatAnthropic``
-    when ``api_key`` is ``None``, raising :class:`AssertionError` before the SDK can
-    raise its own Pydantic ``ValidationError`` (whose stack trace would expose the
-    field path). This pins the precondition guard in
-    :meth:`AnthropicProvider.bind_tools` — protecting against a direct caller who
-    skips :meth:`validate_config` (the normal flow goes through the factory +
-    ``ChatService.create_session`` ordering in Plan 06).
+def test_build_agent_raises_assertion_error_when_validate_config_was_skipped() -> None:
+    """Pitfall 4 regression: ``build_agent`` MUST refuse to construct
+    ``AnthropicProvider`` when ``api_key`` is ``None``, raising
+    :class:`AssertionError` before the SDK can raise its own
+    ``pydantic_ai.UserError`` (whose message could include field-path detail
+    in logs). This pins the precondition guard in
+    :meth:`AnthropicProvider.build_agent` — protecting against a direct caller
+    who skips :meth:`validate_config` (the normal flow goes through the factory
+    + ``ChatService.create_session`` ordering).
+
+    Phase 5 / Plan 05-03 rewrites the Pitfall 2 (Phase 4.5 ``bind_tools``)
+    regression onto Pitfall 4 (Phase 5 ``build_agent``); the underlying
+    invariant is unchanged, only the SDK + method-name moved.
     """
     # Arrange
     provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key=None)
 
     # Act + Assert
     with pytest.raises(AssertionError):
-        provider.bind_tools([])
+        provider.build_agent(tools=[], deps_type=object)
