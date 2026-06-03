@@ -251,7 +251,7 @@ Plans:
   6. ADR-001 transitions Locked → Superseded; ADR-007 (PydanticAI) becomes Locked.
 **Plans**: 6 plans across 6 waves
 Plans:
-- [ ] 05-01-PLAN.md — Wave 0: Failing test scaffolds (RED stubs) + Phase 4.7 SSE wire-format golden file + anti-pattern locks
+- [x] 05-01-PLAN.md — Wave 0: Failing test scaffolds (RED stubs) + Phase 4.7 SSE wire-format golden file + anti-pattern locks
 - [ ] 05-02-PLAN.md — Wave 1: Foundations — LLMProvider(ABC) (rename protocol.py → base.py), ChatDeps, ConversationStore(ABC) + InMemoryConversationStore, StreamEvent ABC refactor, Settings o-series knob
 - [ ] 05-03-PLAN.md — Wave 2: Concrete providers rewritten against PydanticAI (Ollama, OpenAI w/ o-series dispatch, Anthropic, LM Studio); factory threading; protocol.py shim deleted
 - [ ] 05-04-PLAN.md — Wave 3: search_flights with RunContext[ChatDeps]; ChatService rewritten against agent.iter(); MockLLMStream rewritten with FunctionModel; lifespan wiring; manual UAT against qwen3:4b
@@ -323,7 +323,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 4/4 | Complete   | 2026-05-19 |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
-| 5. PydanticAI Migration | v1.5 | 0 / 6 | Planned | - |
+| 5. PydanticAI Migration | v1.5 | 1/6 | In Progress|  |
 | 6. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
