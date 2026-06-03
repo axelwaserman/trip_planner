@@ -48,3 +48,57 @@ def test_qwen3_model_profile_includes_default_thinking_tags() -> None:
     profile = getattr(agent.model, "profile", None) or getattr(agent.model, "_model_profile", None)
     assert profile is not None, "agent.model must expose a model profile"
     assert profile.thinking_tags == ("<think>", "</think>")
+
+
+def test_ollama_chat_base_url_appends_v1_suffix() -> None:
+    """Chat agent must POST to Ollama's OpenAI-compatible ``/v1`` surface.
+
+    Regression: PydanticAI's ``OllamaProvider`` passes ``base_url`` verbatim
+    to ``AsyncOpenAI``, which posts to ``{base_url}/chat/completions``.
+    Ollama's OpenAI-compatible endpoint lives under ``/v1`` — the bare
+    daemon URL serves only the native ``/api/*`` surface (which the
+    ``list_models`` / ``validate_config`` probe targets via ``/api/tags``).
+
+    Without the ``/v1`` suffix, every chat turn fails with
+    ``status_code: 404, body: 404 page not found``. This test pins the
+    suffix on the ``Agent`` model's underlying OpenAI client base URL.
+    """
+    provider = OllamaProvider(
+        model="qwen3:4b",
+        base_url="http://localhost:11434",
+        probe_timeout_seconds=1.0,
+    )
+    agent = provider.build_agent(tools=[], deps_type=ChatDeps)
+
+    # Reach into the AsyncOpenAI client buried inside the PydanticAI provider
+    # to assert the wire-level base URL ends in ``/v1``. The exact attribute
+    # graph is ``agent.model._provider._client.base_url`` (httpx URL); a
+    # trailing slash is normal on httpx URLs.
+    pai_provider = agent.model._provider  # type: ignore[attr-defined]
+    client = pai_provider._client  # type: ignore[attr-defined]
+    base_url_str = str(client.base_url).rstrip("/")
+    assert base_url_str.endswith("/v1"), (
+        f"Ollama chat base_url must end with /v1, got: {client.base_url!r}"
+    )
+
+
+def test_ollama_chat_base_url_does_not_double_v1_suffix() -> None:
+    """Idempotent ``/v1`` appending — operators may already supply it.
+
+    Some operators set ``OLLAMA_BASE_URL=http://host:11434/v1`` directly.
+    The provider must not produce ``/v1/v1`` in that case.
+    """
+    provider = OllamaProvider(
+        model="qwen3:4b",
+        base_url="http://localhost:11434/v1",
+        probe_timeout_seconds=1.0,
+    )
+    agent = provider.build_agent(tools=[], deps_type=ChatDeps)
+
+    pai_provider = agent.model._provider  # type: ignore[attr-defined]
+    client = pai_provider._client  # type: ignore[attr-defined]
+    base_url_str = str(client.base_url).rstrip("/")
+    assert not base_url_str.endswith("/v1/v1"), (
+        f"Ollama chat base_url must not double the /v1 suffix, got: {client.base_url!r}"
+    )
+    assert base_url_str.endswith("/v1")
