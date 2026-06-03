@@ -5,13 +5,22 @@ the Sidebar's "RECENT CHATS" list can re-render a previously-active session
 when clicked. Authentication is required and ownership is enforced — both
 "missing session" and "not your session" collapse to a 404 to avoid
 leaking session existence across users.
+
+Phase 5 / Plan 05-04: history seeding migrates from LangChain
+``HumanMessage`` / ``AIMessage`` into the ``ConversationStore``'s
+``ModelRequest`` / ``ModelResponse`` parts (PydanticAI native shape).
 """
 
 from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage, HumanMessage
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
 
 from app.api.main import app
 
@@ -90,12 +99,16 @@ def test_get_history_returns_user_and_assistant_turns_in_order(
     session_id = session_response.json()["session_id"]
 
     chat_service = client.app.state.chat_service
-    history = chat_service._histories[session_id]
-    history.add_message(HumanMessage(content="Plan a trip to Tokyo"))
-    history.add_message(AIMessage(content="Sure — what dates?"))
-    history.add_message(HumanMessage(content="June 1-7"))
-    # Empty AIMessage (e.g. from a tool-call-only turn) must NOT leak through.
-    history.add_message(AIMessage(content=""))
+    # Phase 5 / Plan 05-04: seed PydanticAI's ModelRequest/ModelResponse parts
+    # directly via the InMemoryConversationStore's ``_store`` dict. The empty
+    # TextPart simulates a tool-call-only assistant turn; the route must
+    # filter it out (Phase 4.7 contract preserved).
+    chat_service._conversation_store._store[session_id] = [
+        ModelRequest(parts=[UserPromptPart(content="Plan a trip to Tokyo")]),
+        ModelResponse(parts=[TextPart(content="Sure — what dates?")]),
+        ModelRequest(parts=[UserPromptPart(content="June 1-7")]),
+        ModelResponse(parts=[TextPart(content="")]),
+    ]
 
     response = client.get(f"/api/chat/sessions/{session_id}", headers=auth_headers)
 
@@ -120,8 +133,9 @@ def test_get_history_returns_404_when_user_does_not_own_session(client: TestClie
     alice_session_id = session_response.json()["session_id"]
 
     chat_service = client.app.state.chat_service
-    history = chat_service._histories[alice_session_id]
-    history.add_message(HumanMessage(content="alice's secret trip plan"))
+    chat_service._conversation_store._store[alice_session_id] = [
+        ModelRequest(parts=[UserPromptPart(content="alice's secret trip plan")]),
+    ]
 
     # Bob must NOT see alice's history.
     bob_response = client.get(f"/api/chat/sessions/{alice_session_id}", headers=bob_headers)

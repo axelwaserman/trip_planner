@@ -4,6 +4,10 @@ Pattern: directly seed ``ChatService._metadata`` for two distinct user_ids and
 assert the route filters by ``current_user.username``. The auth_headers fixture
 issues an admin token (per conftest), so admin should see only its own seeded
 sessions — never alice's or bob's.
+
+Phase 5 / Plan 05-04: ``_histories`` retired in favour of the
+``ConversationStore`` seam; ``first_message_preview`` is now composed from
+PydanticAI :class:`ModelRequest` / :class:`UserPromptPart`.
 """
 
 from collections.abc import Generator
@@ -11,7 +15,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.chat_history import InMemoryChatMessageHistory
+from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from app.api.main import app
 
@@ -28,21 +32,27 @@ def test_sessions_returns_401_without_auth(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def _reset_chat_service(chat_service: object) -> None:
+    """Clear per-session state on the running ChatService (Phase 5 layout)."""
+    chat_service._metadata.clear()  # type: ignore[attr-defined]
+    chat_service._last_activity.clear()  # type: ignore[attr-defined]
+    chat_service._agents.clear()  # type: ignore[attr-defined]
+    # The InMemoryConversationStore exposes ``_store`` as the per-session dict;
+    # reaching in here keeps the test layer free of the store ABC's async surface.
+    store = chat_service._conversation_store  # type: ignore[attr-defined]
+    if hasattr(store, "_store"):
+        store._store.clear()
+
+
 def test_user_with_no_sessions_returns_empty_list(
     client: TestClient,
     auth_headers: dict[str, str],
 ) -> None:
-    # Arrange — clear all sessions so admin sees nothing
     chat_service = client.app.state.chat_service
-    chat_service._histories.clear()
-    chat_service._metadata.clear()
-    chat_service._last_activity.clear()
-    chat_service._bound_providers.clear()
+    _reset_chat_service(chat_service)
 
-    # Act
     response = client.get("/api/chat/sessions", headers=auth_headers)
 
-    # Assert
     assert response.status_code == 200
     assert response.json() == {"sessions": []}
 
@@ -51,23 +61,15 @@ def test_user_sees_only_own_sessions(
     client: TestClient,
     auth_headers: dict[str, str],
 ) -> None:
-    # Arrange — seed sessions for two different users directly in metadata
     chat_service = client.app.state.chat_service
-    chat_service._histories.clear()
-    chat_service._metadata.clear()
-    chat_service._last_activity.clear()
-    chat_service._bound_providers.clear()
+    _reset_chat_service(chat_service)
 
-    chat_service._histories["session-alice-1"] = InMemoryChatMessageHistory()
-    chat_service._histories["session-alice-1"].add_user_message("Hi alice")
     chat_service._metadata["session-alice-1"] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "alice",
         "created_at": datetime.now(UTC).isoformat(),
     }
-    chat_service._histories["session-bob-1"] = InMemoryChatMessageHistory()
-    chat_service._histories["session-bob-1"].add_user_message("Hi bob")
     chat_service._metadata["session-bob-1"] = {
         "provider": "ollama",
         "model": "qwen3:4b",
@@ -77,10 +79,8 @@ def test_user_sees_only_own_sessions(
     # admin (the auth_headers user per conftest) seeds zero sessions —
     # they should see an empty list, NOT alice's or bob's.
 
-    # Act
     response = client.get("/api/chat/sessions", headers=auth_headers)
 
-    # Assert — admin sees neither alice nor bob's sessions
     assert response.status_code == 200
     body = response.json()
     assert body == {"sessions": []}
@@ -90,16 +90,16 @@ def test_first_message_preview_populated(
     client: TestClient,
     auth_headers: dict[str, str],
 ) -> None:
-    # Arrange — seed an admin session with a HumanMessage
+    """``first_message_preview`` is composed from a stored ``UserPromptPart`` (D-08)."""
     chat_service = client.app.state.chat_service
-    chat_service._histories.clear()
-    chat_service._metadata.clear()
-    chat_service._last_activity.clear()
-    chat_service._bound_providers.clear()
+    _reset_chat_service(chat_service)
 
-    history = InMemoryChatMessageHistory()
-    history.add_user_message("This is my first chat message about flights")
-    chat_service._histories["s1"] = history
+    # Seed the conversation store with a single ModelRequest carrying a UserPromptPart
+    # — Phase 5 equivalent of Phase 4.7's ``history.add_user_message(...)``.
+    store = chat_service._conversation_store
+    store._store["s1"] = [
+        ModelRequest(parts=[UserPromptPart(content="This is my first chat message about flights")]),
+    ]
     chat_service._metadata["s1"] = {
         "provider": "ollama",
         "model": "qwen3:4b",
@@ -107,10 +107,8 @@ def test_first_message_preview_populated(
         "created_at": datetime.now(UTC).isoformat(),
     }
 
-    # Act
     response = client.get("/api/chat/sessions", headers=auth_headers)
 
-    # Assert
     assert response.status_code == 200
     body = response.json()
     assert len(body["sessions"]) == 1
