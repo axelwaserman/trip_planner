@@ -31,7 +31,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [x] **Phase 4.7: Error Handling + StreamEvent Hierarchy** — discriminated `StreamEvent` union with `ErrorEvent`; UX-grade error feedback, loading states, retry, toasts. (completed 2026-05-19)
 - [x] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`. (completed 2026-05-19)
 - [x] **Phase 4.9: Pre-Phase-5 Prep** — split monolithic `models.py` into domain modules (auth, chat, providers, flights); extract `UserRepository` interface; add TypeScript/React skill + CLAUDE.md skill routing; fix 6 frontend bugs (empty-session new-session, font harmonization, second thinking block, settings URL error, LM Studio stale cache, sidebar overflow). (completed 2026-05-21)
-- [ ] **Phase 5: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; convert `LLMProvider`/`BoundProvider` from `typing.Protocol` to `abc.ABC`; ADR-001 → Superseded. **Resequenced ahead of Postgres** (PR #20 review, 2026-06-02): the agent surface is still small, so doing PydanticAI first avoids shaping the Phase 6 `Message` SQLModel against LangChain's `BaseChatMessageHistory` and folds the Protocol→ABC tech debt into the same change. **Status: Planned (2026-06-03) — 6 plans / 21 tasks across 6 waves; see `.planning/phases/05-pydanticai-migration/05-0*-PLAN.md`.**
+- [x] **Phase 5: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; convert `LLMProvider`/`BoundProvider` from `typing.Protocol` to `abc.ABC`; ADR-001 → Superseded. **Resequenced ahead of Postgres** (PR #20 review, 2026-06-02): the agent surface is still small, so doing PydanticAI first avoids shaping the Phase 6 `Message` SQLModel against LangChain's `BaseChatMessageHistory` and folds the Protocol→ABC tech debt into the same change. **Status: Planned (2026-06-03) — 6 plans / 21 tasks across 6 waves; see `.planning/phases/05-pydanticai-migration/05-0*-PLAN.md`.** (completed 2026-06-03)
 - [ ] **Phase 6: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Conversation`/`Message` tables (the `Message` shape now targets PydanticAI's `ModelMessage` directly, no JSON-payload escape hatch needed); named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
 - [ ] **Phase 7: Real Flight API** — Amadeus client behind existing `FlightAPIClient` ABC; **outbound HTTP via `pyreqwest`**; reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests.
 - [ ] **Phase 8: Production Hardening (slim)** — CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy headers; Chakra-aware `rehype-sanitize`; `structlog` + `RequestLoggingMiddleware`; backend coverage 60 → 80; frontend `{ branches: 70, lines: 80 }`. **No rate limiting** (ADR-009).
@@ -256,7 +256,7 @@ Plans:
 - [x] 05-03-PLAN.md — Wave 2: Concrete providers rewritten against PydanticAI (Ollama, OpenAI w/ o-series dispatch, Anthropic, LM Studio); factory threading; protocol.py shim deleted
 - [x] 05-04-PLAN.md — Wave 3: search_flights with RunContext[ChatDeps]; ChatService rewritten against agent.iter(); MockLLMStream rewritten with FunctionModel; lifespan wiring; manual UAT against qwen3:4b
 - [x] 05-05-PLAN.md — Wave 4: pyproject dependency swap — uv remove langchain* + langgraph; uv add pydantic-ai; pydantic floor bump to >=2.12; uv lock
-- [ ] 05-06-PLAN.md — Wave 5: Docs — ADR-001 → Superseded; ADR-007 → Locked; ARCHITECTURE.md rewrite; PROJECT.md Key Decisions table
+- [x] 05-06-PLAN.md — Wave 5: Docs — ADR-001 → Superseded; ADR-007 → Locked; ARCHITECTURE.md rewrite; PROJECT.md Key Decisions table
 
 ### Phase 6: Postgres + Redis + docker-compose
 **Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
@@ -323,7 +323,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 4/4 | Complete   | 2026-05-19 |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
-| 5. PydanticAI Migration | v1.5 | 5/6 | In Progress|  |
+| 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
 | 6. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
