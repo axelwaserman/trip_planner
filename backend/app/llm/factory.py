@@ -99,6 +99,7 @@ class LLMProviderFactory:
                 return OpenAIProvider(
                     model=config.model,
                     api_key=config.api_key or self._settings.openai_api_key,
+                    o_series_prefixes=self._settings.openai_o_series_model_prefixes,
                 )
             case "anthropic":
                 return AnthropicProvider(

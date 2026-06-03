@@ -37,7 +37,6 @@ from pydantic import PrivateAttr
 from app.chat import ChatService
 from app.llm.errors import ProbeError
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
-from app.llm.protocol import BoundProvider
 from app.tools.flight_client import MockFlightAPIClient
 
 
@@ -212,11 +211,14 @@ class _MockLLMProvider:
     async def validate_config(self) -> ProbeError | None:
         return None
 
-    def bind_tools(self, tools: Sequence[BaseTool]) -> BoundProvider:
+    def bind_tools(self, tools: Sequence[BaseTool]) -> Any:
         # MockLLM controls its own output regardless of bound tools (see its
         # bind_tools() — it just returns self). The bound wrapper exposes
         # only astream + ainvoke as the Phase 4.5 BoundProvider Protocol
-        # requires.
+        # requires. Phase 5 / Plan 05-04 (Wave 3) replaces this whole fixture
+        # with a FunctionModel-backed PydanticAI ``Agent``; the Wave 2 sweep
+        # only retypes the annotation so the module imports without the
+        # legacy ``protocol`` shim.
         return _MockBoundProvider(self._llm)
 
     async def list_models(self) -> list[str]:
