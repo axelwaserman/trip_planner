@@ -52,8 +52,8 @@ If everything else fails, login → provider selection → streaming chat with t
 - [ ] **REQ-streamevent-hierarchy** — Replace monolithic `StreamEvent` with discriminated union `ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent`; update SSE serialization + frontend parsing (Phase 4.7)
 - [ ] **REQ-pydantic-validators** — `Flight.arrival > departure`, `FlightQuery.departure_date >= today`, `FlightQuery.origin != destination` — additive to the existing `validate_dates` validator (Phase 4.8)
 - [ ] **REQ-test-fixture-dedup** — Shared `create_mock_flight()` factory and `parse_sse_events()` helper; refactor existing tests to consume them; delete orphaned `ToolCallCard.tsx` / `ToolResultCard.tsx` (Phase 4.8)
-- [ ] **REQ-pydantic-ai-migration** — Port `ChatService` from LangChain `bind_tools()` to PydanticAI agents while preserving the SSE event contract; convert `LLMProvider`/`BoundProvider` from `typing.Protocol` to `abc.ABC`; rewire `_flight_client` attribute injection to PydanticAI dependencies; remove `langchain*` from `pyproject.toml`; ADR-001 transitions Locked → Superseded (Phase 5 — *resequenced ahead of Postgres on 2026-06-02 per PR #20 review*)
-- [ ] **REQ-p5-stream-event-abc** — Refactor `StreamEvent` discriminated-union alias into a proper `StreamEvent(ABC)` hierarchy; pulled into Phase 5 because the producer is being rewritten anyway (Phase 5)
+- [x] **REQ-pydantic-ai-migration** — Port `ChatService` from LangChain `bind_tools()` to PydanticAI agents while preserving the SSE event contract; convert `LLMProvider`/`BoundProvider` from `typing.Protocol` to `abc.ABC`; rewire `_flight_client` attribute injection to PydanticAI dependencies; remove `langchain*` from `pyproject.toml`; ADR-001 transitions Locked → Superseded (Phase 5 — *resequenced ahead of Postgres on 2026-06-02 per PR #20 review*) — Validated in Phase 5 (2026-06-03)
+- [x] **REQ-p5-stream-event-abc** — Refactor `StreamEvent` discriminated-union alias into a proper `StreamEvent(ABC)` hierarchy; pulled into Phase 5 because the producer is being rewritten anyway (Phase 5) — Validated in Phase 5 (2026-06-03)
 - [ ] **REQ-postgres-redis-compose** — `docker-compose.yml` brings up backend + frontend + Postgres + Redis with named volumes and a single `OLLAMA_BASE_URL` override; `psycopg` async + `sqlmodel` ORM for `User` / `Conversation` / `Message` (the `Message` shape now targets PydanticAI's `ModelMessage` directly); users seeded from PG (replaces `AUTH_USERS` env-var workaround); CORS resolved by the compose network (Phase 6)
 - [ ] **REQ-real-flight-api** — Replace `MockFlightAPIClient` with a real flight provider (Amadeus) behind the existing `FlightAPIClient` ABC; outbound HTTP via **`pyreqwest`** (not `aiohttp`); reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests (Phase 7)
 - [ ] **REQ-security-headers** — CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy on every response; CORS allowlist from `settings.cors_origins` if not already solved by the compose network; `rehype-sanitize` with the custom Chakra-aware config (Phase 8)
@@ -131,13 +131,13 @@ If everything else fails, login → provider selection → streaming chat with t
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| **ADR-001** Use LangChain 1.0 `bind_tools()` (not `create_agent()`) | LangGraph under the hood; works with any chat model that supports function calling; simpler to mock/test; streaming works out of the box | ⚠️ **Superseded by ADR-007** — replaced by PydanticAI in **Phase 5** *(was Phase 6; resequenced 2026-06-02 per PR #20 review)*. LangChain remains in place through Phase 4.x. |
+| **ADR-001** Use LangChain 1.0 `bind_tools()` (not `create_agent()`) | LangGraph under the hood; works with any chat model that supports function calling; simpler to mock/test; streaming works out of the box | ⚠️ **Status: Superseded by ADR-007 (2026-06-03)** — replaced by PydanticAI in **Phase 5** *(was Phase 6; resequenced 2026-06-02 per PR #20 review)*. LangChain shipped through Phase 4.x; `langchain*` + `langgraph` removed from `pyproject.toml` in Wave 4. See `.planning/adrs/ADR-001-langchain.md` for the standalone ADR with the supersession note. |
 | **ADR-002** Global `_global_chat_store` for session history | Per `NOW.md`, the premise was a misunderstanding — no `_global_chat_store` ever existed; `ChatService._histories` was per-instance from the start. | ⚠️ **Obsolete** — Phase 6 moves history into Postgres anyway, so the original ADR is doubly moot. Recorded for history only. |
 | **ADR-003** Stream LLM responses via Server-Sent Events using FastAPI `StreamingResponse` | Native browser support, simpler than WebSockets for unidirectional streaming, FastAPI-friendly. | ✓ Locked-as-implemented (`StreamingResponse` in `routes.py`) |
 | **ADR-004** Pydantic models for all data structures (no raw dicts) | Validation, OpenAPI schema generation, mypy integration, free serialization | ✓ Good — locked |
 | **ADR-005** Mock-first external API (build `MockFlightAPIClient`, real Amadeus later) | Faster iteration, deterministic tests, no API credentials during dev | ✓ Good — locked; real client lands Phase 7 (after PydanticAI + compose re-platform) |
 | **ADR-006** Postgres + `psycopg` async + `sqlmodel` ORM, in docker-compose, single spin-up | Replaces in-memory `_histories` and `AUTH_USERS` env-seed; named volumes survive restart; CORS resolved by single compose network; `OLLAMA_BASE_URL` overridable. **Pre-phase spike**: verify `postgresql+psycopg://` async URI works with SQLModel async session out-of-the-box on SQLAlchemy ≥ 2.0 (SQLModel historically targeted `asyncpg`; if `psycopg` async needs adapter glue, surface that before locking the model layer). | — Pending — lands **Phase 6** *(was Phase 5; resequenced 2026-06-02 per PR #20 review)* |
-| **ADR-007** PydanticAI replaces LangChain for the chat agent | Lighter footprint, easier to mock/test, native Pydantic integration; LangChain currently works but the migration is the cheaper long-term carrying cost | — Pending — lands **Phase 5** *(was Phase 6; resequenced 2026-06-02 per PR #20 review — doing the agent migration before persistence eliminates the `Message` shape gamble and folds three reworks into one change)* |
+| **ADR-007** PydanticAI replaces LangChain for the chat agent | Lighter footprint, easier to mock/test, native Pydantic integration; single-tier `Agent` shape collapses the Phase 4.5 `LLMProvider`/`BoundProvider` two-tier; `RunContext[Deps]` closes the `_flight_client` monkey-patch; native `<think>` tag parsing for Ollama qwen3 | ✓ **Status: Locked (2026-06-03)** — shipped in **Phase 5**. RESEARCH OQ-01..OQ-05 verified against installed `pydantic-ai 0.8.1` (HIGH confidence). See `.planning/adrs/ADR-007-pydantic-ai.md` for the standalone ADR. |
 | **ADR-008** `pyreqwest` for outbound HTTP (real travel APIs) | Async-first Rust-backed client, performance + ergonomics; replaces `aiohttp` references in earlier docs | — Pending — lands Phase 7 |
 | **ADR-009** Drop rate limiting from v1 hardening | Demo-grade traffic does not warrant `slowapi` + key-function complexity; revisit only if a public deployment surface materializes | ✓ Decided — applies from Phase 8 onward |
 | JWT auth via `pyjwt` + `pwdlib[argon2]` (HS256, 60-min expiry) | Standard, well-supported | ✓ Backend shipped PR #4 — login UI lands Phase 4.2; users move from `AUTH_USERS` env to PG in Phase 6 *(was Phase 5 before the 2026-06-02 swap)* |
@@ -150,6 +150,28 @@ If everything else fails, login → provider selection → streaming chat with t
 | Adopt user-stated milestone goal: unbreak app → swap to PydanticAI → re-platform onto PG+compose → real travel API → hardening *(Phase 5 ↔ 6 swap on 2026-06-02 per PR #20 review)* | User's success metric: working browser demo (login → provider select → chat → real flight results), 80% backend coverage, no CRITICAL security findings | — Pending — drives v1 roadmap |
 
 ---
+*2026-06-03 after Phase 5 completion — PydanticAI migration shipped:
+`LLMProvider(ABC)` + `build_agent(tools, deps_type)` (single-tier;
+`BoundProvider` retired); `ChatDeps` frozen dataclass; four concrete providers
+reshaped against `pydantic_ai.models.*` (Ollama via `OllamaProvider`, OpenAI
+with o-series → `OpenAIResponsesModel` dispatch, Anthropic via
+`AnthropicProvider`, LM Studio via `OpenAIProvider` with no api-key sentinel);
+`search_flights` rewritten with `ctx: RunContext[ChatDeps]` (the
+`_flight_client` back-door is deleted); `ChatService.chat_stream()` rewritten
+against `agent.iter()` walking `ModelRequestNode` / `CallToolsNode`;
+`StreamEvent(BaseModel, ABC)` with five concrete subclasses (wire format
+byte-equivalent to Phase 4.7); `ConversationStore(ABC)` +
+`InMemoryConversationStore` (Phase 6 swaps in `PostgresConversationStore`);
+`MockLLMStream` rewritten to drive `FunctionModel(stream_function=...)` —
+default `pytest` stays fast and offline. Dependency swap: `langchain`,
+`langchain-core`, `langchain-ollama`, `langchain-openai`,
+`langchain-anthropic`, and `langgraph` all removed; `pydantic-ai>=0.8.1`
+added; `pydantic` floor raised to `>=2.12`. **ADR-001 → Superseded by
+ADR-007; ADR-007 → Locked.** Standalone ADR files now live under
+`.planning/adrs/`. Phase 5 success criteria 1-6 (ROADMAP.md lines 246-251)
+all met. REQ-pydantic-ai-migration + REQ-p5-stream-event-abc moved Active →
+Validated.*
+
 *2026-06-02: PR #20 review pass — ARCHITECTURE.md aligned to ADR-008 (`pyreqwest` per CLAUDE.md, replacing stale `aiohttp`/`httpx` references) and **Phase 5 ↔ Phase 6 resequenced**: PydanticAI migration now lands first, Postgres + Redis + docker-compose lands second. Rationale: the agent surface is small enough that doing PydanticAI before persistence is the cheapest moment, eliminates the `Message` shape gamble (table now targets `ModelMessage` directly), and folds three pending reworks (LangChain → PydanticAI, `LLMProvider` Protocol → ABC, `_flight_client` back-door → DI) into one change. `REQ-p5-*` IDs retain their `p5` prefix as historical schedule labels.*
 
 *Last updated: 2026-05-18 after Phase 4.5 completion — LLM provider abstraction shipped: `LLMProvider`/`BoundProvider` Protocols, `LLMProviderFactory` with 4-way `match` dispatch, four real providers (Ollama with dynamic discovery / OpenAI / Anthropic / LM Studio), per-session provider injection, three new auth-protected endpoints (`POST /api/providers/refresh`, `POST /api/providers/{provider}/test`, `GET /api/chat/sessions`), per-user session partitioning, minimal API-key log scrubber, Sidebar + settings UI with active-model badge. REQ-llm-provider-abstraction moved Active → Validated. Verifier passed 9/9 must-haves; 5 critical code-review findings fixed inline before completion.*
