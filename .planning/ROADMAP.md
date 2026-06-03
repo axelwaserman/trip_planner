@@ -253,7 +253,7 @@ Plans:
 Plans:
 - [x] 05-01-PLAN.md — Wave 0: Failing test scaffolds (RED stubs) + Phase 4.7 SSE wire-format golden file + anti-pattern locks
 - [x] 05-02-PLAN.md — Wave 1: Foundations — LLMProvider(ABC) (rename protocol.py → base.py), ChatDeps, ConversationStore(ABC) + InMemoryConversationStore, StreamEvent ABC refactor, Settings o-series knob
-- [ ] 05-03-PLAN.md — Wave 2: Concrete providers rewritten against PydanticAI (Ollama, OpenAI w/ o-series dispatch, Anthropic, LM Studio); factory threading; protocol.py shim deleted
+- [x] 05-03-PLAN.md — Wave 2: Concrete providers rewritten against PydanticAI (Ollama, OpenAI w/ o-series dispatch, Anthropic, LM Studio); factory threading; protocol.py shim deleted
 - [ ] 05-04-PLAN.md — Wave 3: search_flights with RunContext[ChatDeps]; ChatService rewritten against agent.iter(); MockLLMStream rewritten with FunctionModel; lifespan wiring; manual UAT against qwen3:4b
 - [ ] 05-05-PLAN.md — Wave 4: pyproject dependency swap — uv remove langchain* + langgraph; uv add pydantic-ai; pydantic floor bump to >=2.12; uv lock
 - [ ] 05-06-PLAN.md — Wave 5: Docs — ADR-001 → Superseded; ADR-007 → Locked; ARCHITECTURE.md rewrite; PROJECT.md Key Decisions table
@@ -323,7 +323,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.7. Error Handling + StreamEvent Hierarchy | v1 | 4/4 | Complete   | 2026-05-19 |
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
-| 5. PydanticAI Migration | v1.5 | 2/6 | In Progress|  |
+| 5. PydanticAI Migration | v1.5 | 3/6 | In Progress|  |
 | 6. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
