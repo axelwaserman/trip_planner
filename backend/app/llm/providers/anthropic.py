@@ -1,6 +1,6 @@
 """Anthropic provider — wraps :class:`langchain_anthropic.ChatAnthropic`.
 
-This module implements the ``LLMProvider`` Protocol (:mod:`app.llm.protocol`)
+This module implements the ``LLMProvider`` ABC (:mod:`app.llm.base`)
 for Anthropic Claude models. It is the second REAL cloud provider in Phase 4.5
 (success criterion #3 of the phase ROADMAP) and is symmetric with the OpenAI
 provider, with one critical difference (Pitfall 2 below).
@@ -42,13 +42,14 @@ path, which is a (small) information-disclosure surface. To avoid this:
 """
 
 from collections.abc import Sequence
+from typing import Any
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import BaseTool
 from pydantic import SecretStr
 
+from app.llm.base import LLMProvider  # noqa: F401  # imported for Wave 2 explicit subclassing
 from app.llm.errors import ProbeError, ProbeErrorCode
-from app.llm.protocol import BoundProvider
 
 # D-04: cloud providers keep curated model lists. These three identifiers MUST
 # stay in sync with ``Settings.get_available_providers()["anthropic"]["models"]``.
@@ -59,10 +60,11 @@ _CURATED_ANTHROPIC_MODELS: list[str] = [
 ]
 
 
-class AnthropicProvider:
-    """Anthropic Claude provider — implements :class:`app.llm.protocol.LLMProvider`.
+class AnthropicProvider(LLMProvider):
+    """Anthropic Claude provider — Phase 5 D-03 ABC subclass.
 
-    The class never imports :mod:`app.config` and never reads ``os.environ``;
+    Explicitly subclasses :class:`app.llm.base.LLMProvider` (the ABC). The
+    class never imports :mod:`app.config` and never reads ``os.environ``;
     the per-session ``api_key`` is supplied by :class:`app.llm.factory.LLMProviderFactory`
     after applying D-08 precedence (payload wins over ``Settings.anthropic_api_key``).
     """
@@ -98,7 +100,7 @@ class AnthropicProvider:
             )
         return None
 
-    def bind_tools(self, tools: Sequence[BaseTool]) -> BoundProvider:
+    def bind_tools(self, tools: Sequence[BaseTool]) -> Any:
         """Construct :class:`ChatAnthropic` with tools bound; return the runnable.
 
         **Precondition (Pitfall 2):** ``self._api_key`` MUST be non-``None``.
@@ -108,11 +110,9 @@ class AnthropicProvider:
         instead of a Pydantic ``ValidationError`` from inside the SDK (which
         would include the field path in its stack trace).
 
-        The bound runnable returned by ``ChatAnthropic.bind_tools`` is
-        ``Runnable[LanguageModelInput, AIMessage]``; it structurally satisfies
-        the :class:`BoundProvider` Protocol (``ainvoke`` + ``astream``) but
-        mypy cannot prove this statically because ``Runnable`` is not declared
-        as implementing the Protocol — hence the ``type: ignore[return-value]``.
+        Wave 2 / Plan 05-03 replaces this method with ``build_agent`` returning
+        a PydanticAI ``Agent``; the return-type annotation is ``Any`` here so
+        the module imports cleanly mid-wave.
         """
         # Pitfall 2: ChatAnthropic requires non-None api_key at construction;
         # validate_config gates this in the normal flow (factory ordering, Plan 06).
@@ -128,9 +128,9 @@ class AnthropicProvider:
             model=self._model,
             api_key=SecretStr(self._api_key),
         )
-        # Runnable[LanguageModelInput, AIMessage] structurally satisfies BoundProvider;
-        # mypy cannot prove this without importing LangChain's runtime Protocol check.
-        return llm.bind_tools(list(tools))  # type: ignore[return-value]
+        # The explicit ``Any`` return-type annotation here is the transitional
+        # knob until Wave 2 swaps this method for ``build_agent``.
+        return llm.bind_tools(list(tools))
 
     async def list_models(self) -> list[str]:
         """Return the curated Anthropic model list (D-04).
@@ -140,3 +140,15 @@ class AnthropicProvider:
         kept in sync when models are added or retired.
         """
         return list(_CURATED_ANTHROPIC_MODELS)
+
+    def build_agent(self, tools: Sequence[Any], deps_type: type[Any]) -> Any:
+        """Wave 2 stub — Plan 05-03 replaces the body with the real PydanticAI implementation.
+
+        Required to satisfy the :class:`app.llm.base.LLMProvider` ABC contract so
+        ``AnthropicProvider`` is instantiable mid-wave. The Phase 4.5 ``bind_tools``
+        path above continues to serve ``ChatService`` until Wave 3.
+
+        Raises:
+            NotImplementedError: Always, until Plan 05-03 lands the body.
+        """
+        raise NotImplementedError("AnthropicProvider.build_agent is implemented in Wave 2 / Plan 05-03")
