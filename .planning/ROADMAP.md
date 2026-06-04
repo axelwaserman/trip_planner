@@ -341,7 +341,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — Wave 0 spike: deps + async session factory + ADR-006
+- [x] 06-01-PLAN.md — Wave 0 spike: deps + async session factory + ADR-006
 - [ ] 06-05-PLAN.md — `session` → `conversation` rename; SessionCreateRequest + ProviderInfo SRP splits; flight-client DI lock
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -410,7 +410,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
-| 6. Postgres + Redis + docker-compose | v1.5 | 0 / TBD | Not started | - |
+| 6. Postgres + Redis + docker-compose | v1.5 | 1/7 | In Progress|  |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
