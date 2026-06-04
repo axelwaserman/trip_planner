@@ -1,23 +1,30 @@
-"""Persistent chat conversation storage (D-08, D-11).
+"""Persistent chat conversation storage (D-05, D-08, D-11).
 
-Phase 5 introduces a :class:`ConversationStore` ABC that abstracts the
-``list[ModelMessage]`` round-trip used by the new PydanticAI-driven
-:meth:`ChatService.chat_stream`. The Phase 5 in-memory implementation is
-stateful only for the duration of the process; Phase 6 swaps in a
-``PostgresConversationStore`` via FastAPI DI override (per the canonical
-:class:`app.auth.repository.UserRepository` ABC + first-impl pattern).
+Phase 6 / Plan 06-03 splits the Phase 5 :class:`ConversationStore` ABC into
+two narrower abstractions per CONTEXT.md D-05/D-06:
 
-Per D-09, session metadata (``provider``, ``model``, ``created_at``,
-``last_activity``) lives on :class:`ChatService._metadata` — the store
-deliberately does NOT carry it. ``list_for_user`` is therefore minimal in
-Phase 5 (returns an empty list); ``ChatService`` composes the user-scoped
-view by joining ``_metadata`` with the store's per-session contents. Phase 6
-shifts ownership of the ``user_id → session_id`` index into SQL, at which
-point ``list_for_user`` returns a populated list.
+* :class:`MessageStore` (this module) — append-only event log: the
+  ``list[ModelMessage]`` round-trip used by :meth:`ChatService.chat_stream`,
+  plus :meth:`MessageStore.first_user_message_preview` so the
+  ``ChatService._first_message_preview`` `getattr(_store)` peek (CR-04 from
+  Phase 5 verification) can finally retire.
+* :class:`app.chat.repository.ConversationRepository` (sibling module) —
+  meta-CRUD: ``create`` / ``get`` / ``list_for_user`` / ``bump_last_activity``
+  / ``delete``. Conversation metadata (provider/model/timestamps) lives in
+  SQL on the ``conversation`` row, not on a Python ``_metadata`` dict.
 
-Per CLAUDE.md "all I/O must be ``async def``", every method is ``async def``
-even though the in-memory impl is uncontended — Phase 6's PG impl is
-naturally async, and the ABC must match that contract.
+The Phase 5 :class:`ConversationStore` ABC and :class:`InMemoryConversationStore`
+are retained as a deprecated shim for the duration of this wave so the existing
+:class:`ChatService` keeps importing cleanly. Plan 06-04 deletes them once the
+service is rewired onto the new ABCs.
+
+Per D-09, the in-memory impls store only what the in-memory tests need; the
+authoritative user-scoped index lives on
+:class:`app.chat.repository.PostgresConversationRepository`.
+
+Per CLAUDE.md "all I/O must be ``async def``", every method on every store
+is ``async def`` even though the in-memory impls never block — the ABC must
+match what the Postgres impl requires.
 """
 
 from __future__ import annotations
@@ -25,69 +32,401 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    # pydantic_ai is added in Wave 4; using TYPE_CHECKING keeps this module
-    # importable while Waves 1-3 land. ``ModelMessage`` is the PydanticAI
-    # canonical message-history type — opaque to the store, which only
-    # appends/reads list[ModelMessage] without inspecting field shape (D-11).
-    from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelMessagesTypeAdapter,
+    ModelRequest,
+    UserPromptPart,
+)
+from pydantic_core import to_jsonable_python
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import col, delete, select
 
-    # ChatSessionInfo is annotation-only (return type of list_for_user); moving
-    # to TYPE_CHECKING avoids the runtime cycle through app.chat.__init__.
+from app.config import settings
+from app.db.models import Message
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    # ChatSessionInfo is annotation-only (return type of legacy ConversationStore.list_for_user);
+    # moving to TYPE_CHECKING avoids the runtime cycle through app.chat.__init__.
     from app.chat.models import ChatSessionInfo
 
 
+# Truncation length for first_user_message_preview — kept module-level (not on
+# Settings) because the value is part of the wire contract: ``ChatSessionInfo
+# .first_message_preview`` is documented as "truncated to 80 chars" and the
+# frontend truncates accordingly. Per CLAUDE.md, contract values stay as
+# module constants; tunables (e.g. ``message_max_payload_bytes``) live on
+# Settings.
+_PREVIEW_MAX_LENGTH = 80
+
+
+class ConversationConcurrentAppendError(RuntimeError):
+    """Raised when two writers race the ``(conversation_id, seq)`` unique index.
+
+    Phase 6 / 06-RESEARCH.md Pitfall 6 + threat T-06-03-04: the
+    ``SELECT max(seq) … then INSERT`` pattern is not atomic across concurrent
+    writers, so the unique index is the safety net. This exception surfaces
+    the resulting ``IntegrityError`` as a domain-level signal so
+    :class:`ChatService` (Plan 06-04) can map it to a clear
+    :class:`app.chat.models.ErrorEvent` rather than letting the SQL error
+    propagate to the SSE wire (V4 Access Control + repudiation lock).
+
+    The single-writer-per-conversation invariant (06-RESEARCH.md Assumption
+    A4) means this should be rare in v1; it exists primarily as a
+    defence-in-depth lock for the Phase 5 verification finding WR-01
+    (concurrent ``chat_stream`` calls on the same conversation).
+    """
+
+    def __init__(self, conversation_id: UUID) -> None:
+        super().__init__(
+            f"Concurrent append detected on conversation {conversation_id}; "
+            "another writer raced the (conversation_id, seq) unique index.",
+        )
+        self.conversation_id = conversation_id
+
+
+class MessageStore(ABC):
+    """Abstract message-event store keyed by ``conversation_id`` (D-05).
+
+    Phase 6 contract: persist a per-conversation ``list[ModelMessage]`` and
+    expose minimal append-only operations against it. Both concrete impls
+    (in-memory + Postgres) ship this wave; future :class:`RedisMessageStore`
+    or hybrid Redis-hot/PG-durable variants slot in via the same ABC without
+    :class:`ChatService` changes.
+
+    :meth:`first_user_message_preview` lives on the ABC so that
+    :meth:`ChatService.list_sessions_for_user` no longer reaches into a
+    private ``_store`` dict via ``getattr`` (CR-04 from Phase 5 verification).
+    The PG impl owns it as a SQL query; the in-memory impl owns it as a list
+    walk — both satisfy the same observable shape.
+    """
+
+    @abstractmethod
+    async def append(self, conversation_id: UUID, messages: list[ModelMessage]) -> None:
+        """Append ``messages`` to the conversation's history.
+
+        Implementations MUST treat the existing history as immutable and
+        produce a new list internally (per
+        ``~/.claude/rules/common/coding-style.md`` immutability rule). Append
+        is the only mutation; in-place edits are not supported.
+
+        Args:
+            conversation_id: DB-native ``UUID`` primary key of the
+                ``conversation`` row.
+            messages: One or more :class:`ModelMessage` instances to append.
+                The list is opaque to the store — element shape is owned by
+                PydanticAI.
+
+        Raises:
+            ConversationConcurrentAppendError: When a Postgres impl detects
+                a unique-index collision on ``(conversation_id, seq)`` —
+                another writer raced this one. The in-memory impl never
+                raises this.
+            ValueError: When a serialized payload exceeds
+                :attr:`Settings.message_max_payload_bytes` (Pitfall 5
+                guardrail). The Postgres impl enforces this; the in-memory
+                impl does not.
+        """
+        ...
+
+    @abstractmethod
+    async def load(self, conversation_id: UUID) -> list[ModelMessage]:
+        """Load the conversation's full message history in append order.
+
+        Args:
+            conversation_id: DB-native ``UUID`` primary key.
+
+        Returns:
+            A list of :class:`ModelMessage` ordered by append sequence; empty
+            list when the conversation is unknown (the store NEVER raises
+            for missing keys — per the :class:`UserRepository` analog).
+        """
+        ...
+
+    @abstractmethod
+    async def delete(self, conversation_id: UUID) -> None:
+        """Remove the conversation's message history. No-op for unknowns.
+
+        Args:
+            conversation_id: DB-native ``UUID`` primary key.
+        """
+        ...
+
+    @abstractmethod
+    async def first_user_message_preview(self, conversation_id: UUID) -> str | None:
+        """Return the conversation's first user-prompt content (truncated).
+
+        Walks the conversation's message history and returns
+        ``content[:80]`` of the first :class:`UserPromptPart` found on a
+        :class:`ModelRequest`. ``None`` when the conversation is unknown or
+        carries no user-prompt yet.
+
+        This method exists on the ABC (D-05) so
+        :meth:`ChatService.list_sessions_for_user` no longer peeks into a
+        private ``_store`` dict via ``getattr`` (CR-04 anti-pattern lock).
+
+        Args:
+            conversation_id: DB-native ``UUID`` primary key.
+
+        Returns:
+            The first user-prompt text truncated to 80 characters, or
+            ``None`` if no user-prompt exists yet.
+        """
+        ...
+
+
+class InMemoryMessageStore(MessageStore):
+    """In-memory :class:`MessageStore` for unit tests + dev fallback.
+
+    State lives in a single private dict ``_store: dict[UUID,
+    list[ModelMessage]]``. Round-trip via ``append`` then ``load`` returns a
+    defensive copy of the stored list so callers cannot mutate the store's
+    internal state — same invariant as
+    :class:`app.auth.repository.EnvUserRepository.get_user`'s ``UserInDB``
+    returns.
+
+    Unlike the legacy :class:`InMemoryConversationStore`, this impl does NOT
+    track a ``user_id → conversation_id`` index; that responsibility now
+    lives on :class:`app.chat.repository.InMemoryConversationRepository`
+    (D-06 split).
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[UUID, list[ModelMessage]] = {}
+
+    async def append(self, conversation_id: UUID, messages: list[ModelMessage]) -> None:
+        """Append ``messages`` immutably (``existing + messages``)."""
+        existing = self._store.get(conversation_id, [])
+        # Immutable concat per coding-style.md — never `.append()` in place.
+        self._store[conversation_id] = existing + messages
+
+    async def load(self, conversation_id: UUID) -> list[ModelMessage]:
+        """Return a defensive copy of the conversation's history (empty list when unknown)."""
+        return list(self._store.get(conversation_id, []))
+
+    async def delete(self, conversation_id: UUID) -> None:
+        """Drop the conversation entry. ``dict.pop(..., None)`` makes this a no-op for unknowns."""
+        self._store.pop(conversation_id, None)
+
+    async def first_user_message_preview(self, conversation_id: UUID) -> str | None:
+        """Return the first user-prompt content truncated to 80 chars, or None."""
+        messages = self._store.get(conversation_id, [])
+        return _extract_first_user_prompt_preview(messages)
+
+
+class PostgresMessageStore(MessageStore):
+    """Postgres-backed :class:`MessageStore` (06-RESEARCH.md Pattern 3).
+
+    Each :class:`ModelMessage` round-trips through the ``message`` table's
+    ``payload`` JSONB column via
+    :func:`pydantic_core.to_jsonable_python` on append and
+    :class:`pydantic_ai.messages.ModelMessagesTypeAdapter` on load. The
+    ``(conversation_id, seq)`` composite unique index defined in
+    :mod:`app.db.models` (Plan 06-02) is the safety net for concurrent
+    writers (Pitfall 6) — :meth:`append` maps the resulting
+    :class:`sqlalchemy.exc.IntegrityError` to
+    :class:`ConversationConcurrentAppendError` so the ChatService layer can
+    surface a domain error instead of letting raw SQL bubble up.
+
+    The store is constructed with an ``async_sessionmaker`` (not a single
+    long-lived session) so each call manages its own short transaction —
+    06-RESEARCH.md Pitfall 3 forbids holding an :class:`AsyncSession` across
+    a streaming SSE handler.
+    """
+
+    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+        self._sessionmaker = sessionmaker
+
+    async def append(self, conversation_id: UUID, messages: list[ModelMessage]) -> None:
+        """Append ``messages`` as event-log rows; reject oversize payloads.
+
+        Steps (RESEARCH Pattern 3):
+
+        1. Serialize each :class:`ModelMessage` via
+           :func:`to_jsonable_python` and compute its UTF-8 byte length.
+           Anything exceeding :attr:`Settings.message_max_payload_bytes` is
+           rejected with :class:`ValueError` BEFORE issuing any INSERT
+           (Pitfall 5 / threat T-06-03-05). The whole batch fails if any
+           single payload is too large — partial writes would corrupt the
+           ordered log.
+        2. ``SELECT coalesce(max(seq), 0)`` for the conversation, then build
+           one :class:`Message` per input with monotonic
+           ``seq = current_max + offset``.
+        3. ``await session.commit()``; on
+           :class:`sqlalchemy.exc.IntegrityError` (the
+           ``(conversation_id, seq)`` unique-index race) re-raise as
+           :class:`ConversationConcurrentAppendError`.
+        """
+        # Pitfall 5 / T-06-03-05: cap row size before any DB work so an
+        # oversize payload doesn't waste a round-trip + a session checkout.
+        # Serialize once, reuse for the INSERT — keeps the CPU cost flat.
+        serialized: list[tuple[ModelMessage, dict[str, object]]] = []
+        for msg in messages:
+            payload = to_jsonable_python(msg)
+            # ``to_jsonable_python`` returns a Python object tree. Serialize to
+            # JSON bytes for the size check so the cap matches what JSONB will
+            # actually store on disk. ``ensure_ascii=False`` keeps non-ASCII
+            # text at its true byte size (the JSONB column is UTF-8 by default).
+            import json as _stdjson  # noqa: PLC0415 — avoid leaking the alias to module surface
+
+            payload_bytes = len(_stdjson.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            if payload_bytes > settings.message_max_payload_bytes:
+                raise ValueError(
+                    f"ModelMessage payload size {payload_bytes} bytes exceeds "
+                    f"message_max_payload_bytes={settings.message_max_payload_bytes}",
+                )
+            serialized.append((msg, payload))
+
+        # ``sqlmodel.select`` + ``sqlmodel.col`` is the mypy-strict-friendly
+        # combo: SQLModel's class-level descriptors are typed as the Python
+        # field type (UUID/int/dict) for end-user ergonomics, so a bare
+        # ``Message.conversation_id == cid`` resolves to ``bool`` under
+        # ``--strict``. ``col(Message.x)`` re-types the descriptor as a
+        # ``ColumnClause`` so where/order_by accept it cleanly.
+        async with self._sessionmaker() as session:
+            current_max_result = await session.execute(
+                select(func.coalesce(func.max(col(Message.seq)), 0)).where(
+                    col(Message.conversation_id) == conversation_id,
+                ),
+            )
+            current_max = current_max_result.scalar_one()
+            for offset, (_msg, payload) in enumerate(serialized, start=1):
+                session.add(
+                    Message(
+                        conversation_id=conversation_id,
+                        seq=current_max + offset,
+                        payload=payload,
+                    ),
+                )
+            try:
+                await session.commit()
+            except IntegrityError as exc:
+                # Pitfall 6 / T-06-03-04: surface the unique-violation as a
+                # domain-level signal so the caller can map it to a clear
+                # ErrorEvent rather than 500'ing on raw SQL state.
+                raise ConversationConcurrentAppendError(conversation_id) from exc
+
+    async def load(self, conversation_id: UUID) -> list[ModelMessage]:
+        """Replay the conversation's event log via JSONB → ``ModelMessage``."""
+        async with self._sessionmaker() as session:
+            result = await session.execute(
+                select(Message.payload)
+                .where(col(Message.conversation_id) == conversation_id)
+                .order_by(col(Message.seq)),
+            )
+            rows = list(result.scalars().all())
+        if not rows:
+            return []
+        # ModelMessagesTypeAdapter.validate_python reconstitutes the full
+        # list[ModelMessage] from the JSONB-shape Python objects.
+        return ModelMessagesTypeAdapter.validate_python(rows)
+
+    async def delete(self, conversation_id: UUID) -> None:
+        """Truncate the conversation's event log.
+
+        Note: deleting the parent ``conversation`` row triggers ON DELETE
+        CASCADE, which removes child ``message`` rows automatically. This
+        method exists for explicit per-conversation truncation (e.g. tests,
+        future "clear history" UX) without dropping the conversation row.
+        """
+        async with self._sessionmaker() as session:
+            await session.execute(
+                delete(Message).where(col(Message.conversation_id) == conversation_id),
+            )
+            await session.commit()
+
+    async def first_user_message_preview(self, conversation_id: UUID) -> str | None:
+        """Return the first ``UserPromptPart`` content truncated to 80 chars.
+
+        Loads the earliest message row by ``seq`` and decodes its JSONB
+        payload back into a :class:`ModelMessage`. Returning ``None`` here
+        is the documented contract for "no user-prompt yet" — empty
+        conversation, or a leading non-request message (rare).
+        """
+        async with self._sessionmaker() as session:
+            result = await session.execute(
+                select(Message.payload)
+                .where(col(Message.conversation_id) == conversation_id)
+                .order_by(col(Message.seq))
+                .limit(1),
+            )
+            row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        # Reuse the canonical adapter so JSONB → ModelMessage stays in one place.
+        messages = ModelMessagesTypeAdapter.validate_python([row])
+        return _extract_first_user_prompt_preview(messages)
+
+
+def _extract_first_user_prompt_preview(messages: list[ModelMessage]) -> str | None:
+    """Walk ``messages`` and return the first ``UserPromptPart`` content (≤80 chars).
+
+    Shared between :class:`InMemoryMessageStore` and
+    :class:`PostgresMessageStore` so the truncation rule lives in exactly one
+    place. ``content`` is canonically a ``str`` on PydanticAI's
+    :class:`UserPromptPart`; the ``str(content)`` fallback exists only to
+    cover the documented multimodal case (image/file content) which
+    Phase 6 has no LLM in scope for.
+    """
+    for msg in messages:
+        if isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if isinstance(part, UserPromptPart):
+                    content = part.content
+                    if isinstance(content, str):
+                        return content[:_PREVIEW_MAX_LENGTH]
+                    return str(content)[:_PREVIEW_MAX_LENGTH]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Legacy ConversationStore ABC + InMemoryConversationStore — DEPRECATED.
+# Plan 06-04 deletes these once ChatService is rewired to consume MessageStore
+# + ConversationRepository directly. Until then they keep the existing
+# ChatService importable so this wave does not break the build.
+# ---------------------------------------------------------------------------
+
+
 class ConversationStore(ABC):
-    """Abstract conversation store keyed by ``session_id`` (D-08).
+    """DEPRECATED: split into MessageStore (this file) + ConversationRepository (chat/repository.py); Plan 04 deletes after ChatService rewire.
 
-    Phase 5 contract: persist a per-session ``list[ModelMessage]`` and expose
-    minimal CRUD operations against it. Phase 6 swaps the in-memory impl for
-    a Postgres-backed one via FastAPI DI override (the
-    :class:`app.auth.repository.UserRepository` ABC + ``EnvUserRepository``
-    pattern is the canonical analog).
-
-    Per CONTEXT.md D-09 the store does NOT track session-level metadata
-    (``provider``/``model``/timestamps) — that lives on
-    :class:`app.chat.service.ChatService._metadata`. ``list_for_user``'s
-    return type is :class:`ChatSessionInfo` for forward compatibility with
-    Phase 6 where the SQL impl owns the user→sessions index and can return
-    populated entries directly.
+    Phase 5 contract retained verbatim so the existing :class:`ChatService`
+    keeps importing during this wave. New code MUST consume
+    :class:`MessageStore` + :class:`app.chat.repository.ConversationRepository`
+    instead.
     """
 
     @abstractmethod
     async def append(self, session_id: str, messages: list[ModelMessage]) -> None:
-        """Append ``messages`` to the session's history.
-
-        Implementations MUST treat the existing history as immutable and
-        produce a new list internally (per ``~/.claude/rules/common/coding-style.md``
-        immutability rule). Append is the only mutation; in-place edits are
-        not supported.
+        """DEPRECATED: see :class:`MessageStore.append`.
 
         Args:
             session_id: Server-generated session UUID; used as the storage key.
-            messages: One or more ``ModelMessage`` instances to append. The
-                list is opaque to the store — element shape is owned by
-                PydanticAI.
+            messages: One or more ``ModelMessage`` instances to append.
         """
         ...
 
     @abstractmethod
     async def load(self, session_id: str) -> list[ModelMessage]:
-        """Load the session's full message history.
+        """DEPRECATED: see :class:`MessageStore.load`.
 
         Args:
             session_id: Server-generated session UUID.
 
         Returns:
-            A list of ``ModelMessage``; empty list when the session is
-            unknown (the store NEVER raises for missing keys — per the
-            ``UserRepository`` analog).
+            A list of ``ModelMessage``; empty list when the session is unknown.
         """
         ...
 
     @abstractmethod
     async def delete(self, session_id: str) -> None:
-        """Remove the session's history. No-op for unknown ``session_id``.
+        """DEPRECATED: see :class:`MessageStore.delete`.
 
         Args:
             session_id: Server-generated session UUID.
@@ -96,41 +435,20 @@ class ConversationStore(ABC):
 
     @abstractmethod
     async def list_for_user(self, user_id: str) -> list[ChatSessionInfo]:
-        """List sessions owned by ``user_id`` as :class:`ChatSessionInfo` entries.
-
-        Phase 5 in-memory impl returns an empty list — the store does NOT
-        track the ``user_id → session_id`` index (D-09 keeps that on
-        ``ChatService._metadata``). Phase 6 ``PostgresConversationStore``
-        owns this index in SQL and returns populated entries.
+        """DEPRECATED: see :class:`app.chat.repository.ConversationRepository.list_for_user`.
 
         Args:
             user_id: Authenticated username (the JWT ``sub`` claim).
 
         Returns:
-            A list of :class:`ChatSessionInfo` entries; in Phase 5 always
-            empty. ``ChatService.list_sessions`` composes the user-scoped
-            view from its own ``_metadata`` dict regardless of this return.
+            A list of :class:`ChatSessionInfo` entries (Phase 5 in-memory
+            impl always returned empty).
         """
         ...
 
 
 class InMemoryConversationStore(ConversationStore):
-    """Phase 5 in-memory :class:`ConversationStore`.
-
-    State lives in two private dicts:
-
-    - ``_store: dict[str, list[ModelMessage]]`` — per-session message history.
-    - The ``user_id → session_id`` index is intentionally NOT tracked here
-      (D-09); :class:`app.chat.service.ChatService` composes user-scoped
-      views from its own ``_metadata`` dict. Phase 6's
-      ``PostgresConversationStore`` migrates that index into SQL with FK
-      constraints on the ``user_id`` column.
-
-    Round-trip via ``append`` then ``load`` returns a defensive copy of the
-    stored list so callers cannot mutate the store's internal state — same
-    invariant as :class:`app.auth.repository.EnvUserRepository.get_user`'s
-    ``UserInDB`` returns.
-    """
+    """DEPRECATED: split into InMemoryMessageStore + InMemoryConversationRepository; Plan 04 deletes after ChatService rewire."""
 
     def __init__(self) -> None:
         self._store: dict[str, list[ModelMessage]] = {}
@@ -138,7 +456,6 @@ class InMemoryConversationStore(ConversationStore):
     async def append(self, session_id: str, messages: list[ModelMessage]) -> None:
         """Append ``messages`` immutably (``existing + messages``)."""
         existing = self._store.get(session_id, [])
-        # Immutable concat per coding-style.md — never `.append()` in place.
         self._store[session_id] = existing + messages
 
     async def load(self, session_id: str) -> list[ModelMessage]:
@@ -150,12 +467,5 @@ class InMemoryConversationStore(ConversationStore):
         self._store.pop(session_id, None)
 
     async def list_for_user(self, user_id: str) -> list[ChatSessionInfo]:
-        """Phase 5: returns an empty list (D-09 keeps user-indexing on ChatService).
-
-        Phase 6 ``PostgresConversationStore`` will own the ``user_id →
-        session_id`` index in SQL and return populated entries; until then,
-        :meth:`app.chat.service.ChatService.list_sessions` composes the
-        user-scoped view from its own ``_metadata`` dict and ignores this
-        return value.
-        """
+        """Phase 5 placeholder — always returns empty; ChatService composes from _metadata."""
         return []

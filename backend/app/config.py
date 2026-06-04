@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     db_pool_overflow: int = 10
     seed_allow_non_local: bool = False
 
+    # MessageStore guardrail (Plan 06-03 / 06-RESEARCH.md Pitfall 5).
+    # Phase 6 has no image/file-input LLM in scope; serialized ModelMessage
+    # payloads stay text-shaped and well under 1 MB. The cap defends against
+    # accidental BinaryContent/FilePart bloat slipping past the LLM boundary
+    # and turning a single row into a multi-MB JSONB blob (RESEARCH Pattern 3
+    # caveat). PostgresMessageStore.append rejects any ``to_jsonable_python``
+    # output exceeding this byte length before issuing the INSERT.
+    message_max_payload_bytes: int = 1_000_000
+
     # Provider probe (RESEARCH.md Pitfall 3, Assumption A2). 1.5 s caps the worst
     # case for a misconfigured Ollama daemon; localhost hits are typically 50–200 ms.
     provider_probe_timeout_seconds: float = 1.5
