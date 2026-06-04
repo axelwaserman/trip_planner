@@ -80,3 +80,37 @@ clean:
     find . -type d -name ".ruff_cache" -exec rm -rf {} +
     rm -rf backend/dist
     rm -rf frontend/dist
+
+# Phase 6 — compose + migrations + seed
+
+# Bring the compose db service up and wait for healthcheck (compose v2.18+)
+compose-up:
+    docker compose up -d --wait
+
+# Stop compose; pgdata named volume is preserved (data survives restart)
+compose-down:
+    docker compose down
+
+# Stop compose AND drop the pgdata volume — destructive
+compose-down-clean:
+    docker compose down -v
+
+# Tail the db container logs
+compose-logs:
+    docker compose logs -f db
+
+# Open psql shell against the running compose db
+db-shell:
+    docker compose exec db psql -U trip_planner -d trip_planner
+
+# Apply all alembic migrations (host-side uv env; compose only runs the DB)
+migrate:
+    cd backend && uv run alembic upgrade head
+
+# Generate a new alembic migration from the SQLModel metadata diff
+migrate-create MSG:
+    cd backend && uv run alembic revision --autogenerate -m "{{MSG}}"
+
+# Idempotent seed: upserts users from backend/seed.toml into the user table
+db-seed:
+    cd backend && uv run python scripts/seed.py
