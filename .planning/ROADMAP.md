@@ -33,7 +33,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [x] **Phase 4.8: Validators + Test Hygiene + Orphan Cleanup** — additive Pydantic business-rule validators; shared test fixtures (`create_mock_flight()`, `parse_sse_events()`); delete orphan `ToolCallCard` / `ToolResultCard`. (completed 2026-05-19)
 - [x] **Phase 4.9: Pre-Phase-5 Prep** — split monolithic `models.py` into domain modules (auth, chat, providers, flights); extract `UserRepository` interface; add TypeScript/React skill + CLAUDE.md skill routing; fix 6 frontend bugs (empty-session new-session, font harmonization, second thinking block, settings URL error, LM Studio stale cache, sidebar overflow). (completed 2026-05-21)
 - [x] **Phase 5: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; convert `LLMProvider`/`BoundProvider` from `typing.Protocol` to `abc.ABC`; ADR-001 → Superseded. **Resequenced ahead of Postgres** (PR #20 review, 2026-06-02): the agent surface is still small, so doing PydanticAI first avoids shaping the Phase 6 `Message` SQLModel against LangChain's `BaseChatMessageHistory` and folds the Protocol→ABC tech debt into the same change. **Status: Planned (2026-06-03) — 6 plans / 21 tasks across 6 waves; see `.planning/phases/05-pydanticai-migration/05-0*-PLAN.md`.** (completed 2026-06-03)
-- [ ] **Phase 6: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Conversation`/`Message` tables (the `Message` shape now targets PydanticAI's `ModelMessage` directly, no JSON-payload escape hatch needed); named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired.
+- [x] **Phase 6: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Conversation`/`Message` tables (the `Message` shape now targets PydanticAI's `ModelMessage` directly, no JSON-payload escape hatch needed); named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired. (completed 2026-06-04)
 - [ ] **Phase 7: Real Flight API** — Amadeus client behind existing `FlightAPIClient` ABC; **outbound HTTP via `pyreqwest`**; reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests.
 - [ ] **Phase 8: Production Hardening (slim)** — CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy headers; Chakra-aware `rehype-sanitize`; `structlog` + `RequestLoggingMiddleware`; backend coverage 60 → 80; frontend `{ branches: 70, lines: 80 }`. **No rate limiting** (ADR-009).
 
@@ -410,7 +410,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
-| 6. Postgres + Redis + docker-compose | v1.5 | 6/7 | In Progress|  |
+| 6. Postgres + Redis + docker-compose | v1.5 | 7/7 | Complete   | 2026-06-04 |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
