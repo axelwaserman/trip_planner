@@ -72,3 +72,7 @@ frontend/playwright-report/
 frontend/.playwright/
 frontend/blob-report/
 frontend/playwright/.cache/
+
+# Phase 6 — seed file with dev creds (real seed.toml stays gitignored;
+# backend/seed.toml.example is committed as a placeholder template).
+backend/seed.toml
