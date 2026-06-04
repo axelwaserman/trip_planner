@@ -15,6 +15,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases (1, 2, 3, 5, 6, 7, 8): Product milestones.
 - Decimal phases (4.1 → 4.8): Sub-phases of the Phase 4 working-demo milestone.
 - Engineering-quality work is folded into the renumbered phase tree — there is no parallel "engineering Phase N" track.
@@ -39,81 +40,100 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 ## Phase Details
 
 ### Phase 1: Foundation & FastAPI Setup
+
 **Goal**: A typed, tested, CI-gated, JWT-authenticated FastAPI + React monorepo skeleton that any future feature can ship on top of.
 **Depends on**: Nothing (first phase)
 **Requirements**: REQ-bug-fixes-cleanup, REQ-auth-backend (partial — login UI deferred to Phase 4.2), REQ-ci-cd-pipeline (partial — schedule reset deferred to Phase 4.3), REQ-mypy-eslint-cleanup
 **Status**: Partially complete (shipped 2025-11-06 → 2025-11-08; quality PRs #1, #2, #4, #5 landed retroactively). Frontend login route + correct CI triggers reopened as REQ-login-page (4.2) and REQ-ci-reset (4.3).
 **Success Criteria** (what must be TRUE):
+
   1. `just install` followed by `just backend` and `just frontend` brings up both servers cleanly on Python 3.13 / Node 22.
   2. `just check` (ruff lint + format-check + mypy strict + tsc + eslint) passes; CI enforces the same gates with a 60% backend coverage floor.
   3. `POST /token` issues a JWT (HS256, 60-min expiry) using users from `AUTH_USERS`; protected routes reject missing/invalid tokens; `GET /health` is public. **Frontend login UI required for end-to-end usability — see Phase 4.2.**
   4. Branch protection on `master` blocks merges that fail Backend (Python 3.13) or Frontend (Node 22) jobs. **CI trigger schedule reset — see Phase 4.3.**
+
 **Plans**: Complete (retroactive — PRs #1, #2, #4, #5)
 
 ### Phase 2: LangChain Integration & Chat Agent
+
 **Goal**: A streaming chat agent backed by LangChain 1.0 `bind_tools()` and Ollama, with a React frontend that consumes the SSE stream and renders markdown.
 **Depends on**: Phase 1
 **Requirements**: REQ-frontend-testing-refactor
 **Status**: Complete (shipped 2025-11-08 → 2025-11-10; PR #3 landed retroactively against this surface)
 **Success Criteria** (what must be TRUE):
+
   1. A user holds a multi-turn conversation in the React UI and sees streamed responses arrive token-by-token over SSE.
   2. Sessions persist message history across requests via `ChatService._histories` (no global store).
   3. `ChatInterface.tsx` is decomposed into `lib/parseSSE.ts`, `hooks/useSSEStream.ts`, `hooks/useChat.ts`; the component is under 200 lines.
   4. Vitest + `@testing-library/react` + `@vitest/coverage-v8` are wired up; unit tests cover `parseSSE` and `useChat`.
+
 **Plans**: Complete (retroactive — PR #3)
 **UI hint**: yes
 
 ### Phase 3: Mock Flight Search Tool
+
 **Goal**: The agent can call a mock flight-search tool, the LLM streams reasoning tokens, and the frontend renders tool execution and thinking cards live.
 **Depends on**: Phase 2
 **Requirements**: *(none active — Phase 3 deliverables are foundational and shipped before the v1 milestone scope)*
 **Status**: Complete (shipped 2025-11-10 → 2025-11-14)
 **Success Criteria** (what must be TRUE):
+
   1. A user asks the agent for flights and watches a `ToolExecutionCard` appear with tool name, args, and result, plus a `ThinkingCard` showing reasoning tokens.
   2. `MockFlightAPIClient` returns realistic data through the `FlightAPIClient` ABC; the client is injected at startup via `search_flights._flight_client`.
   3. SSE event stream emits the four current event types (`content`, `thinking`, `tool_call`, `tool_result`) with `thinking` chunks sourced from `chunk.additional_kwargs["reasoning_content"]`.
   4. qwen3:4b runs in `init_chat_model(reasoning=True)` mode; default `pytest -m "not slow"` passes without Ollama.
+
 **Plans**: Complete
 **UI hint**: yes
 
 ### Phase 4.1: LLM Provider UI Config (partial)
+
 **Goal**: A user can pick provider + model from the UI, the choice is persisted, and a new selection creates a fresh session bound to that config.
 **Depends on**: Phase 3
 **Requirements**: REQ-llm-provider-ui-config
 **Status**: **Partial (shipped 2026-05-13)** — UI ships and persists selection, but the in-browser model selector does **not** produce a working session (wiring broken). Reopened as REQ-llm-provider-ui-fix in Phase 4.2.
 **Success Criteria** (what must be TRUE):
+
   1. `GET /api/providers` returns the available providers, each with their models and credential status. ✓
   2. `POST /api/chat/session` accepts `{"provider": "<id>", "model": "<id>"}` and returns `201` with the session metadata `{session_id, provider, model}`. ✓
   3. The frontend renders a provider + model dropdown; the selection survives a page reload via localStorage. ✓
   4. Selecting a different provider creates a new session rather than mutating the active one. **⚠️ broken — selection does not produce a working session in the browser.**
+
 **Plans**: Partial — REQ-llm-provider-ui-fix (4.2) closes the gap.
 **UI hint**: yes
 
 ### Phase 4.2: Unbreak the App
+
 **Goal**: A fresh user can open the app in a browser, log in, pick a provider/model, and complete one chat turn end-to-end.
 **Depends on**: Phase 4.1 (partial)
 **Requirements**: REQ-login-page, REQ-llm-provider-ui-fix
 **Success Criteria** (what must be TRUE):
+
   1. A React `/login` route renders a Chakra UI form; submitting valid credentials calls `POST /token`, stores the JWT, and redirects to the chat. Invalid credentials surface a clear error.
   2. A protected-route wrapper redirects unauthenticated users to `/login`. The chat header shows the logged-in user; logout clears the token.
   3. With Ollama running and at least one local model present, picking a provider+model in the dropdown reliably creates a session and the next chat turn uses it.
   4. Provider misconfiguration (Ollama unreachable, cloud API key missing) renders a deterministic, human-readable error in the UI rather than a silent broken state.
   5. `AUTH_USERS=user1:pass1,...` remains the user source — no Postgres yet (deferred to Phase 5).
+
 **Plans**: 6 plans across 4 waves
 Plans:
+
 - [x] 04.2-01-PLAN.md — Wave 0: Create 8 failing test stubs (4 backend, 4 frontend)
 - [x] 04.2-02-PLAN.md — Wave 1: Rename auth router to /api/auth + create provider_probe service
 - [x] 04.2-03-PLAN.md — Wave 1: Frontend auth lib (auth.ts, providerErrors.ts), theme, BrowserRouter, fonts
 - [x] 04.2-04-PLAN.md — Wave 2: Wire probe_provider() into POST /api/chat/session
 - [x] 04.2-05-PLAN.md — Wave 2: Login page + routing (RequireAuth, LoginForm, UserMenu, App.tsx)
 - [x] 04.2-06-PLAN.md — Wave 3: SelectorErrorBanner + useChat/ProviderSelector rewiring + manual UAT
+
 **UI hint**: yes
 
 ### Phase 4.3: CI Reset + Lint/DI Migration
+
 **Goal**: CI runs the right checks at the right times — every PR push runs lint + unit + integration; the nightly schedule is gone; E2E exists only for auth flow + real travel APIs. Lint and DI conventions are also migrated forward in this phase so subsequent phases inherit the modern surface.
 **Depends on**: Phase 4.2
 **Requirements**: REQ-ci-reset, REQ-lint-line-length-120, REQ-annotated-depends
 **Success Criteria** (what must be TRUE):
+
   1. `.github/workflows/ci.yml` triggers on `pull_request` against `master` and `push` to any branch with an open PR; **no `schedule:` block**.
   2. `lint` + `unit` + `integration` jobs are required for merge by branch protection on `master`.
   3. The `E2E` job is retained but runs only when secrets relevant to auth flow + real travel API are present; it never invokes Ollama.
@@ -122,25 +142,31 @@ Plans:
   6. All FastAPI route dependencies use `Annotated[T, Depends(...)]`; mypy strict still passes; behaviour unchanged.
 
 ### Phase 4.4: Mock Chat in Tests
+
 **Goal**: The default test suite is fast and offline — no chat test calls a real Ollama instance.
 **Depends on**: Phase 4.3
 **Requirements**: REQ-mock-chat-tests
 **Success Criteria** (what must be TRUE):
+
   1. `backend/tests/fixtures/llm.py` exports a `MockLLMStream` fixture producing deterministic streams of `content` / `thinking` / `tool_call` / `tool_result` chunks.
   2. All chat tests in `unit/` and `integration/` consume the mock; no chat test in the default suite calls a real Ollama instance.
   3. The `slow` pytest marker is removed (`pyproject.toml` `addopts` updated). Default `pytest` is fast and offline.
   4. README / `CLAUDE.md` describe what unit / integration / e2e tests *contain* by purpose, not just by directory.
+
 **Plans**: 2 plans across 1 wave
 Plans:
+
 - [x] 04.4-01-PLAN.md — Wave 1: MockLLM fixture + three locked test scenarios; delete dead mock_llm.py and .skip files
 - [x] 04.4-02-PLAN.md — Wave 1: Strip four custom pytest markers + expand CLAUDE.md test-structure docs to collaborator-scope taxonomy
 
 ### Phase 4.5: LLM Provider Abstraction (real cloud + dynamic Ollama)
+
 **Goal**: The provider layer supports a real cloud LLM via API key and a dynamically-discovered local Ollama model, both selectable per session.
 **Depends on**: Phase 4.4
 **Requirements**: REQ-llm-provider-abstraction
 **Rework risk**: The Protocol surface (`ainvoke`, `astream`, `bind_tools`) mirrors LangChain's `BaseChatModel`; Phase 6's PydanticAI migration is `Agent`-shaped and will retire `bind_tools` from the Protocol. Either accept the rework or revisit whether to swap Phase 6 forward of Phase 5.
 **Success Criteria** (what must be TRUE):
+
   1. `LLMProvider` Protocol exists with `bind_tools`, `get_provider_name`, `validate_config`, `list_models`; `BoundProvider` Protocol exists with `ainvoke`, `astream`. The two-Protocol shape is required because LangChain's `bind_tools` returns a `Runnable[..., AIMessage]`, not a `BaseChatModel` (RESEARCH.md Pitfall 1).
   2. `OllamaProvider` discovers models dynamically via Ollama's `GET /api/tags` against `OLLAMA_BASE_URL`; no model list is hard-coded. Discovery is surfaced end-to-end (refresh endpoint or session-create caching) so the UI dropdown reflects live daemon state.
   3. `OpenAIProvider`, `AnthropicProvider`, and `LMStudioProvider` are real implementations. Cloud providers accept API keys from env vars or session creation payload; LM Studio uses the OpenAI-compatible surface against a local `base_url` with the `"lm-studio"` sentinel `api_key`.
@@ -150,8 +176,10 @@ Plans:
   7. `POST /api/providers/refresh` re-runs Ollama/LM Studio discovery on demand; `POST /api/providers/{provider}/test` validates a key/base_url against the live provider; `GET /api/chat/sessions` returns the authenticated user's session ids. All three endpoints are auth-protected.
   8. Sidebar component lists the user's active chat sessions and provides a "+ New chat" entry point and a Settings link; chat history is partitioned per authenticated user.
   9. A minimal log scrubber redacts `api_key` JSON fields and `sk-…` / `sk-ant-…` substring patterns from logs in 4.5; processor-based scrubbing is deferred to Phase 8.
+
 **Plans**: 11 plans across 6 waves
 Plans:
+
 - [x] 04.5-01-PLAN.md — Wave 0: deps + test scaffolds (langchain-openai/anthropic; backend/tests/unit/llm/ stubs; tests/integration/test_cloud_providers_real.py skipif)
 - [x] 04.5-02-PLAN.md — Wave 1: Protocol + errors + factory skeleton + SessionCreateRequest validators (app/llm/{protocol,errors,factory}.py; SSRF + key-length guards)
 - [x] 04.5-02b-PLAN.md — Wave 1: minimal API-key log scrubber per D-10 (app/llm/log_scrubbing.py + lifespan wiring; sequenced after Plan 06 for the wiring task)
@@ -163,63 +191,82 @@ Plans:
 - [x] 04.5-07-PLAN.md — Wave 4: providerErrors.ts F5 + useChat extended payload + provider_settings localStorage migration
 - [x] 04.5-08-PLAN.md — Wave 4: ProviderCard + SettingsProviders page + ChatInterface badge + /settings/providers route + manual UAT
 - [x] 04.5-09-PLAN.md — Wave 5: real cloud acceptance tests (gated) + delete app/services/provider_probe.py
+
 **UI hint**: yes
 
 ### Phase 4.6: Vendor-Neutral Tool JSON
+
 **Goal**: `search_flights()` returns a JSON shape designed to map cleanly onto Amadeus / Skyscanner / Google Flights responses, ready to back the real Phase 7 client without rework.
 **Depends on**: Phase 4.5
 **Requirements**: REQ-tool-json-output
 **Acceptance fixture sources** (locked at planning time, override in the phase plan if changed):
+
   - Amadeus: a `FlightOffer` payload from the `developers.amadeus.com/self-service/category/flights` Flight Offers Search public sample.
   - Skyscanner: an `Itinerary` from the Skyscanner Rapid (`partners.skyscanner.net`) public reference docs sample response.
   - Google Flights: a search-response sample from a public Postman / community collection (Google Flights has no public REST API; if no representative sample exists, drop the third fixture and document the omission).
+
 **Schedule risk**: locking the schema before the first real Amadeus call (Phase 7) may surface missing fields. Treat the schema as additively extendable — Phase 7 may append fields without breaking the contract.
 **Success Criteria** (what must be TRUE):
+
   1. `search_flights()` returns `{status, query, results[], count}` where each result has IATA + city + (optional) terminal endpoints, ISO-8601 timestamps with timezone, multi-leg journeys in `segments[]`, price as `{amount, currency}`, and carrier as IATA + display name.
   2. The fixtures above (or their documented substitutes) normalize into our shape without lossy field collapses, asserted by tests in `backend/tests/unit/test_tool_json_normalization.py` (or equivalent).
   3. `ToolExecutionCard` renders the structured result as a table for `results[]`, lists for arrays, and labelled sections for nested objects — never a raw JSON blob.
   4. The LLM still narrates results naturally in chat alongside the structured card; the two views remain consistent.
+
 **Plans**: 2 plans across 1 wave
 Plans:
+
 - [x] 04.6-01-PLAN.md — Wave 1: Backend FlightSearchResult Pydantic models + Amadeus/Skyscanner normalization adapters + unit tests
 - [x] 04.6-02-PLAN.md — Wave 1: Frontend FlightSearchResultData types + ToolExecutionCard structured Table renderer + component tests
+
 **UI hint**: yes
 
 ### Phase 4.7: Error Handling + StreamEvent Hierarchy
+
 **Goal**: A user sees clear, actionable feedback when anything goes wrong (API, session, tool, stream), and the SSE protocol carries errors as a first-class event type.
 **Depends on**: Phase 4.6
 **Requirements**: REQ-error-handling-feedback, REQ-streamevent-hierarchy
 **Success Criteria** (what must be TRUE):
+
   1. `StreamEvent` is replaced by a discriminated union `ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent`; backend SSE serialization and frontend `parseSSE` handle each variant.
   2. API, session, and tool errors render as distinct, human-readable messages in the chat UI rather than silent failures or raw stack traces.
   3. `ToolExecutionCard` shows a loading state while a tool call is in flight; failed tool calls expose a retry control that re-issues the call.
   4. Non-blocking errors surface as toast notifications; the streaming UI continues to render subsequent events after a recoverable error.
+
 **Plans**: 4 plans across 3 waves
 Plans:
+
 - [x] 04.7-01-PLAN.md — Wave 1: backend chat/ package + StreamEvent discriminated union + ChatService extraction + last_tool_invocation
 - [x] 04.7-02-PLAN.md — Wave 2: route ErrorEvent emissions + POST /api/chat/retry endpoint + RetryRequest model
 - [x] 04.7-03-PLAN.md — Wave 1: frontend discriminated-union types + parseSSE update + Chakra Toaster singleton mounted in App.tsx
 - [x] 04.7-04-PLAN.md — Wave 3: useChat switch narrowing + ToolExecutionCard tri-state UI + retryLastTool + manual UAT
+
 **UI hint**: yes
 
 ### Phase 4.8: Validators + Test Hygiene + Orphan Cleanup
+
 **Goal**: Business rules are enforced at the model boundary, the test suite shares fixtures, and dead components are gone.
 **Depends on**: Phase 4.7
 **Requirements**: REQ-pydantic-validators, REQ-test-fixture-dedup
 **Success Criteria** (what must be TRUE):
+
   1. Submitting an invalid `FlightQuery` (`origin == destination`, `departure_date < today`) or constructing a `Flight` with `arrival <= departure` is rejected at the model boundary with a clear 422. The existing `validate_dates` validator is preserved (additive, not replacement).
   2. `backend/tests/fixtures/flights.py::create_mock_flight()` and `backend/tests/utils/sse.py::parse_sse_events()` exist; existing tests consume them; no test redefines a mock-flight factory inline.
   3. Orphaned `frontend/src/components/ToolCallCard.tsx` and `ToolResultCard.tsx` are deleted (superseded by `ToolExecutionCard`); the frontend builds without dead-import warnings.
+
 **Plans**: 2 plans across 2 waves
 Plans:
+
 - [x] 04.8-01-PLAN.md — Wave 1: Add Pydantic validators (origin!=destination, departure>=today, arrival>departure) + tests
 - [x] 04.8-02-PLAN.md — Wave 2: Extract create_mock_flight() + parse_sse_events(), refactor consumers, delete frontend orphans
 
 ### Phase 4.9: Pre-Phase-5 Prep
+
 **Goal**: The codebase is restructured and polished so Phase 5 lands on clean foundations — no monolithic model file, no auth/routes coupling, skill routing documented, and 6 known frontend bugs resolved.
 **Depends on**: Phase 4.8
 **Requirements**: REQ-model-restructure, REQ-user-repository, REQ-skill-routing, REQ-frontend-bug-fixes
 **Success Criteria** (what must be TRUE):
+
   1. `backend/app/models.py` is deleted; domain models live in `backend/app/auth/models.py`, `backend/app/chat/models.py`, `backend/app/providers/models.py`, `backend/app/flights/models.py`; all imports updated; `mypy --strict` and `just check` pass.
   2. A `UserRepository` protocol/interface is extracted; `get_current_active_user` depends on it rather than importing `_users_db` directly from `auth.py`; auth routes are decoupled from auth internals.
   3. A TypeScript/React skill (`frontend/skills/react-stack.md` or equivalent) capturing Vite + React + Chakra v3 + Vitest patterns is created; CLAUDE.md has a skill-routing table (`/fastapi`, `/chakra-ui`, `/react-stack`, `/pydantic-ai-agent-builder`).
@@ -229,8 +276,10 @@ Plans:
   7. **Bug fix — settings URL error**: entering an invalid base URL on a local provider in Settings surfaces a human-readable error in the UI (no silent failure).
   8. **Bug fix — LM Studio stale cache**: refreshing models in Settings always reflects the current server state; ejecting and re-adding a model shows the correct list within one refresh cycle.
   9. **Bug fix — sidebar overflow**: model name in the chat sidebar does not overflow its container when it wraps to two lines.
+
 **Plans**: 5 plans across 4 waves
 Plans:
+
 - [x] 04.9-01-PLAN.md — Wave 1: Model split — create 4 domain model files + update 9 production + 5 test import sites + delete app/models.py
 - [x] 04.9-02-PLAN.md — Wave 2: UserRepository Protocol + EnvUserRepository + DI wiring in main.py + unit tests
 - [x] 04.9-03-PLAN.md — Wave 3: Frontend bugs A — sidebar overflow, empty-session guard, font harmonization, double-think reset
@@ -238,19 +287,23 @@ Plans:
 - [x] 04.9-05-PLAN.md — Wave 4: react-stack SKILL.md + CLAUDE.md skill-routing table
 
 ### Phase 5: PydanticAI Migration
+
 **Goal**: The chat agent runs on PydanticAI rather than LangChain — lighter, easier to test — preserving the **frontend-facing** SSE event contract from Phase 4.7. The internal extraction of thinking + tool_call chunks is rewritten against PydanticAI's stream surface. Done **before** the PG re-platform (resequenced 2026-06-02 per PR #20 review) so the eventual `Message` SQLModel is shaped against PydanticAI's `ModelMessage` from the start, not retrofitted.
 **Depends on**: Phase 4.9
 **Requirements**: REQ-pydantic-ai-migration, REQ-p5-stream-event-abc
 **Backward-compat scope**: the discriminated `StreamEvent` union (`ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent`) over the wire is preserved unchanged. Inside `ChatService`, the LangChain-specific `chunk.additional_kwargs["reasoning_content"]` extraction is replaced by the equivalent PydanticAI accessor — this is **not** a verbatim port. `LLMProvider` Protocol from Phase 4.5 has its `bind_tools` member retired; the surface is also converted from `typing.Protocol` to `abc.ABC` in the same change (closes the "Known Tech Debt" entry in ARCHITECTURE.md). `OllamaProvider`/`OpenAIProvider`/`AnthropicProvider`/`LMStudioProvider` are reshaped around PydanticAI `Model` + `Agent`.
 **Success Criteria** (what must be TRUE):
+
   1. `ChatService` orchestrates a PydanticAI `Agent` per session; tool registration moves from LangChain `@tool` to PydanticAI's tool API. The `search_flights._flight_client` attribute-injection back-door is replaced by passing the client through PydanticAI's per-agent dependency mechanism.
   2. The discriminated `StreamEvent` union over the SSE wire is preserved — frontend requires no changes; backend extraction is rewritten. As part of the rewrite, `StreamEvent` is refactored from a discriminated-union alias into a proper `StreamEvent(ABC)` base class with `ContentEvent`/`ThinkingEvent`/`ToolCallEvent`/`ToolResultEvent`/`ErrorEvent` as concrete subclasses (closes REQ-p5-stream-event-abc — bundled here because the producer is being rewritten anyway).
   3. `LLMProvider` and `BoundProvider` are converted from `typing.Protocol` to `abc.ABC` (project rule per `/dignified-python`); concrete providers are explicit subclasses.
   4. `langchain`, `langchain-core`, `langchain-ollama`, `langchain-openai`, `langchain-anthropic` are removed from `pyproject.toml`; `pydantic-ai` is added; `uv lock` reflects the swap.
   5. The `MockLLMStream` fixture (Phase 4.4) is updated to drive the PydanticAI agent surface; default `pytest` remains fast and offline.
   6. ADR-001 transitions Locked → Superseded; ADR-007 (PydanticAI) becomes Locked.
+
 **Plans**: 6 plans across 6 waves
 Plans:
+
 - [x] 05-01-PLAN.md — Wave 0: Failing test scaffolds (RED stubs) + Phase 4.7 SSE wire-format golden file + anti-pattern locks
 - [x] 05-02-PLAN.md — Wave 1: Foundations — LLMProvider(ABC) (rename protocol.py → base.py), ChatDeps, ConversationStore(ABC) + InMemoryConversationStore, StreamEvent ABC refactor, Settings o-series knob
 - [x] 05-03-PLAN.md — Wave 2: Concrete providers rewritten against PydanticAI (Ollama, OpenAI w/ o-series dispatch, Anthropic, LM Studio); factory threading; protocol.py shim deleted
@@ -259,6 +312,7 @@ Plans:
 - [x] 05-06-PLAN.md — Wave 5: Docs — ADR-001 → Superseded; ADR-007 → Locked; ARCHITECTURE.md rewrite; PROJECT.md Key Decisions table
 
 ### Phase 6: Postgres + Redis + docker-compose
+
 **Goal**: A single `docker compose up` brings up backend + frontend + Postgres + Redis with named volumes; in-memory session/user state is replaced by PG-backed storage.
 **Depends on**: Phase 5
 **Requirements**: REQ-postgres-redis-compose, REQ-p5-conversation-rename, REQ-p5-db-seed, REQ-p5-session-create-request-split, REQ-p5-flight-client-di, REQ-p5-provider-info-split
@@ -266,6 +320,7 @@ Plans:
 **Resequencing note**: this phase used to be Phase 5; Phase 5 (PydanticAI) was promoted ahead of it on 2026-06-02 per PR #20 review. The previous "Phase 6 rework risk" — `Message` SQLModel shaped against LangChain's `BaseChatMessageHistory` and needing a forward migration to PydanticAI's `ModelMessage` — is now eliminated: PydanticAI lands first, so the `Message` table is designed against `ModelMessage` from the start. The `REQ-p5-*` requirement IDs retain their `p5` prefix as historical schedule labels — they still belong to this phase, only the ordering changed.
 **User-data migration**: existing JWTs issued under the Phase 4.2 `AUTH_USERS` env-seed are invalidated at this phase's boot (rotate `jwt_secret`); the bootstrap script re-seeds the same usernames into PG with the same passwords (read once from the env, hashed via `pwdlib`, then env unset). Define this concretely in the Phase 6 plan.
 **Success Criteria** (what must be TRUE):
+
   1. `docker-compose.yml` defines services for `backend`, `frontend`, `postgres`, `redis`, with named volumes for PG data and Redis snapshot. `docker compose up` brings the full stack up reproducibly. Restarting compose preserves data via the named volumes (acceptance test: write a row, `docker compose down`, `docker compose up`, read the row back).
   2. Backend uses `psycopg` async driver + `sqlmodel` for `User`, `Conversation`, and `Message` models. The `Message` table targets PydanticAI's `ModelMessage` shape directly. Migrations (alembic or sqlmodel-native) bring up a fresh DB from empty.
   3. `ChatService` history is Postgres-backed; users move from `AUTH_USERS` env-seed to a PG `users` table seeded by an idempotent bootstrap script — the `AUTH_USERS` env-var workaround is retired.
@@ -274,33 +329,64 @@ Plans:
   6. `just install` and `just backend` document the compose path; the legacy "run uv + npm directly" path remains supported for fast inner-loop iteration.
 
 **Carry-forward from Phase 4.9 review** (scoped into this phase):
+
 - REQ-p5-conversation-rename: rename `session` → `conversation`; add account-less → authenticated migration
 - REQ-p5-db-seed: replace `EnvUserRepository` with Postgres-backed seeding; remove env-file user loading
 - REQ-p5-session-create-request-split: split `SessionCreateRequest` by SRP into target + credentials
 - REQ-p5-flight-client-di: replace `_flight_client` attribute injection with `Depends(get_flight_client)` *(may already be closed by Phase 5's PydanticAI dependency rewire — confirm at plan time)*
 - REQ-p5-provider-info-split: split `ProviderInfo` into `LocalProviderInfo` / `CloudProviderInfo`
 
+**Plans**: 6 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 06-01-PLAN.md — Wave 0 spike: deps + async session factory + ADR-006
+- [ ] 06-05-PLAN.md — `session` → `conversation` rename; SessionCreateRequest + ProviderInfo SRP splits; flight-client DI lock
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 06-02-PLAN.md — DB layer: SQLModel tables + alembic init + initial migration
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 06-03-PLAN.md — Storage ABCs: MessageStore + ConversationRepository (InMemory + Postgres)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 06-04-PLAN.md — ChatService rewire + PostgresUserRepository swap; lifespan + engine.dispose
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 06-06-PLAN.md — docker-compose + .env.example + idempotent seed + compose round-trip acceptance script
+
 ### Phase 7: Real Flight API
+
 **Goal**: The agent calls Amadeus through the existing `FlightAPIClient` ABC, with `pyreqwest` for outbound HTTP, retry + circuit breaker, and clean error mapping; the mock remains the test default.
 **Depends on**: Phase 6
 **Requirements**: REQ-real-flight-api
 **Success Criteria** (what must be TRUE):
+
   1. An Amadeus client implements `FlightAPIClient`, uses **`pyreqwest`** for async I/O (not `aiohttp`/`httpx`), and reuses the existing retry decorator (exponential backoff + circuit breaker) and `APIError` hierarchy.
   2. With real credentials configured, `search_flights` returns live results in the vendor-neutral JSON contract from Phase 4.6; without credentials, the system falls back to the mock client.
   3. Real-API integration tests exist and are gated on the `AMADEUS_*` secrets being present in the E2E job; PR CI does not require API keys.
   4. Default `pytest` continues to pass with the mock client as the DI default; documentation describes credential setup for local and CI use.
+
 **Plans**: TBD
 
 ### Phase 8: Production Hardening (slim)
+
 **Goal**: The demo is production-ready: hardened HTTP layer, structured logs, Chakra-aware markdown sanitization, and an 80% backend / 70-branch-80-line frontend coverage gate enforced in CI. **No rate limiting** (ADR-009).
 **Depends on**: Phase 7
 **Requirements**: REQ-security-headers, REQ-structured-logging, REQ-backend-test-coverage-60, REQ-coverage-ratchet-80
 **Success Criteria** (what must be TRUE):
+
   1. Every response carries CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, and Permissions-Policy headers; if the deployment splits backend + frontend onto different origins, CORS uses `settings.cors_origins` (wildcard forbidden).
   2. All `<ReactMarkdown>` instances run through `rehype-sanitize` with the custom Chakra-aware `sanitizeConfig.ts`: `<script>alert(1)</script>` in LLM output renders as escaped text and Chakra-rendered flight tables continue to render correctly.
   3. `structlog` JSON logging is configured at startup; `RequestLoggingMiddleware` issues a `request_id` per request; `ChatService` logs tool calls, streaming durations, and errors with `request_id` and `session_id`.
   4. CI enforces `pytest --cov=app --cov-fail-under=80` and frontend `coverage: { branches: 70, lines: 80 }`; new tests cover validation branches, model validators, and middleware.
   5. A security review of the production-mode demo finds zero CRITICAL findings; a user can log in, switch LLM providers from the UI, and receive structured, sanitized flight results from the real API end-to-end.
+
 **Plans**: TBD
 **UI hint**: yes
 

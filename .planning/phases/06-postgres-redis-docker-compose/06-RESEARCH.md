@@ -894,32 +894,22 @@ volumes:
 
 If A2 or A4 is wrong, planner should add an explicit checkpoint:human-verify task before execute-phase. None of these assumptions block planning.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should host-port collision with Homebrew Postgres bind compose to 5433 instead of 5432?**
-   - What we know: D-10 says `5432:5432`; many devs run host Postgres.
-   - What's unclear: Whether the team prefers "stop your host PG" doc note vs. "we use 5433" doc note.
-   - Recommendation: Default to `5433:5432` (less friction); update CONTEXT.md D-10 if planner agrees, OR leave 5432 and document the conflict in README.
+   - **RESOLVED:** Keep `5432:5432` per locked CONTEXT D-10. Document Pitfall 4 (host PG collision) in README + `.env.example` with override path: set `POSTGRES_HOST_PORT=5433` and bind `${POSTGRES_HOST_PORT:-5432}:5432` in `docker-compose.yml`. Resolution preserves the locked decision while giving devs a one-env-var escape hatch.
 
 2. **Where does `last_activity_at` live — `conversation` row or denormalized projection?**
-   - What we know: Default per CONTEXT.md "Claude's Discretion" is column on row.
-   - What's unclear: Update-on-every-message-append might cause hot-row contention if a single user has multiple concurrent conversations.
-   - Recommendation: Column on `conversation` row (simplest), updated in the same transaction as `MessageStore.append`. Defer denormalization to Phase 8 if perf tells.
+   - **RESOLVED:** Column on `conversation` row, updated in the same transaction as `MessageStore.append`. Defer denormalization to Phase 8 if perf tells.
 
 3. **Does `ConversationRepository` need a `bump_last_activity(conversation_id)` method, or is `update(...)` enough?**
-   - What we know: D-06 lists "last_activity bump" as one of the five concerns.
-   - What's unclear: Whether to ship a dedicated method or just a generic `update` that takes a partial dict.
-   - Recommendation: Dedicated method — narrower API surface, easier to test, avoids "what fields are updateable" discussions.
+   - **RESOLVED:** Dedicated `bump_last_activity(conversation_id)` method — narrower API surface, easier to test. Already wired this way in plan 06-03.
 
 4. **Should `seed.toml` support roles / disabled flags / additional metadata?**
-   - What we know: D-08 says idempotent upsert.
-   - What's unclear: Future fields (e.g., `is_admin`) might be wanted.
-   - Recommendation: Ship with `username`, `password`, `disabled` (the existing `UserInDB` shape). Extending the seed format is a one-line `tomllib` change later.
+   - **RESOLVED:** Ship with `username`, `password`, `disabled` (the existing `UserInDB` shape). Extending the seed format is a one-line `tomllib` change later.
 
 5. **Frontend conversation rename — coordinate via PR or ship alongside backend?**
-   - What we know: D-03 says coordinate during execute-phase.
-   - What's unclear: One PR or two?
-   - Recommendation: One atomic PR — backend route paths, SSE event field name, and frontend types must move together to keep `master` green. The wire-format golden file from Phase 5 is the gate (it must be regenerated to match the new field name).
+   - **RESOLVED:** One atomic PR — backend route paths, SSE event field name, and frontend types must move together to keep `master` green. The wire-format golden file from Phase 5 is the gate.
 
 ## Environment Availability
 
@@ -1092,13 +1082,13 @@ All required tooling is present on the dev host.
 | Test Strategy | HIGH | pytest-postgresql official; tradeoff vs testcontainers explicit |
 | Rename Inventory | MEDIUM | grep counts include false positives; planner refines during planning |
 
-### Open Questions
+### Open Questions (RESOLVED)
 
-1. Compose port: 5432 (collision risk) vs 5433 (safer) — recommend 5433.
-2. `last_activity_at` placement: column on row (default) vs denormalized projection — recommend column.
-3. `ConversationRepository.bump_last_activity` dedicated method vs generic `update` — recommend dedicated.
-4. `seed.toml` schema fields beyond username/password/disabled — defer until needed.
-5. Frontend rename PR coordination: one atomic PR vs split — recommend one atomic.
+1. Compose port: **RESOLVED** — keep `5432:5432` per CONTEXT D-10; bind via `${POSTGRES_HOST_PORT:-5432}:5432` and document Pitfall 4 + override env var in README + `.env.example`.
+2. `last_activity_at` placement: **RESOLVED** — column on `conversation` row, bumped in the same transaction as `MessageStore.append`.
+3. `ConversationRepository.bump_last_activity` shape: **RESOLVED** — dedicated method (already wired in plan 06-03).
+4. `seed.toml` schema fields: **RESOLVED** — `username`, `password`, `disabled` (shape of `UserInDB`); extension is a one-line `tomllib` change later.
+5. Frontend rename PR coordination: **RESOLVED** — one atomic PR; wire-format golden file from Phase 5 is the gate.
 
 ### Ready for Planning
 
