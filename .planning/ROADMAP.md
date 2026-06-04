@@ -358,7 +358,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 06-06-PLAN.md — docker-compose + .env.example + idempotent seed + compose round-trip acceptance script
+- [x] 06-06-PLAN.md — docker-compose + .env.example + idempotent seed + compose round-trip acceptance script
 
 ### Phase 7: Real Flight API
 
@@ -410,7 +410,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
-| 6. Postgres + Redis + docker-compose | v1.5 | 4/7 | In Progress|  |
+| 6. Postgres + Redis + docker-compose | v1.5 | 6/7 | In Progress|  |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
