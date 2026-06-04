@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-3-5-sonnet-20241022"
 
+    # Database (Phase 6 — D-01, D-11). database_url drives create_async_engine
+    # in app/db/session.py; pool knobs are tunables on Settings per CLAUDE.md
+    # ("Tunable thresholds live on Settings, not as module-level constants").
+    # seed_allow_non_local guards scripts/seed.py against non-localhost targets
+    # (Plan 06-06 will enforce; the field lands here so its env override is wired now).
+    database_url: str = "postgresql+psycopg://trip_planner:trip_planner@localhost:5432/trip_planner"
+    db_pool_size: int = 5
+    db_pool_overflow: int = 10
+    seed_allow_non_local: bool = False
+
     # Provider probe (RESEARCH.md Pitfall 3, Assumption A2). 1.5 s caps the worst
     # case for a misconfigured Ollama daemon; localhost hits are typically 50–200 ms.
     provider_probe_timeout_seconds: float = 1.5
