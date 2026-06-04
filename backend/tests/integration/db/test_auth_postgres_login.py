@@ -80,7 +80,7 @@ async def app_with_pg(pg_database_url: str) -> AsyncIterator[FastAPI]:
     app = FastAPI()
     app.state.user_repo = PostgresUserRepository(factory)
 
-    async def get_user_repository_override(request: httpx.Request) -> PostgresUserRepository:  # noqa: ARG001
+    async def get_user_repository_override() -> PostgresUserRepository:
         return app.state.user_repo
 
     app.dependency_overrides[auth_routes.get_user_repository] = get_user_repository_override

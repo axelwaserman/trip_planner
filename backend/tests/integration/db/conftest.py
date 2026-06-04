@@ -19,21 +19,54 @@ NOT silently skip. Bring up the compose stack (``just compose-up`` once Plan
 06-06 lands) or the manual ``docker run`` from 06-01-SUMMARY.md.
 """
 
+import os
 from collections.abc import Generator
+from urllib.parse import urlparse
 
 import pytest
 from pytest_postgresql.executor_noop import NoopExecutor
 from pytest_postgresql.factories import postgresql_noproc
 from pytest_postgresql.janitor import DatabaseJanitor
 
+
+def _resolve_pg_target() -> tuple[str, int, str, str, str]:
+    """Resolve Postgres target from env, falling back to compose defaults.
+
+    Compose default is ``localhost:5432`` (CONTEXT.md D-10), but ``POSTGRES_HOST_PORT``
+    in ``.env`` (Pitfall 4) may override the host port — and developers may run
+    the phase-6 db service alongside another local Postgres on 5432. Reading
+    ``DATABASE_URL`` keeps tests honest against whatever the running app uses.
+    """
+    raw = os.environ.get("DATABASE_URL")
+    if raw:
+        # SQLAlchemy URL form ``postgresql+psycopg://...`` parses with urlparse
+        # once the ``+psycopg`` driver suffix is stripped.
+        parsed = urlparse(raw.replace("postgresql+psycopg://", "postgresql://"))
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 5432
+        user = parsed.username or "trip_planner"
+        password = parsed.password or "trip_planner"
+        dbname = (parsed.path or "/trip_planner").lstrip("/") or "trip_planner"
+        return host, port, user, password, dbname
+    return (
+        "localhost",
+        int(os.environ.get("POSTGRES_HOST_PORT", "5432")),
+        "trip_planner",
+        "trip_planner",
+        "trip_planner",
+    )
+
+
+_PG_HOST, _PG_PORT, _PG_USER, _PG_PASSWORD, _PG_DBNAME = _resolve_pg_target()
+
 # Pointed at the compose db (CONTEXT.md D-10). The helper-process model
 # (``noproc``) reuses the live container instead of starting a second one.
 postgresql_my_proc = postgresql_noproc(
-    host="localhost",
-    port=5432,
-    user="trip_planner",
-    password="trip_planner",
-    dbname="trip_planner",
+    host=_PG_HOST,
+    port=_PG_PORT,
+    user=_PG_USER,
+    password=_PG_PASSWORD,
+    dbname=_PG_DBNAME,
 )
 
 

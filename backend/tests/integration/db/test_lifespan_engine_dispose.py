@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 
 if TYPE_CHECKING:
@@ -70,15 +69,25 @@ async def reloaded_app(
     importlib.reload(app.db.session)
     importlib.reload(app.api.main)
 
-    # Wrap the freshly-loaded engine's dispose method with a spy that delegates.
-    # The lifespan calls ``await engine.dispose()`` directly; instrumenting the
-    # bound method captures the call without changing behaviour.
-    real_dispose = app.db.session.engine.dispose
-    dispose_spy = AsyncMock(side_effect=real_dispose)
-    monkeypatch.setattr(app.db.session.engine, "dispose", dispose_spy)
-    # The lifespan imports ``engine`` directly into ``app.api.main``; refresh
-    # that reference to point at the freshly-reloaded engine.
-    monkeypatch.setattr(app.api.main, "engine", app.db.session.engine)
+    # Wrap the freshly-loaded engine in a thin proxy whose ``dispose`` is the
+    # AsyncMock spy; every other attribute delegates to the real engine. The
+    # lifespan imports ``engine`` directly into ``app.api.main`` — pointing
+    # that module attribute at the proxy is enough to capture the call without
+    # touching ``AsyncEngine`` itself, which has read-only attributes that
+    # block direct ``setattr`` even via ``object.__setattr__``.
+    real_engine = app.db.session.engine
+    dispose_spy = AsyncMock(side_effect=real_engine.dispose)
+
+    class _EngineProxy:
+        def __init__(self, target: object, dispose: AsyncMock) -> None:
+            self._target = target
+            self.dispose = dispose
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._target, name)
+
+    proxy = _EngineProxy(real_engine, dispose_spy)
+    monkeypatch.setattr(app.api.main, "engine", proxy)
 
     yield app.api.main.app, dispose_spy
 
@@ -86,19 +95,20 @@ async def reloaded_app(
 async def test_lifespan_dispose_closes_engine_on_shutdown(
     reloaded_app: tuple[FastAPI, AsyncMock],
 ) -> None:
-    """The lifespan ``await engine.dispose()`` step actually runs on shutdown."""
-    app, dispose_spy = reloaded_app
-    transport = httpx.ASGITransport(app=app)
+    """The lifespan ``await engine.dispose()`` step actually runs on shutdown.
 
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # Drive the startup phase by issuing one request, then capture state.
-        response = await client.get("/health")
-        assert response.status_code == 200
-        # While the app is alive, dispose has NOT been called yet.
+    httpx 0.28's ``ASGITransport`` does NOT run lifespan automatically — we
+    drive the lifespan_context manager directly so the ``yield``/teardown
+    boundary is the testable wire-level shape, independent of HTTP transport.
+    """
+    app, dispose_spy = reloaded_app
+
+    async with app.router.lifespan_context(app):
+        # Startup phase complete — ``await engine.dispose()`` has NOT run yet.
         assert dispose_spy.await_count == 0
         # The DB engine is stashed on app.state per the new lifespan.
         assert app.state.db_engine is not None
 
-    # Async-with exit drives the lifespan shutdown; ``await engine.dispose()``
+    # Lifespan exit drives the shutdown; ``await engine.dispose()``
     # is the new step the plan is locking. The spy proves it ran exactly once.
     assert dispose_spy.await_count == 1
