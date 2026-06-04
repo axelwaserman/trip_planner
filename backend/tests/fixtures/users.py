@@ -19,9 +19,13 @@ separately in ``tests/integration/db/test_auth_postgres_login.py``.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.auth.exceptions import UserNotFoundError
-from app.auth.models import UserInDB
-from app.auth.repository import _password_hasher, UserRepository
+from app.auth.repository import UserRepository, _password_hasher
+
+if TYPE_CHECKING:
+    from app.auth.models import UserInDB
 
 
 class InMemoryUserRepository(UserRepository):

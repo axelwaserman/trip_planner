@@ -33,13 +33,13 @@ def client() -> Generator[TestClient]:
 
 
 @pytest.fixture
-def two_users(client: TestClient) -> Generator[None]:
-    """Seed alice + bob into the in-memory test user repo (Plan 06-04)."""
+def two_users(_inmemory_user_repo: object) -> Generator[None]:
+    """Seed alice + bob into the conftest in-memory test user repo (Plan 06-04)."""
     from app.auth.models import UserInDB
     from app.auth.repository import _password_hasher
-    from tests.fixtures.users import InMemoryUserRepository
+    from tests.fixtures.users import InMemoryUserRepository  # noqa: TC001
 
-    user_repo: InMemoryUserRepository = client.app.state.user_repo
+    user_repo: InMemoryUserRepository = _inmemory_user_repo  # type: ignore[assignment]
     user_repo.add_user(UserInDB(username="alice", hashed_password=_password_hasher.hash("alicepass"), disabled=False))
     user_repo.add_user(UserInDB(username="bob", hashed_password=_password_hasher.hash("bobpass"), disabled=False))
     yield

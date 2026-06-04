@@ -15,18 +15,18 @@ def client() -> TestClient:
 
 
 @pytest.fixture
-def two_users(client: TestClient) -> Generator[None]:
+def two_users(_inmemory_user_repo: object) -> Generator[None]:
     """Seed alice + bob into the in-memory test user repo for cross-user tests.
 
     Phase 6 / Plan 06-04 (D-07): the autouse ``_inmemory_user_repo`` conftest
-    fixture installs an :class:`InMemoryUserRepository` on
-    ``app.state.user_repo``; this fixture borrows it to seed alice/bob.
+    fixture installs an :class:`InMemoryUserRepository` on the FastAPI
+    dependency override map; this fixture borrows that repo to seed alice/bob.
     """
     from app.auth.models import UserInDB
     from app.auth.repository import _password_hasher
-    from tests.fixtures.users import InMemoryUserRepository
+    from tests.fixtures.users import InMemoryUserRepository  # noqa: TC001
 
-    user_repo: InMemoryUserRepository = client.app.state.user_repo
+    user_repo: InMemoryUserRepository = _inmemory_user_repo  # type: ignore[assignment]
     user_repo.add_user(UserInDB(username="alice", hashed_password=_password_hasher.hash("alicepass"), disabled=False))
     user_repo.add_user(UserInDB(username="bob", hashed_password=_password_hasher.hash("bobpass"), disabled=False))
     yield

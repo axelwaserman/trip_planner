@@ -21,7 +21,7 @@ from app.auth.routes import create_access_token, get_current_user, get_user_repo
 class _AlwaysNoneRepo(UserRepository):
     """Stub UserRepository that always raises UserNotFoundError from get_user."""
 
-    def get_user(self, username: str) -> UserInDB:
+    async def get_user(self, username: str) -> UserInDB:
         raise UserNotFoundError(username)
 
     def verify_password(self, plain: str, hashed: str) -> bool:
@@ -31,7 +31,7 @@ class _AlwaysNoneRepo(UserRepository):
 class _KnownUserRepo(UserRepository):
     """Stub UserRepository that returns a fixed user for username 'alice'."""
 
-    def get_user(self, username: str) -> UserInDB:
+    async def get_user(self, username: str) -> UserInDB:
         if username == "alice":
             return UserInDB(
                 username="alice",

@@ -202,7 +202,11 @@ def test_retry_endpoint_returns_404_for_unknown_session(client: TestClient, auth
     assert response.status_code == 404
 
 
-def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_retry_endpoint_returns_404_for_cross_user_session(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    _inmemory_user_repo: object,
+) -> None:
     """User B calling POST /api/chat/retry with user A's session gets 404 (NOT 403).
 
     CR-02 / T-04.7-04: same-shape 404 prevents a non-owner from probing
@@ -210,18 +214,18 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
     """
     from app.auth.models import UserInDB
     from app.auth.repository import _password_hasher
-    from tests.fixtures.users import InMemoryUserRepository
+    from tests.fixtures.users import InMemoryUserRepository  # noqa: TC001
 
     # Arrange — user A (admin) creates a session
     session_response = client.post("/api/chat/session", headers=auth_headers)
     assert session_response.status_code == 201
     session_id = session_response.json()["session_id"]
 
-    # Register a second user (user B) via the in-memory test user repo
+    # Register a second user (user B) via the conftest in-memory user repo
     # (Plan 06-04 — EnvUserRepository deleted; the conftest's
     # ``_inmemory_user_repo`` fixture installs the in-memory shim).
     user_b_name = "user_b_test_cross_user"
-    user_repo: InMemoryUserRepository = client.app.state.user_repo
+    user_repo: InMemoryUserRepository = _inmemory_user_repo  # type: ignore[assignment]
     user_repo.add_user(UserInDB(username=user_b_name, hashed_password=_password_hasher.hash("testpw"), disabled=False))
     try:
         user_b_token = create_access_token({"sub": user_b_name})

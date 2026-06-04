@@ -9,9 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import routes
 from app.auth import routes as auth_routes
-from app.auth.repository import EnvUserRepository, UserRepository
-from app.chat import ChatService, InMemoryConversationStore
+from app.auth.repository import PostgresUserRepository, UserRepository
+from app.chat import (
+    ChatService,
+    ConversationRepository,
+    MessageStore,
+    PostgresConversationRepository,
+    PostgresMessageStore,
+)
 from app.config import settings
+from app.db.session import _async_sessionmaker, engine
 from app.llm.factory import LLMProviderFactory
 from app.llm.log_scrubbing import ApiKeyScrubber, install_log_scrubber, uninstall_log_scrubber
 from app.tools.flight_client import MockFlightAPIClient
@@ -25,16 +32,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     Startup:
         - Initialize flight API client.
-        - Construct the per-app :class:`LLMProviderFactory` (D-03 — replaces the
-          4.2 startup-time chat-model construction; providers are built
-          per-session inside :meth:`ChatService.create_session`).
-        - Construct the :class:`InMemoryConversationStore` singleton (D-08 —
-          Phase 6 swaps for ``PostgresConversationStore`` via DI).
-        - Initialize :class:`ChatService` with the factory + store.
-        - Stash ``chat_service`` and ``llm_factory`` on ``app.state``.
+        - Construct the per-app :class:`LLMProviderFactory` (D-03).
+        - Construct the Phase 6 / Plan 06-04 split store collaborators —
+          :class:`PostgresMessageStore` + :class:`PostgresConversationRepository`
+          — plus the new :class:`PostgresUserRepository` (D-07; replaces the
+          deleted env-backed user repository).
+        - Initialize :class:`ChatService` with the split collaborators (D-05/D-06).
+        - Stash ``db_engine``, ``message_store``, ``conversation_repo``,
+          ``user_repo``, ``chat_service``, and ``llm_factory`` on ``app.state``.
 
     Shutdown:
-        - Cleanup expired sessions (now async — Assumption A1).
+        - Cleanup expired sessions (async since A1).
+        - ``await engine.dispose()`` — release pooled connections cleanly so
+          no DB connections leak between hot-reloads (T-06-04-02 mitigation).
     """
     # Startup
     # D-10: install API-key scrubber FIRST so any secret accidentally captured
@@ -49,25 +59,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Construct the per-app LLM factory; providers are built per-session.
     llm_factory = LLMProviderFactory(settings)
 
-    # Phase 5 / D-08: per-app conversation store; threaded into ChatService
-    # so Phase 6 can swap for PostgresConversationStore via DI override.
-    # Phase 4.x's monkey-patched tool-attribute back-door (D-06 anti-pattern lock)
-    # is GONE — the flight client is now threaded through PydanticAI's
-    # ``RunContext[ChatDeps]`` per chat turn.
-    conversation_store = InMemoryConversationStore()
+    # Phase 6 / Plan 06-04 (D-05/D-06): the Phase 5 single-store seam splits
+    # into MessageStore (events) + ConversationRepository (meta-CRUD). Both
+    # are Postgres-backed in production and share the lifespan's
+    # _async_sessionmaker so they hit the same pool. Test code overrides
+    # ``app.state.message_store`` / ``app.state.conversation_repo`` directly
+    # for in-memory testing (Plan 06-04's integration tests do the wiring).
+    message_store = PostgresMessageStore(_async_sessionmaker)
+    conversation_repo = PostgresConversationRepository(_async_sessionmaker)
 
     chat_service = ChatService(
         flight_client=flight_client,
         factory=llm_factory,
-        conversation_store=conversation_store,
+        message_store=message_store,
+        conversation_repo=conversation_repo,
     )
 
     # Store in app state
+    app.state.db_engine = engine
+    app.state.message_store = message_store
+    app.state.conversation_repo = conversation_repo
     app.state.chat_service = chat_service
     app.state.llm_factory = llm_factory
 
-    # Phase 4.9-02: UserRepository via DI — replaced by PostgresUserRepository in Phase 5.
-    app.state.user_repo = EnvUserRepository()
+    # Phase 6 / Plan 06-04 (D-07): PostgresUserRepository is the sole impl.
+    # The env-backed Phase 4 implementation was deleted; users are seeded via
+    # ``just db-seed`` (Plan 06-06).
+    app.state.user_repo = PostgresUserRepository(_async_sessionmaker)
 
     # D-05 + D-06: discovery cache + per-entry timestamps for TTL gating.
     # Populated by POST /api/providers/refresh and read by GET /api/providers.
@@ -79,6 +97,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Shutdown: cleanup expired sessions (async since A1).
     cleaned_up = await chat_service.cleanup_expired_sessions(max_age_seconds=0)
     logger.info("Cleaned up %d sessions on shutdown", cleaned_up)
+
+    # Phase 6 / Plan 06-04: dispose the engine so pooled connections close
+    # cleanly between hot-reloads (T-06-04-02 mitigation; locked by
+    # ``tests/integration/db/test_lifespan_engine_dispose.py``).
+    await engine.dispose()
 
     # D-10: best-effort filter cleanup. Failure to remove must not raise on shutdown.
     uninstall_log_scrubber(log_scrubber)
@@ -117,9 +140,21 @@ async def get_user_repository_override(request: Request) -> UserRepository:
     return request.app.state.user_repo  # type: ignore[no-any-return]
 
 
+async def get_message_store_override(request: Request) -> MessageStore:
+    """Get the MessageStore from app state (Plan 06-04 D-05 wiring)."""
+    return request.app.state.message_store  # type: ignore[no-any-return]
+
+
+async def get_conversation_repo_override(request: Request) -> ConversationRepository:
+    """Get the ConversationRepository from app state (Plan 06-04 D-06 wiring)."""
+    return request.app.state.conversation_repo  # type: ignore[no-any-return]
+
+
 app.dependency_overrides[routes.get_chat_service] = get_chat_service_override
 app.dependency_overrides[routes.get_llm_factory] = get_llm_factory_override
 app.dependency_overrides[auth_routes.get_user_repository] = get_user_repository_override
+app.dependency_overrides[routes.get_message_store] = get_message_store_override
+app.dependency_overrides[routes.get_conversation_repo] = get_conversation_repo_override
 
 # Include router
 app.include_router(routes.router)

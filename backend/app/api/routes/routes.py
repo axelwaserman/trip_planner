@@ -20,6 +20,8 @@ from app.chat.models import (
     RetryRequest,
     SessionCreateRequest,
 )
+from app.chat.repository import ConversationRepository
+from app.chat.store import MessageStore
 from app.config import settings
 from app.llm.errors import ProbeErrorCode
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
@@ -51,6 +53,23 @@ async def get_llm_factory() -> LLMProviderFactory:
     Replaced by the actual factory from app.state in main.py via dependency_overrides.
     """
     raise RuntimeError("LLMProviderFactory not configured in app state")
+
+
+# Placeholder dependencies for the Phase 6 / Plan 06-04 lifespan-wired
+# stores (CONTEXT.md D-05/D-06). The lifespan startup registers
+# ``app.dependency_overrides[get_message_store] = ...`` and
+# ``app.dependency_overrides[get_conversation_repo] = ...`` so these
+# RuntimeError stubs are never executed in a real request — they exist as
+# fail-fast guards so unconfigured boots crash loudly. Plan 06-05a's request
+# rewrite consumes these deps in the route handlers.
+def get_message_store() -> MessageStore:
+    """Placeholder dependency — overridden in main.py lifespan startup."""
+    raise RuntimeError("MessageStore not configured")
+
+
+def get_conversation_repo() -> ConversationRepository:
+    """Placeholder dependency — overridden in main.py lifespan startup."""
+    raise RuntimeError("ConversationRepository not configured")
 
 
 @router.post("/api/chat", response_class=StreamingResponse)

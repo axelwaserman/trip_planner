@@ -18,19 +18,13 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
-def two_users(client: TestClient) -> Generator[None]:
-    """Seed alice + bob into the in-memory test user repo for each test.
-
-    Phase 6 / Plan 06-04 (D-07): cross-user behaviour assertions still hit
-    the in-memory FastAPI ``TestClient`` route layer; the conftest's autouse
-    ``_inmemory_user_repo`` fixture installs an
-    :class:`InMemoryUserRepository` on ``app.state.user_repo`` for this.
-    """
+def two_users(_inmemory_user_repo: object) -> Generator[None]:
+    """Seed alice + bob into the conftest in-memory test user repo for each test."""
     from app.auth.models import UserInDB
     from app.auth.repository import _password_hasher
-    from tests.fixtures.users import InMemoryUserRepository
+    from tests.fixtures.users import InMemoryUserRepository  # noqa: TC001
 
-    user_repo: InMemoryUserRepository = client.app.state.user_repo
+    user_repo: InMemoryUserRepository = _inmemory_user_repo  # type: ignore[assignment]
     user_repo.add_user(UserInDB(username="alice", hashed_password=_password_hasher.hash("alicepass"), disabled=False))
     user_repo.add_user(UserInDB(username="bob", hashed_password=_password_hasher.hash("bobpass"), disabled=False))
     yield
