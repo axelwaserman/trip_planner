@@ -1,8 +1,8 @@
 """Unit tests for ChatService.chat_stream() with the FunctionModel-backed mock.
 
 Phase 6 / Plan 06-04: history assertions migrate from
-``service._conversation_store.load(session_id)`` to
-``service._message_store.load(UUID(session_id))`` after the D-05/D-06 split.
+``service._conversation_store.load(conversation_id)`` to
+``service._message_store.load(UUID(conversation_id))`` after the D-05/D-06 split.
 
 Phase 5 / Plan 05-04 (Wave 3): the LangChain-shape tests that patched
 ``search_flights.ainvoke`` to inject errors retired in favour of the
@@ -26,9 +26,9 @@ from tests.fixtures.llm import (
 async def test_chat_stream_emits_content_events_for_greeting() -> None:
     """Content-only mock stream produces only 'content' type events and correct history."""
     service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    events = [e async for e in service.chat_stream("Hello", session_id)]
+    events = [e async for e in service.chat_stream("Hello", conversation_id)]
 
     content_events = [e for e in events if e.type == "content"]
     non_content_events = [e for e in events if e.type not in ("content",)]
@@ -36,7 +36,7 @@ async def test_chat_stream_emits_content_events_for_greeting() -> None:
     assert len(non_content_events) == 0
 
     # History: one ModelRequest (with UserPromptPart) and one ModelResponse (with TextPart).
-    msgs = await service._message_store.load(UUID(session_id))
+    msgs = await service._message_store.load(UUID(conversation_id))
     user_msgs = [p for m in msgs if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, UserPromptPart)]
     assistant_msgs = [p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)]
     assert len(user_msgs) == 1
@@ -59,9 +59,9 @@ async def test_chat_stream_yields_error_event_on_stream_exception() -> None:
         raise RuntimeError("kaboom")
 
     service = make_chat_service_with_mock_llm(boom)  # type: ignore[arg-type]
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    events = [e async for e in service.chat_stream("find flights", session_id)]
+    events = [e async for e in service.chat_stream("find flights", conversation_id)]
 
     error_events = [e for e in events if e.type == "error"]
     assert len(error_events) == 1
@@ -87,9 +87,9 @@ async def test_chat_stream_scrubs_api_key_from_raw_detail() -> None:
         raise RuntimeError(f"call to OpenAI failed: {fake_key}")
 
     service = make_chat_service_with_mock_llm(boom)  # type: ignore[arg-type]
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    events = [e async for e in service.chat_stream("find flights", session_id)]
+    events = [e async for e in service.chat_stream("find flights", conversation_id)]
 
     error_events = [e for e in events if e.type == "error"]
     assert len(error_events) == 1
@@ -107,9 +107,9 @@ async def test_chat_stream_no_tool_call_for_content_scenarios(scenario_name: str
     """Content-only scenarios never produce tool_call / tool_result events."""
     scenario = getattr(MockLLMStream, scenario_name)()
     service = make_chat_service_with_mock_llm(scenario)
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    events = [e async for e in service.chat_stream("hi", session_id)]
+    events = [e async for e in service.chat_stream("hi", conversation_id)]
     types = {e.type for e in events}
     assert "tool_call" not in types
     assert "tool_result" not in types

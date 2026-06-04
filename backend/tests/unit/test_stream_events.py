@@ -50,17 +50,17 @@ def test_error_code_is_strenum_with_three_members() -> None:
 
 def test_event_models_instantiate_and_serialise_with_discriminator() -> None:
     """All five event models serialise with the correct 'type' discriminator."""
-    content = ContentEvent(chunk="hello", session_id="s1")
+    content = ContentEvent(chunk="hello", conversation_id="s1")
     assert '"type":"content"' in content.model_dump_json()
 
-    thinking = ThinkingEvent(chunk="reasoning", session_id="s1")
+    thinking = ThinkingEvent(chunk="reasoning", conversation_id="s1")
     assert '"type":"thinking"' in thinking.model_dump_json()
 
-    tool_call = ToolCallEvent(tool_name="search_flights", tool_args={"origin": "LAX"}, session_id="s1")
+    tool_call = ToolCallEvent(tool_name="search_flights", tool_args={"origin": "LAX"}, conversation_id="s1")
     assert '"type":"tool_call"' in tool_call.model_dump_json()
 
     tool_result = ToolResultEvent(
-        tool_name="search_flights", tool_result="5 flights found", elapsed_ms=123, session_id="s1"
+        tool_name="search_flights", tool_result="5 flights found", elapsed_ms=123, conversation_id="s1"
     )
     assert '"type":"tool_result"' in tool_result.model_dump_json()
 
@@ -68,7 +68,7 @@ def test_event_models_instantiate_and_serialise_with_discriminator() -> None:
         error_code=ErrorCode.tool_error,
         message="Tool failed.",
         retryable=True,
-        session_id="s1",
+        conversation_id="s1",
     )
     assert '"type":"error"' in error.model_dump_json()
 
@@ -82,25 +82,25 @@ def test_event_models_instantiate_and_serialise_with_discriminator() -> None:
 def test_tool_call_event_rejects_construction_without_required_fields() -> None:
     """ToolCallEvent requires tool_name and tool_args (Pydantic ValidationError)."""
     with pytest.raises(ValidationError):
-        ToolCallEvent(session_id="s1")  # type: ignore[call-arg]
+        ToolCallEvent(conversation_id="s1")  # type: ignore[call-arg]
 
     with pytest.raises(ValidationError):
-        ToolCallEvent(tool_name="search_flights", session_id="s1")  # type: ignore[call-arg]
+        ToolCallEvent(tool_name="search_flights", conversation_id="s1")  # type: ignore[call-arg]
 
     with pytest.raises(ValidationError):
-        ToolCallEvent(tool_args={"origin": "LAX"}, session_id="s1")  # type: ignore[call-arg]
+        ToolCallEvent(tool_args={"origin": "LAX"}, conversation_id="s1")  # type: ignore[call-arg]
 
 
 def test_tool_result_event_rejects_construction_without_required_fields() -> None:
     """ToolResultEvent requires tool_name, tool_result, and elapsed_ms."""
     with pytest.raises(ValidationError):
-        ToolResultEvent(session_id="s1")  # type: ignore[call-arg]
+        ToolResultEvent(conversation_id="s1")  # type: ignore[call-arg]
 
     with pytest.raises(ValidationError):
-        ToolResultEvent(tool_name="search_flights", session_id="s1")  # type: ignore[call-arg]
+        ToolResultEvent(tool_name="search_flights", conversation_id="s1")  # type: ignore[call-arg]
 
     with pytest.raises(ValidationError):
-        ToolResultEvent(tool_name="search_flights", tool_result="x", session_id="s1")  # type: ignore[call-arg]
+        ToolResultEvent(tool_name="search_flights", tool_result="x", conversation_id="s1")  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -109,12 +109,12 @@ def test_tool_result_event_rejects_construction_without_required_fields() -> Non
 
 
 def test_error_event_rejects_construction_without_required_fields() -> None:
-    """ErrorEvent requires error_code, message, retryable, and session_id."""
+    """ErrorEvent requires error_code, message, retryable, and conversation_id."""
     # Missing all required fields
     with pytest.raises(ValidationError):
         ErrorEvent()  # type: ignore[call-arg]
 
-    # Missing session_id
+    # Missing conversation_id
     with pytest.raises(ValidationError):
         ErrorEvent(error_code=ErrorCode.tool_error, message="x", retryable=True)  # type: ignore[call-arg]
 
@@ -124,7 +124,7 @@ def test_error_event_rejects_construction_without_required_fields() -> None:
         error_code=ErrorCode.tool_error,
         message="x",
         retryable=False,
-        session_id="s1",
+        conversation_id="s1",
     )
     assert event.tool_name is None
     assert event.raw_detail is None
@@ -142,7 +142,7 @@ def test_stream_event_union_alias_deserialises_error_event() -> None:
         "error_code": "tool_error",
         "message": "x",
         "retryable": True,
-        "session_id": "s",
+        "conversation_id": "s",
     }
     adapter: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
     result = adapter.validate_python(payload)
@@ -152,7 +152,7 @@ def test_stream_event_union_alias_deserialises_error_event() -> None:
 
 def test_stream_event_union_alias_deserialises_content_event() -> None:
     """TypeAdapter(StreamEvent) must deserialise a content payload to ContentEvent."""
-    payload = {"type": "content", "chunk": "hi", "session_id": "s"}
+    payload = {"type": "content", "chunk": "hi", "conversation_id": "s"}
     adapter: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
     result = adapter.validate_python(payload)
     assert isinstance(result, ContentEvent)
@@ -188,7 +188,7 @@ def test_error_event_raw_detail_is_scrubbed() -> None:
         message="Tool failed.",
         retryable=False,
         raw_detail=scrubbed,
-        session_id="s1",
+        conversation_id="s1",
     )
     assert event.raw_detail is not None
     assert "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA" not in event.raw_detail

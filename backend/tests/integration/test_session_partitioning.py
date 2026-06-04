@@ -1,7 +1,7 @@
 """Integration test — sessions are partitioned per authenticated user (D-22, D-27).
 
 Two distinct users log in, each owns a session in ``ChatService._metadata``,
-and each ``GET /api/chat/sessions`` call MUST return only its caller's
+and each ``GET /api/chat/conversations`` call MUST return only its caller's
 sessions. Closes RESEARCH.md Open Question 5 (RESOLVED).
 
 Phase 5 / Plan 05-04: ``_histories`` and ``_bound_providers`` retired in
@@ -64,14 +64,14 @@ def test_two_users_get_independent_session_lists(
     bob_headers = _login(client, "bob", "bobpass")
 
     # Act 1 — alice's sessions list is initially empty
-    r1 = client.get("/api/chat/sessions", headers=alice_headers)
+    r1 = client.get("/api/chat/conversations", headers=alice_headers)
     assert r1.status_code == 200
-    assert r1.json() == {"sessions": []}
+    assert r1.json() == {"conversations": []}
 
     # Act 2 — bob's sessions list is initially empty
-    r1b = client.get("/api/chat/sessions", headers=bob_headers)
+    r1b = client.get("/api/chat/conversations", headers=bob_headers)
     assert r1b.status_code == 200
-    assert r1b.json() == {"sessions": []}
+    assert r1b.json() == {"conversations": []}
 
     # Seed one session per user directly via metadata.
     # We bypass the create_session route because that requires a live provider
@@ -79,15 +79,15 @@ def test_two_users_get_independent_session_lists(
     # Phase 6 / Plan 06-04: session ids must be UUID-strings — the new
     # MessageStore.first_user_message_preview takes a UUID so opaque ids
     # like "alice-1" no longer parse.
-    alice_session_id = str(uuid4())
-    bob_session_id = str(uuid4())
-    chat_service._metadata[alice_session_id] = {
+    alice_conversation_id = str(uuid4())
+    bob_conversation_id = str(uuid4())
+    chat_service._metadata[alice_conversation_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "alice",
         "created_at": datetime.now(UTC).isoformat(),
     }
-    chat_service._metadata[bob_session_id] = {
+    chat_service._metadata[bob_conversation_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "bob",
@@ -95,15 +95,15 @@ def test_two_users_get_independent_session_lists(
     }
 
     # Act 3 — alice lists sessions, sees ONLY her own
-    r2 = client.get("/api/chat/sessions", headers=alice_headers)
+    r2 = client.get("/api/chat/conversations", headers=alice_headers)
     assert r2.status_code == 200
-    alice_sessions = r2.json()["sessions"]
+    alice_sessions = r2.json()["conversations"]
     assert len(alice_sessions) == 1
-    assert alice_sessions[0]["session_id"] == alice_session_id
+    assert alice_sessions[0]["conversation_id"] == alice_conversation_id
 
     # Act 4 — bob lists sessions, sees ONLY his own
-    r3 = client.get("/api/chat/sessions", headers=bob_headers)
+    r3 = client.get("/api/chat/conversations", headers=bob_headers)
     assert r3.status_code == 200
-    bob_sessions = r3.json()["sessions"]
+    bob_sessions = r3.json()["conversations"]
     assert len(bob_sessions) == 1
-    assert bob_sessions[0]["session_id"] == bob_session_id
+    assert bob_sessions[0]["conversation_id"] == bob_conversation_id

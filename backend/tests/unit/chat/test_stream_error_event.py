@@ -48,9 +48,9 @@ async def test_chat_stream_emits_error_event_on_exception() -> None:
         raise RuntimeError(f"upstream failure with key {secret}")
 
     service = make_chat_service_with_mock_llm(boom)  # type: ignore[arg-type]
-    session_id, _ = await service.create_session(default_session_config(), user_id="u")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="u")
 
-    events = [e async for e in service.chat_stream("hi", session_id)]
+    events = [e async for e in service.chat_stream("hi", conversation_id)]
     error_events = [e for e in events if e.type == "error"]
     assert len(error_events) == 1, "exactly one ErrorEvent expected"
     err = error_events[0]

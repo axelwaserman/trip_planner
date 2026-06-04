@@ -94,9 +94,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     yield
 
-    # Shutdown: cleanup expired sessions (async since A1).
-    cleaned_up = await chat_service.cleanup_expired_sessions(max_age_seconds=0)
-    logger.info("Cleaned up %d sessions on shutdown", cleaned_up)
+    # Shutdown: cleanup expired conversations (async since A1).
+    cleaned_up = await chat_service.cleanup_expired_conversations(max_age_seconds=0)
+    logger.info("Cleaned up %d conversations on shutdown", cleaned_up)
 
     # Phase 6 / Plan 06-04: dispose the engine so pooled connections close
     # cleanly between hot-reloads (T-06-04-02 mitigation; locked by

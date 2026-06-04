@@ -1,4 +1,4 @@
-"""Integration tests for the provider probe wired into POST /api/chat/session.
+"""Integration tests for the provider probe wired into POST /api/chat/conversation.
 
 Plan 4.2-04 inserts ``await probe_provider(provider, model)`` between the existing
 provider validation and ``chat_service.create_session()``. These tests monkeypatch
@@ -42,9 +42,9 @@ def test_session_create_returns_502_when_provider_unreachable(
     )
 
     response = client.post(
-        "/api/chat/session",
+        "/api/chat/conversation",
         headers=auth_headers,
-        json={"provider": "ollama", "model": "qwen3:4b"},
+        json={"target": {"provider": "ollama", "model": "qwen3:4b"}},
     )
 
     assert response.status_code == 502
@@ -70,9 +70,9 @@ def test_session_create_returns_400_when_model_not_installed(
     )
 
     response = client.post(
-        "/api/chat/session",
+        "/api/chat/conversation",
         headers=auth_headers,
-        json={"provider": "ollama", "model": "qwen3:4b"},
+        json={"target": {"provider": "ollama", "model": "qwen3:4b"}},
     )
 
     assert response.status_code == 400
@@ -99,9 +99,9 @@ def test_session_create_returns_400_when_cloud_key_missing(
     monkeypatch.setattr(factory._settings, "openai_api_key", None, raising=False)
 
     response = client.post(
-        "/api/chat/session",
+        "/api/chat/conversation",
         headers=auth_headers,
-        json={"provider": "openai", "model": "gpt-4o-mini"},
+        json={"target": {"provider": "openai", "model": "gpt-4o-mini"}},
     )
 
     assert response.status_code == 400
@@ -113,7 +113,7 @@ def test_session_create_returns_400_when_cloud_key_missing(
 def test_session_create_succeeds_when_ollama_probe_passes(
     client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """/api/tags lists the requested model → 201 with session_id."""
+    """/api/tags lists the requested model → 201 with conversation_id."""
     monkeypatch.setattr(
         httpx.AsyncClient,
         "get",
@@ -125,14 +125,14 @@ def test_session_create_succeeds_when_ollama_probe_passes(
     )
 
     response = client.post(
-        "/api/chat/session",
+        "/api/chat/conversation",
         headers=auth_headers,
-        json={"provider": "ollama", "model": "qwen3:4b"},
+        json={"target": {"provider": "ollama", "model": "qwen3:4b"}},
     )
 
     assert response.status_code == 201
     body = response.json()
-    assert "session_id" in body
+    assert "conversation_id" in body
     assert body["provider"] == "ollama"
     assert body["model"] == "qwen3:4b"
 
@@ -161,9 +161,9 @@ def test_session_create_accepts_model_outside_curated_list_when_daemon_has_it(
     )
 
     response = client.post(
-        "/api/chat/session",
+        "/api/chat/conversation",
         headers=auth_headers,
-        json={"provider": "ollama", "model": "qwen3.5:9b"},
+        json={"target": {"provider": "ollama", "model": "qwen3.5:9b"}},
     )
 
     assert response.status_code == 201
@@ -181,9 +181,9 @@ def test_session_create_rejects_unknown_provider_at_route_layer(
     match-default branch.
     """
     response = client.post(
-        "/api/chat/session",
+        "/api/chat/conversation",
         headers=auth_headers,
-        json={"provider": "made-up-provider", "model": "anything"},
+        json={"target": {"provider": "made-up-provider", "model": "anything"}},
     )
     assert response.status_code == 400
     body = response.json()
@@ -209,7 +209,7 @@ def test_session_create_accepts_lmstudio_provider_at_route_layer(
     """Regression for AR-01: ``provider="lmstudio"`` must pass the route validator.
 
     Before AR-01's fix, ``Settings.get_available_providers()`` only listed
-    ``ollama``/``openai``/``anthropic`` — every ``POST /api/chat/session`` with
+    ``ollama``/``openai``/``anthropic`` — every ``POST /api/chat/conversation`` with
     ``provider="lmstudio"`` returned HTTP 400 ``"Invalid provider: lmstudio"``
     before the factory was ever reached, making the entire LM Studio
     implementation unreachable from the frontend. This test asserts the
@@ -225,20 +225,16 @@ def test_session_create_accepts_lmstudio_provider_at_route_layer(
     )
 
     response = client.post(
-        "/api/chat/session",
+        "/api/chat/conversation",
         headers=auth_headers,
-        json={
-            "provider": "lmstudio",
-            "model": "qwen2.5-coder-7b",
-            "base_url": "http://localhost:1234/v1",
-        },
+        json={"target": {"provider": "lmstudio", "model": "qwen2.5-coder-7b"}, "credentials": {"base_url": "http://localhost:1234/v1"}},
     )
 
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["provider"] == "lmstudio"
     assert body["model"] == "qwen2.5-coder-7b"
-    assert "session_id" in body
+    assert "conversation_id" in body
 
 
 def test_get_available_providers_lists_all_factory_dispatch_arms() -> None:

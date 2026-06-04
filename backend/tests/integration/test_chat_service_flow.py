@@ -2,8 +2,8 @@
 
 Phase 5 / Plan 05-04 (Wave 3): the LangChain history assertions
 (``isinstance(m, HumanMessage)`` / ``ToolMessage`` / ``AIMessage`` against
-``service.get_session_history(session_id).messages``) are rewritten against the
-:class:`ConversationStore` seam — ``await store.load(session_id)`` returns
+``service.get_session_history(conversation_id).messages``) are rewritten against the
+:class:`ConversationStore` seam — ``await store.load(conversation_id)`` returns
 ``list[ModelMessage]`` whose parts are PydanticAI's
 :class:`UserPromptPart` / :class:`TextPart` / :class:`ToolCallPart` /
 :class:`ToolReturnPart`. The semantic assertions are unchanged ("exactly two
@@ -51,9 +51,9 @@ async def test_chat_stream_emits_tool_events_for_flight_query() -> None:
     user message, and a ``ToolReturnPart`` somewhere in the run's messages.
     """
     service = make_chat_service_with_mock_llm(MockLLMStream.single_tool_call())
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    events = [e async for e in service.chat_stream("Find flights LAX to JFK", session_id)]
+    events = [e async for e in service.chat_stream("Find flights LAX to JFK", conversation_id)]
 
     # Event-type assertions (unchanged from Phase 4.7).
     types = [e.type for e in events]
@@ -73,7 +73,7 @@ async def test_chat_stream_emits_tool_events_for_flight_query() -> None:
     assert parsed.query.origin == "LAX"
 
     # History assertions: the ConversationStore returns PydanticAI's ModelMessage list.
-    msgs = await service._message_store.load(UUID(session_id))
+    msgs = await service._message_store.load(UUID(conversation_id))
     assert any(
         isinstance(m, ModelRequest)
         and any(isinstance(p, UserPromptPart) and p.content == "Find flights LAX to JFK" for p in m.parts)
@@ -109,12 +109,12 @@ async def test_chat_stream_retains_history_across_turns() -> None:
             *MockLLMStream.multi_turn(),  # second turn
         ]
     )
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    _ = [e async for e in service.chat_stream("Hello", session_id)]
-    _ = [e async for e in service.chat_stream("Show me alternatives", session_id)]
+    _ = [e async for e in service.chat_stream("Hello", conversation_id)]
+    _ = [e async for e in service.chat_stream("Show me alternatives", conversation_id)]
 
-    msgs = await service._message_store.load(UUID(session_id))
+    msgs = await service._message_store.load(UUID(conversation_id))
 
     user_prompts = [p for m in msgs if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, UserPromptPart)]
     assistant_texts = [p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)]
@@ -128,11 +128,11 @@ async def test_post_chat_streams_tool_events_via_mock_llm(client: TestClient, au
     """HTTP layer: POST /api/chat with MockLLM injected produces tool event SSE stream."""
     service = make_chat_service_with_mock_llm(MockLLMStream.single_tool_call())
     client.app.state.chat_service = service  # type: ignore[attr-defined]
-    session_id, _ = await service.create_session(default_session_config(), user_id="admin")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="admin")
 
     response = client.post(
         "/api/chat",
-        json={"message": "Find flights", "session_id": session_id},
+        json={"message": "Find flights", "conversation_id": conversation_id},
         headers=auth_headers,
     )
 

@@ -38,8 +38,8 @@ async def test_thinking() -> None:
     """A Thinking chunk in the mock stream surfaces as a ``ThinkingEvent``."""
     streams = [[Thinking("planning your trip"), Content("Hello!")]]
     service = make_chat_service_with_mock_llm(streams)
-    session_id, _ = await service.create_session(default_session_config(), user_id="u")
-    events = [e async for e in service.chat_stream("hi", session_id)]
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="u")
+    events = [e async for e in service.chat_stream("hi", conversation_id)]
     types = [e.type for e in events]
     assert "thinking" in types
 
@@ -47,8 +47,8 @@ async def test_thinking() -> None:
 async def test_text() -> None:
     """A Content chunk in the mock stream surfaces as a ``ContentEvent``."""
     service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
-    session_id, _ = await service.create_session(default_session_config(), user_id="u")
-    events = [e async for e in service.chat_stream("Hello", session_id)]
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="u")
+    events = [e async for e in service.chat_stream("Hello", conversation_id)]
     types = [e.type for e in events]
     assert "content" in types
 
@@ -56,8 +56,8 @@ async def test_text() -> None:
 async def test_tool_call() -> None:
     """A ToolCall chunk surfaces as a ``ToolCallEvent`` (before the tool runs)."""
     service = make_chat_service_with_mock_llm(MockLLMStream.single_tool_call())
-    session_id, _ = await service.create_session(default_session_config(), user_id="u")
-    events = [e async for e in service.chat_stream("Find flights LAX-JFK", session_id)]
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="u")
+    events = [e async for e in service.chat_stream("Find flights LAX-JFK", conversation_id)]
     types = [e.type for e in events]
     assert "tool_call" in types
 
@@ -70,7 +70,7 @@ async def test_tool_result() -> None:
     a ``tool_result`` event is yielded with the tool's JSON payload.
     """
     service = make_chat_service_with_mock_llm(MockLLMStream.single_tool_call())
-    session_id, _ = await service.create_session(default_session_config(), user_id="u")
-    events = [e async for e in service.chat_stream("Find flights LAX-JFK", session_id)]
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="u")
+    events = [e async for e in service.chat_stream("Find flights LAX-JFK", conversation_id)]
     types = [e.type for e in events]
     assert "tool_result" in types

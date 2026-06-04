@@ -83,22 +83,22 @@ def test_get_providers_succeeds_with_valid_token(client: TestClient, auth_header
 
 
 # ---------------------------------------------------------------------------
-# POST /api/chat/session — requires auth
+# POST /api/chat/conversation — requires auth
 # ---------------------------------------------------------------------------
 
 
 def test_create_session_requires_auth(client: TestClient) -> None:
-    """POST /api/chat/session returns 401 without Bearer token."""
-    response = client.post("/api/chat/session")
+    """POST /api/chat/conversation returns 401 without Bearer token."""
+    response = client.post("/api/chat/conversation")
     assert response.status_code == 401
 
 
 def test_create_session_succeeds_with_valid_token(client: TestClient, auth_headers: dict[str, str]) -> None:
-    """POST /api/chat/session returns 201 with a valid Bearer token."""
-    response = client.post("/api/chat/session", headers=auth_headers)
+    """POST /api/chat/conversation returns 201 with a valid Bearer token."""
+    response = client.post("/api/chat/conversation", headers=auth_headers)
     assert response.status_code == 201
     body = response.json()
-    assert "session_id" in body
+    assert "conversation_id" in body
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +110,6 @@ def test_chat_requires_auth(client: TestClient) -> None:
     """POST /api/chat returns 401 without Bearer token."""
     response = client.post(
         "/api/chat",
-        json={"message": "Hello", "session_id": "fake-session"},
+        json={"message": "Hello", "conversation_id": "fake-session"},
     )
     assert response.status_code == 401

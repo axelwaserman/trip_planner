@@ -43,14 +43,14 @@ def test_streamevent_is_abc() -> None:
 
 def test_concrete_event_isinstance_streamevent_abc() -> None:
     """Each of the 5 concrete subclasses is an ``isinstance`` of StreamEvent."""
-    assert isinstance(ContentEvent(chunk="hi", session_id="s"), StreamEvent)
-    assert isinstance(ThinkingEvent(chunk="think", session_id="s"), StreamEvent)
+    assert isinstance(ContentEvent(chunk="hi", conversation_id="s"), StreamEvent)
+    assert isinstance(ThinkingEvent(chunk="think", conversation_id="s"), StreamEvent)
     assert isinstance(
-        ToolCallEvent(tool_name="search_flights", tool_args={}, session_id="s"),
+        ToolCallEvent(tool_name="search_flights", tool_args={}, conversation_id="s"),
         StreamEvent,
     )
     assert isinstance(
-        ToolResultEvent(tool_name="search_flights", tool_result="ok", elapsed_ms=1, session_id="s"),
+        ToolResultEvent(tool_name="search_flights", tool_result="ok", elapsed_ms=1, conversation_id="s"),
         StreamEvent,
     )
     assert isinstance(
@@ -58,7 +58,7 @@ def test_concrete_event_isinstance_streamevent_abc() -> None:
             error_code=ErrorCode.tool_error,
             message="x",
             retryable=False,
-            session_id="s",
+            conversation_id="s",
         ),
         StreamEvent,
     )
@@ -71,7 +71,7 @@ def test_typeadapter_round_trip() -> None:
         "error_code": "tool_error",
         "message": "x",
         "retryable": True,
-        "session_id": "s",
+        "conversation_id": "s",
     }
     adapter: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
     result = adapter.validate_python(payload)

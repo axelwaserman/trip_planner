@@ -52,7 +52,7 @@ async def test_o3_mini_emits_thinking_events_against_live_openai() -> None:
 
     deps = ChatDeps(
         flight_client=MockFlightAPIClient(seed=42),
-        session_id="live-openai-test",
+        conversation_id="live-openai-test",
         user_id="ci",
     )
     agent = provider.build_agent(tools=[], deps_type=ChatDeps)

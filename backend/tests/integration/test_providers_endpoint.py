@@ -123,7 +123,14 @@ def test_get_providers_includes_base_url(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Local providers carry base_url from Settings; cloud providers carry None."""
+    """Local providers carry base_url from Settings; cloud providers carry api_key_configured.
+
+    Phase 6 / Plan 06-05a (REQ-p5-provider-info-split): the legacy
+    ``ProviderInfo`` shape (every entry exposing ``base_url`` even for cloud)
+    is replaced by a discriminated union — local providers expose ``base_url``
+    only; cloud providers expose ``api_key_configured`` only and never the
+    ``api_key`` itself (D-09 lock).
+    """
     # Arrange — populate cache so we don't depend on a live daemon
     import time as time_module
 
@@ -139,12 +146,20 @@ def test_get_providers_includes_base_url(
 
     assert response.status_code == 200
     body = response.json()
-    # Local providers — base_url from Settings.
+    # Local providers — type=local, base_url from Settings.
+    assert body["ollama"]["type"] == "local"
     assert body["ollama"]["base_url"] == settings.ollama_base_url
+    assert body["lmstudio"]["type"] == "local"
     assert body["lmstudio"]["base_url"] == settings.lmstudio_base_url
-    # Cloud providers — base_url is None.
-    assert body["openai"]["base_url"] is None
-    assert body["anthropic"]["base_url"] is None
+    # Cloud providers — type=cloud, api_key_configured boolean only.
+    assert body["openai"]["type"] == "cloud"
+    assert "api_key_configured" in body["openai"]
+    assert "base_url" not in body["openai"]
+    assert "api_key" not in body["openai"]
+    assert body["anthropic"]["type"] == "cloud"
+    assert "api_key_configured" in body["anthropic"]
+    assert "base_url" not in body["anthropic"]
+    assert "api_key" not in body["anthropic"]
 
 
 def test_get_providers_keeps_curated_cloud_models(
