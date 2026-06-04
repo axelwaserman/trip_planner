@@ -20,6 +20,12 @@ dependencies = [
     "psycopg[binary,pool]>=3.3.4",
     "sqlmodel>=0.0.38",
     "alembic>=1.18.4",
+    # SQLAlchemy[asyncio] — explicit pull of the `greenlet` async runtime.
+    # SQLAlchemy auto-pulls greenlet only on linux/x86_64 + windows; macOS arm64
+    # (`platform.machine() == "arm64"`) is excluded by upstream's marker, so async
+    # tooling raises `ValueError: the greenlet library is required` at first await.
+    # Adding the `[asyncio]` extra makes the install platform-agnostic.
+    "sqlalchemy[asyncio]>=2.0.50",
 ]
 
 [dependency-groups]
