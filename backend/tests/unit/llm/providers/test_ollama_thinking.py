@@ -77,9 +77,7 @@ def test_ollama_chat_base_url_appends_v1_suffix() -> None:
     pai_provider = agent.model._provider  # type: ignore[attr-defined]
     client = pai_provider._client  # type: ignore[attr-defined]
     base_url_str = str(client.base_url).rstrip("/")
-    assert base_url_str.endswith("/v1"), (
-        f"Ollama chat base_url must end with /v1, got: {client.base_url!r}"
-    )
+    assert base_url_str.endswith("/v1"), f"Ollama chat base_url must end with /v1, got: {client.base_url!r}"
 
 
 def test_ollama_chat_base_url_does_not_double_v1_suffix() -> None:

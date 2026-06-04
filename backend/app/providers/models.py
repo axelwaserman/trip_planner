@@ -69,9 +69,7 @@ class CloudProviderInfo(BaseModel):
     type: Literal["cloud"] = "cloud"
     available: bool
     models: list[str] = Field(default_factory=list)
-    api_key_configured: bool = Field(
-        ..., description="True iff Settings has a non-empty api_key for this provider."
-    )
+    api_key_configured: bool = Field(..., description="True iff Settings has a non-empty api_key for this provider.")
 
 
 # Discriminated alias used by the route layer's ``-> dict[str, ProviderInfoResponse]``

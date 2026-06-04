@@ -59,8 +59,7 @@ def test_tool_result_event_wire_unchanged() -> None:
         conversation_id="s1",
     )
     assert event.model_dump_json() == (
-        '{"type":"tool_result","tool_name":"search_flights","tool_result":"ok",'
-        '"elapsed_ms":42,"conversation_id":"s1"}'
+        '{"type":"tool_result","tool_name":"search_flights","tool_result":"ok","elapsed_ms":42,"conversation_id":"s1"}'
     )
 
 

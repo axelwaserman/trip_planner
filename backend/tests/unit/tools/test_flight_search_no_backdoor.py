@@ -135,9 +135,7 @@ def test_no_backdoor_assignments_or_getattrs_in_production_code() -> None:
                     f'prohibited getattr(search_flights, "_flight_client", ...)',
                 )
 
-    assert matches == [], (
-        "prohibited back-door shapes found in production code:\n" + "\n".join(matches)
-    )
+    assert matches == [], "prohibited back-door shapes found in production code:\n" + "\n".join(matches)
 
 
 def test_chat_deps_carries_flight_client_via_runcontext_path() -> None:

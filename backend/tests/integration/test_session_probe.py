@@ -227,7 +227,10 @@ def test_session_create_accepts_lmstudio_provider_at_route_layer(
     response = client.post(
         "/api/chat/conversation",
         headers=auth_headers,
-        json={"target": {"provider": "lmstudio", "model": "qwen2.5-coder-7b"}, "credentials": {"base_url": "http://localhost:1234/v1"}},
+        json={
+            "target": {"provider": "lmstudio", "model": "qwen2.5-coder-7b"},
+            "credentials": {"base_url": "http://localhost:1234/v1"},
+        },
     )
 
     assert response.status_code == 201, response.text

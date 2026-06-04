@@ -30,9 +30,7 @@ def client() -> Generator[TestClient]:
         yield c
 
 
-def test_post_chat_conversation_accepts_split_body(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_post_chat_conversation_accepts_split_body(client: TestClient, auth_headers: dict[str, str]) -> None:
     """The nested ``{target, credentials}`` body is the canonical post-Plan-06-05a shape."""
     response = client.post(
         "/api/chat/conversation",
@@ -49,9 +47,7 @@ def test_post_chat_conversation_accepts_split_body(
     assert body["model"] == "qwen3:4b"
 
 
-def test_post_chat_conversation_rejects_legacy_flat_shape(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_post_chat_conversation_rejects_legacy_flat_shape(client: TestClient, auth_headers: dict[str, str]) -> None:
     """The legacy flat ``{provider, model, base_url}`` body is rejected with 422.
 
     Pydantic v2 with ``extra='ignore'`` (the default) silently drops the legacy
@@ -111,9 +107,7 @@ def test_post_chat_conversation_validates_credentials_ssrf_through_split(
     assert "host" in detail_text.lower() or "localhost" in detail_text.lower()
 
 
-def test_post_chat_conversation_oversize_api_key_rejected(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_post_chat_conversation_oversize_api_key_rejected(client: TestClient, auth_headers: dict[str, str]) -> None:
     """``credentials.api_key`` >256 chars is rejected by the relocated length validator."""
     oversize_key = "x" * 257
     response = client.post(
@@ -147,9 +141,7 @@ def test_legacy_session_routes_return_404(client: TestClient, auth_headers: dict
         )
 
 
-def test_get_chat_conversations_lists_user_conversations(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_get_chat_conversations_lists_user_conversations(client: TestClient, auth_headers: dict[str, str]) -> None:
     """``GET /api/chat/conversations`` lists the authenticated user's conversations."""
     # Create two conversations via the renamed POST.
     resp1 = client.post(

@@ -230,9 +230,7 @@ class ChatService:
         """
         return await self._message_store.first_user_message_preview(UUID(conversation_id))
 
-    async def get_history_for_user(
-        self, conversation_id: str, user_id: str
-    ) -> ChatConversationHistoryResponse | None:
+    async def get_history_for_user(self, conversation_id: str, user_id: str) -> ChatConversationHistoryResponse | None:
         """Return the conversation's user/assistant history, if owned by ``user_id``.
 
         Returns ``None`` when the conversation doesn't exist OR when ``user_id``
@@ -365,9 +363,7 @@ class ChatService:
                     elif Agent.is_call_tools_node(node):
                         async with node.stream(agent_run.ctx) as tool_stream:
                             async for ev in tool_stream:
-                                async for stream_event in self._handle_tool_event(
-                                    ev, conversation_id, tool_call_start
-                                ):
+                                async for stream_event in self._handle_tool_event(ev, conversation_id, tool_call_start):
                                     yield stream_event
 
             if persist_user_message and agent_run.result is not None:

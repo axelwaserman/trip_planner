@@ -295,9 +295,7 @@ class ChatConversationInfo(BaseModel):
 class ChatConversationsListResponse(BaseModel):
     """Response shape for GET /api/chat/conversations (D-22, D-27)."""
 
-    conversations: list[ChatConversationInfo] = Field(
-        ..., description="Conversations owned by the authenticated user."
-    )
+    conversations: list[ChatConversationInfo] = Field(..., description="Conversations owned by the authenticated user.")
 
 
 class ChatHistoryMessage(BaseModel):

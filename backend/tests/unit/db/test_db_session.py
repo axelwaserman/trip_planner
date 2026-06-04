@@ -62,9 +62,7 @@ def test_async_sessionmaker_disables_expire_on_commit() -> None:
 # ``warnings.catch_warnings()`` is overridden by pytest's per-test recorder).
 # The canonical ORM path will switch to ``.exec()`` with proper Select
 # statements once Plan 06-02 lands the SQLModel tables.
-@pytest.mark.filterwarnings(
-    "ignore::DeprecationWarning:tests.unit.db.test_db_session"
-)
+@pytest.mark.filterwarnings("ignore::DeprecationWarning:tests.unit.db.test_db_session")
 async def test_async_session_select_one_round_trip() -> None:
     """Open a session, run ``SELECT 1``, assert the round-trip works.
 

@@ -76,9 +76,9 @@ def _inmemory_user_repo(monkeypatch: pytest.MonkeyPatch) -> Generator[InMemoryUs
 
 
 @pytest.fixture(autouse=True)
-def _inmemory_chat_collaborators(monkeypatch: pytest.MonkeyPatch) -> Generator[
-    tuple[InMemoryMessageStore, InMemoryConversationRepository]
-]:
+def _inmemory_chat_collaborators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[tuple[InMemoryMessageStore, InMemoryConversationRepository]]:
     """Swap chat-service collaborators with in-memory impls during the test.
 
     Phase 6 / Plan 06-04 wires :class:`PostgresMessageStore` +

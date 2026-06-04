@@ -374,5 +374,3 @@ def _extract_first_user_prompt_preview(messages: list[ModelMessage]) -> str | No
                         return content[:_PREVIEW_MAX_LENGTH]
                     return str(content)[:_PREVIEW_MAX_LENGTH]
     return None
-
-
