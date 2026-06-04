@@ -111,16 +111,16 @@ async def test_chat_turn_persists_and_replays_after_restart(
     # table) and an in-process _metadata entry (so chat_stream can look up
     # the user_id). create_session() handles _metadata; the SQL conversation
     # row is provisioned via the ConversationRepository directly.
-    session_id, probe_error = await service_v1.create_session(
+    conversation_id, probe_error = await service_v1.create_session(
         default_session_config(),
         user_id="chat-persistence-user",
     )
     assert probe_error is None
 
-    conversation_uuid = UUID(session_id)
+    conversation_uuid = UUID(conversation_id)
     # The conversation row needs to exist before chat_stream's append step;
     # Plan 06-05a will move this provisioning into create_session itself.
-    # Insert a Conversation row whose id matches the session_id so the FK on
+    # Insert a Conversation row whose id matches the conversation_id so the FK on
     # the message rows lines up.
     async with sessionmaker() as s:
         from app.db.models import Conversation  # noqa: PLC0415
@@ -129,7 +129,7 @@ async def test_chat_turn_persists_and_replays_after_restart(
         await s.commit()
 
     # Act 1 — drive a real chat turn through the v1 service
-    events_v1 = [e async for e in service_v1.chat_stream("hi", session_id)]
+    events_v1 = [e async for e in service_v1.chat_stream("hi", conversation_id)]
 
     # The greeting scenario produces only Content events; assert the stream
     # produced at least one (i.e. the run actually completed).

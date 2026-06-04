@@ -1,4 +1,4 @@
-"""Unit tests for GET /api/chat/sessions (D-22, D-27).
+"""Unit tests for GET /api/chat/conversations (D-22, D-27).
 
 Pattern: directly seed ``ChatService._metadata`` for two distinct user_ids and
 assert the route filters by ``current_user.username``. The auth_headers fixture
@@ -31,7 +31,7 @@ def client() -> Generator[TestClient]:
 
 
 def test_sessions_returns_401_without_auth(client: TestClient) -> None:
-    response = client.get("/api/chat/sessions")
+    response = client.get("/api/chat/conversations")
     assert response.status_code == 401
 
 
@@ -57,10 +57,10 @@ def test_user_with_no_sessions_returns_empty_list(
     chat_service = client.app.state.chat_service
     _reset_chat_service(chat_service)
 
-    response = client.get("/api/chat/sessions", headers=auth_headers)
+    response = client.get("/api/chat/conversations", headers=auth_headers)
 
     assert response.status_code == 200
-    assert response.json() == {"sessions": []}
+    assert response.json() == {"conversations": []}
 
 
 def test_user_sees_only_own_sessions(
@@ -70,15 +70,15 @@ def test_user_sees_only_own_sessions(
     chat_service = client.app.state.chat_service
     _reset_chat_service(chat_service)
 
-    alice_session_id = str(uuid4())
-    bob_session_id = str(uuid4())
-    chat_service._metadata[alice_session_id] = {
+    alice_conversation_id = str(uuid4())
+    bob_conversation_id = str(uuid4())
+    chat_service._metadata[alice_conversation_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "alice",
         "created_at": datetime.now(UTC).isoformat(),
     }
-    chat_service._metadata[bob_session_id] = {
+    chat_service._metadata[bob_conversation_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "bob",
@@ -87,11 +87,11 @@ def test_user_sees_only_own_sessions(
     # admin (the auth_headers user per conftest) seeds zero sessions —
     # they should see an empty list, NOT alice's or bob's.
 
-    response = client.get("/api/chat/sessions", headers=auth_headers)
+    response = client.get("/api/chat/conversations", headers=auth_headers)
 
     assert response.status_code == 200
     body = response.json()
-    assert body == {"sessions": []}
+    assert body == {"conversations": []}
 
 
 def test_first_message_preview_populated(
@@ -105,28 +105,28 @@ def test_first_message_preview_populated(
     # Seed the message store with a single ModelRequest carrying a UserPromptPart
     # via the in-memory impl's ``_store`` dict (UUID-keyed in Phase 6).
     session_uuid = uuid4()
-    session_id = str(session_uuid)
+    conversation_id = str(session_uuid)
     store = chat_service._message_store
     store._store[session_uuid] = [
         ModelRequest(parts=[UserPromptPart(content="This is my first chat message about flights")]),
     ]
-    chat_service._metadata[session_id] = {
+    chat_service._metadata[conversation_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "admin",  # match the auth_headers user (per conftest AUTH_USERS)
         "created_at": datetime.now(UTC).isoformat(),
     }
 
-    response = client.get("/api/chat/sessions", headers=auth_headers)
+    response = client.get("/api/chat/conversations", headers=auth_headers)
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["sessions"]) == 1
-    session = body["sessions"][0]
-    assert session["session_id"] == session_id
+    assert len(body["conversations"]) == 1
+    session = body["conversations"][0]
+    assert session["conversation_id"] == conversation_id
     assert session["provider"] == "ollama"
     assert session["model"] == "qwen3:4b"
     assert session["first_message_preview"].startswith("This is my first chat")
     # Confirm the seeded UUID is well-formed (catches the str-vs-UUID drift
     # documented in the plan's squash-merge boundary).
-    UUID(session["session_id"])
+    UUID(session["conversation_id"])

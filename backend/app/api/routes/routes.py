@@ -12,13 +12,14 @@ from app.auth.models import User
 from app.auth.routes import get_current_active_user
 from app.chat import ChatService
 from app.chat.models import (
+    ChatConversationHistoryResponse,
+    ChatConversationsListResponse,
     ChatRequest,
-    ChatSessionHistoryResponse,
-    ChatSessionsListResponse,
+    ConversationCreateRequest,
+    ConversationTarget,
     ErrorCode,
     ErrorEvent,
     RetryRequest,
-    SessionCreateRequest,
 )
 from app.chat.repository import ConversationRepository
 from app.chat.store import MessageStore
@@ -26,7 +27,9 @@ from app.config import settings
 from app.llm.errors import ProbeErrorCode
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.providers.models import (
-    ProviderInfo,
+    CloudProviderInfo,
+    LocalProviderInfo,
+    ProviderInfoResponse,
     ProviderRefreshEntry,
     ProviderRefreshResponse,
 )
@@ -60,8 +63,7 @@ async def get_llm_factory() -> LLMProviderFactory:
 # ``app.dependency_overrides[get_message_store] = ...`` and
 # ``app.dependency_overrides[get_conversation_repo] = ...`` so these
 # RuntimeError stubs are never executed in a real request — they exist as
-# fail-fast guards so unconfigured boots crash loudly. Plan 06-05a's request
-# rewrite consumes these deps in the route handlers.
+# fail-fast guards so unconfigured boots crash loudly.
 def get_message_store() -> MessageStore:
     """Placeholder dependency — overridden in main.py lifespan startup."""
     raise RuntimeError("MessageStore not configured")
@@ -80,42 +82,42 @@ async def chat(
 ) -> StreamingResponse:
     """Chat endpoint with streaming responses.
 
-    Accepts a chat message and session ID, returns a stream of events including
+    Accepts a chat message and conversation ID, returns a stream of events including
     AI responses, tool calls, and tool results.
 
-    Per CR-02: the route verifies that ``request.session_id`` exists AND is
+    Per CR-02: the route verifies that ``request.conversation_id`` exists AND is
     owned by ``current_user`` before any history mutation or model call.
-    Non-owner / missing-session both surface as 404 (same shape) so a caller
-    cannot probe for session existence by status code. This stops a
+    Non-owner / missing-conversation both surface as 404 (same shape) so a caller
+    cannot probe for conversation existence by status code. This stops a
     horizontal privilege escalation where Alice's valid token could read /
-    write Bob's session history just by guessing the UUID.
+    write Bob's conversation history just by guessing the UUID.
 
     Args:
-        request: ChatRequest with message and session_id
+        request: ChatRequest with message and conversation_id
         chat_service: Injected ChatService instance
-        current_user: Authenticated caller; must own the session.
+        current_user: Authenticated caller; must own the conversation.
 
     Returns:
         StreamingResponse with server-sent events
 
     Raises:
-        HTTPException: 404 if session doesn't exist or is owned by another
+        HTTPException: 404 if conversation doesn't exist or is owned by another
             user; 500 surfaces internally as an SSE error event.
     """
     # Ownership check (CR-02). Same 404 shape on missing-vs-not-owner so
-    # a non-owner cannot probe for session existence by status code.
-    metadata = chat_service._metadata.get(request.session_id)
+    # a non-owner cannot probe for conversation existence by status code.
+    metadata = chat_service._metadata.get(request.conversation_id)
     if metadata is None or metadata.get("user_id") != current_user.username:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session {request.session_id} not found",
+            detail=f"Conversation {request.conversation_id} not found",
         )
 
     async def event_generator() -> AsyncGenerator[str]:
         """Generate server-sent events from chat stream."""
         try:
             async for event in chat_service.chat_stream(
-                session_id=request.session_id,
+                conversation_id=request.conversation_id,
                 message=request.message,
             ):
                 # Format as server-sent event. ``event`` is typed as the
@@ -126,17 +128,17 @@ async def chat(
                 yield f"data: {event.model_dump_json()}\n\n"  # type: ignore[attr-defined]
 
         except ValueError:
-            # Defensive: the route boundary already 404s missing sessions
-            # (CR-02). This catch covers a narrow race where the session is
+            # Defensive: the route boundary already 404s missing conversations
+            # (CR-02). This catch covers a narrow race where the conversation is
             # deleted between the boundary check and chat_stream's first
             # history read.
             error_event = ErrorEvent(
                 error_code=ErrorCode.session_error,
-                message="Session not found or expired.",
+                message="Conversation not found or expired.",
                 retryable=False,
                 tool_name=None,
                 raw_detail=None,
-                session_id=request.session_id,
+                conversation_id=request.conversation_id,
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
 
@@ -149,14 +151,14 @@ async def chat(
             # exception server-side (the ApiKeyScrubber redacts any key-
             # shaped substrings before the formatter runs) and emit a
             # static, generic message to the client.
-            logger.exception("chat_stream failed for session %s", request.session_id)
+            logger.exception("chat_stream failed for conversation %s", request.conversation_id)
             error_event = ErrorEvent(
                 error_code=ErrorCode.stream_error,
                 message="Sorry, something went wrong. Please try again.",
                 retryable=False,
                 tool_name=None,
                 raw_detail=None,  # No exc str here — logger already captured it
-                session_id=request.session_id,
+                conversation_id=request.conversation_id,
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
 
@@ -177,46 +179,46 @@ async def retry_tool_call(
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> StreamingResponse:
-    """Replay the last tool invocation for ``request.session_id``.
+    """Replay the last tool invocation for ``request.conversation_id``.
 
-    CONTEXT.md D-07/D-08/D-09: reads ``_metadata[session_id]["last_tool_invocation"]``
+    CONTEXT.md D-07/D-08/D-09: reads ``_metadata[conversation_id]["last_tool_invocation"]``
     and re-streams the full LLM turn (tool_call → tool_result → reasoning → final
     response). Same CR-02 ownership pattern as POST /api/chat: 404 on missing-or-
-    not-owner so a non-owner cannot probe for session existence.
+    not-owner so a non-owner cannot probe for conversation existence.
 
     Returns:
         StreamingResponse with server-sent events (same SSE format as POST /api/chat).
 
     Raises:
-        HTTPException: 404 if session doesn't exist or is owned by another user
-            (same shape — prevents session-existence probing, mirrors CR-02).
-        HTTPException: 422 if no tool invocation has been recorded yet for the session
+        HTTPException: 404 if conversation doesn't exist or is owned by another user
+            (same shape — prevents conversation-existence probing, mirrors CR-02).
+        HTTPException: 422 if no tool invocation has been recorded yet for the conversation
             (requires at least one prior chat turn that triggered a tool call).
     """
     # CR-02 ownership check — same shape as POST /api/chat: 404 on missing-or-not-owner.
-    # A non-owner receives the same 404 as a missing session to avoid leaking session
-    # existence via status code differences (horizontal privilege escalation, T-04.7-04).
-    metadata = chat_service._metadata.get(request.session_id)
+    # A non-owner receives the same 404 as a missing conversation to avoid leaking
+    # conversation existence via status code differences (horizontal privilege escalation, T-04.7-04).
+    metadata = chat_service._metadata.get(request.conversation_id)
     if metadata is None or metadata.get("user_id") != current_user.username:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session {request.session_id} not found",
+            detail=f"Conversation {request.conversation_id} not found",
         )
 
-    # 422 when no tool invocation has been recorded for the session (D-07).
+    # 422 when no tool invocation has been recorded for the conversation (D-07).
     # Surfaces as Unprocessable Entity so the frontend can distinguish "no prior
-    # tool call" (user error) from "missing session" (404 ownership failure).
+    # tool call" (user error) from "missing conversation" (404 ownership failure).
     last_inv = metadata.get("last_tool_invocation")
     if last_inv is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="No retryable tool invocation found for this session.",
+            detail="No retryable tool invocation found for this conversation.",
         )
 
     # D-09: re-stream the full LLM turn. The agent already has the prior
     # conversation in its history (Plan 01 persists user turns upfront), so a
     # short directive triggers the same tool-calling loop that produced the
-    # original invocation. The session's bound provider and tool set are
+    # original invocation. The conversation's bound provider and tool set are
     # unchanged — only the prompt changes.
     replay_message = f"Please retry the previous {last_inv['tool_name']} call."
 
@@ -225,7 +227,7 @@ async def retry_tool_call(
         try:
             async for event in chat_service.chat_stream(
                 message=replay_message,
-                session_id=request.session_id,
+                conversation_id=request.conversation_id,
                 persist_user_message=False,
             ):
                 # See note on the corresponding line in chat_stream above —
@@ -234,15 +236,15 @@ async def retry_tool_call(
                 yield f"data: {event.model_dump_json()}\n\n"  # type: ignore[attr-defined]
 
         except ValueError:
-            # Defensive: narrow race where the session is deleted between the
+            # Defensive: narrow race where the conversation is deleted between the
             # ownership check above and chat_stream's first history read.
             error_event = ErrorEvent(
                 error_code=ErrorCode.session_error,
-                message="Session not found or expired.",
+                message="Conversation not found or expired.",
                 retryable=False,
                 tool_name=None,
                 raw_detail=None,
-                session_id=request.session_id,
+                conversation_id=request.conversation_id,
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
 
@@ -250,14 +252,14 @@ async def retry_tool_call(
             # CR-05: same static-message guarantee as POST /api/chat — no
             # exception text leaks over the SSE wire. The ApiKeyScrubber
             # redacts key-shaped substrings before the server-side log formats.
-            logger.exception("retry_tool_call stream failed for session %s", request.session_id)
+            logger.exception("retry_tool_call stream failed for conversation %s", request.conversation_id)
             error_event = ErrorEvent(
                 error_code=ErrorCode.stream_error,
                 message="Sorry, something went wrong. Please try again.",
                 retryable=False,
                 tool_name=None,
                 raw_detail=None,
-                session_id=request.session_id,
+                conversation_id=request.conversation_id,
             )
             yield f"data: {error_event.model_dump_json()}\n\n"
 
@@ -304,16 +306,17 @@ def _resolve_allowed_cloud_models(
     return list(models) if isinstance(models, list) else None
 
 
-@router.post("/api/chat/session", status_code=status.HTTP_201_CREATED)
-async def create_session(
+@router.post("/api/chat/conversation", status_code=status.HTTP_201_CREATED)
+async def create_conversation(
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-    request: SessionCreateRequest | None = None,
+    request: ConversationCreateRequest | None = None,
 ) -> dict[str, str]:
-    """Create a new chat session with optional provider/model selection.
+    """Create a new chat conversation with optional provider/model selection.
 
-    Generates a new session ID and initializes chat history for that session.
-    Optionally accepts provider, model, base_url, and api_key fields per D-24.
+    Generates a new conversation ID and initializes chat history for that
+    conversation. Optionally accepts a nested ``target`` (provider/model) and
+    ``credentials`` (base_url/api_key) per REQ-p5-session-create-request-split.
     The provider's ``validate_config`` runs inline inside
     :meth:`ChatService.create_session`; on probe failure the structured
     :class:`app.llm.errors.ProbeError` surfaces as 502 (provider_unreachable)
@@ -323,53 +326,49 @@ async def create_session(
     ``lmstudio``) we DO NOT enforce a route-level model whitelist — the
     per-provider probe owns that decision and surfaces a structured
     ``MODEL_NOT_INSTALLED`` ProbeError when the daemon doesn't have the
-    requested model. The previous behaviour rejected legitimate
-    daemon-installed models (e.g. ``qwen3.5:9b``) that weren't in the
-    curated frozen list. Cloud providers (``openai``, ``anthropic``) still
-    use the curated list since they have no live probe today.
+    requested model. Cloud providers (``openai``, ``anthropic``) still use
+    the curated list since they have no live probe today.
 
     Args:
-        request: Session creation request with optional provider/model/base_url/api_key.
+        request: Conversation creation request with optional target + credentials.
         chat_service: Injected ChatService instance.
 
     Returns:
-        Dictionary with ``session_id``, ``provider``, and ``model`` fields.
+        Dictionary with ``conversation_id``, ``provider``, and ``model`` fields.
     """
-    if request is None:
-        request = SessionCreateRequest()
+    target = request.target if request is not None else ConversationTarget()
+    credentials = request.credentials if request is not None else None
 
     # Defense-in-depth: validate provider name at the route boundary; the
     # model existence check is delegated to the per-provider probe for local
     # providers (see docstring + _resolve_allowed_cloud_models).
-    if request.provider:
+    if target.provider:
         providers = settings.get_available_providers()
-        if request.provider not in providers:
+        if target.provider not in providers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid provider: {request.provider}. Available: {list(providers.keys())}",
+                detail=f"Invalid provider: {target.provider}. Available: {list(providers.keys())}",
             )
 
-        if request.model:
-            allowed_models = _resolve_allowed_cloud_models(provider=request.provider, curated=providers)
-            if allowed_models is not None and request.model not in allowed_models:
+        if target.model:
+            allowed_models = _resolve_allowed_cloud_models(provider=target.provider, curated=providers)
+            if allowed_models is not None and target.model not in allowed_models:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid model {request.model} for provider {request.provider}",
+                    detail=f"Invalid model {target.model} for provider {target.provider}",
                 )
 
     # Default fallbacks live here (moved out of ChatService — SessionLLMConfig
-    # requires non-None provider/model). NOTE: a follow-up phase wires
-    # GET /api/providers to the dynamic /api/tags discovery cache; for now
-    # settings.get_available_providers() above still returns the curated frozen
-    # list for Ollama.
+    # requires non-None provider/model). Build the internal SessionLLMConfig
+    # from the split DTO; the LLM-factory contract is unchanged.
     config = SessionLLMConfig(
-        provider=request.provider or settings.default_provider,
-        model=request.model or settings.default_model,
-        base_url=request.base_url,
-        api_key=request.api_key,
+        provider=target.provider or settings.default_provider,
+        model=target.model or settings.default_model,
+        base_url=credentials.base_url if credentials is not None else None,
+        api_key=credentials.api_key if credentials is not None else None,
     )
 
-    session_id, probe_error = await chat_service.create_session(config, user_id=current_user.username)
+    conversation_id, probe_error = await chat_service.create_session(config, user_id=current_user.username)
     if probe_error is not None:
         # Network-level reachability failures map to 502 Bad Gateway; everything
         # else (model not installed, missing API key) is the user's misconfig
@@ -381,50 +380,50 @@ async def create_session(
         )
         raise HTTPException(status_code=probe_status, detail=probe_error.model_dump())
 
-    metadata = chat_service._metadata[session_id]
+    metadata = chat_service._metadata[conversation_id]
     return {
-        "session_id": session_id,
+        "conversation_id": conversation_id,
         "provider": metadata["provider"],
         "model": metadata["model"],
     }
 
 
-@router.delete("/api/chat/session/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_session(
-    session_id: str,
+@router.delete("/api/chat/conversation/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: str,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> None:
-    """Delete a chat session.
+    """Delete a chat conversation.
 
-    Removes the session and its chat history from memory. Authentication is
-    required (CR-01) and the session must belong to ``current_user`` — a
-    non-owner gets the same 404 as a missing session to avoid leaking
-    session existence (mirror of the per-user partition pattern from
-    ``GET /api/chat/sessions``).
+    Removes the conversation and its chat history from memory. Authentication is
+    required (CR-01) and the conversation must belong to ``current_user`` — a
+    non-owner gets the same 404 as a missing conversation to avoid leaking
+    conversation existence (mirror of the per-user partition pattern from
+    ``GET /api/chat/conversations``).
 
     Args:
-        session_id: Session ID to delete
+        conversation_id: Conversation ID to delete
         chat_service: Injected ChatService instance
-        current_user: Authenticated caller; must own the session.
+        current_user: Authenticated caller; must own the conversation.
 
     Raises:
-        HTTPException: If session doesn't exist or is owned by another user
+        HTTPException: If conversation doesn't exist or is owned by another user
             (both surface as 404).
     """
-    metadata = chat_service._metadata.get(session_id)
+    metadata = chat_service._metadata.get(conversation_id)
     if metadata is None or metadata.get("user_id") != current_user.username:
         # Same 404 shape on missing-vs-not-owner so a non-owner cannot
-        # probe for session existence by status code.
+        # probe for conversation existence by status code.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session {session_id} not found",
+            detail=f"Conversation {conversation_id} not found",
         )
 
     # Phase 5 / Plan 05-04: ``_histories`` + ``_bound_providers`` retired in
-    # favour of ``_agents`` + the ``ConversationStore`` seam. ``delete_session``
-    # awaits the store and prunes the per-session dicts.
-    await chat_service.delete_session(session_id)
+    # favour of ``_agents`` + the ``ConversationStore`` seam. ``delete_conversation``
+    # awaits the store and prunes the per-conversation dicts.
+    await chat_service.delete_conversation(conversation_id)
 
 
 @router.get("/health")
@@ -441,7 +440,7 @@ async def health_check() -> dict[str, str]:
 
 
 # (Plan 04.5-06b — _LOCAL_PROVIDER_NAMES is now declared above the
-# _resolve_allowed_models helper so the create_session route can reach it.)
+# _resolve_allowed_models helper so the create_conversation route can reach it.)
 
 
 @router.get("/api/providers")
@@ -449,7 +448,7 @@ async def get_providers(
     request: Request,
     _current_user: Annotated[User, Depends(get_current_active_user)],
     factory: Annotated[LLMProviderFactory, Depends(get_llm_factory)],
-) -> dict[str, ProviderInfo]:
+) -> dict[str, ProviderInfoResponse]:
     """Get available LLM providers and their models (D-25).
 
     Local providers (``ollama``, ``lmstudio``) read their model list from the
@@ -460,9 +459,12 @@ async def get_providers(
     model list from :meth:`Settings.get_available_providers` — we don't probe
     cloud APIs here (would burn quota on every settings page load).
 
-    Every entry now carries ``base_url``: populated from
-    ``Settings.{provider}_base_url`` for local providers; ``None`` for cloud.
-    Frontend consumers that ignore ``base_url`` continue to work — additive change.
+    Plan 06-05a (REQ-p5-provider-info-split) introduces a discriminated
+    response: local entries are :class:`LocalProviderInfo` (``base_url`` is
+    always present); cloud entries are :class:`CloudProviderInfo`
+    (``api_key_configured: bool`` only — D-09 lock). The
+    :data:`ProviderInfoResponse` alias drives Pydantic's discriminated-union
+    serialization off the ``type`` field.
 
     The endpoint stays auth-protected via ``Depends(get_current_active_user)``.
     """
@@ -483,26 +485,27 @@ async def get_providers(
     # Cloud providers — curated lists from Settings, no live probe.
     curated = settings.get_available_providers()
 
-    result: dict[str, ProviderInfo] = {}
+    result: dict[str, ProviderInfoResponse] = {}
     # Local providers: models from discovery cache, base_url from Settings.
-    result["ollama"] = ProviderInfo(
+    result["ollama"] = LocalProviderInfo(
         available=bool(cache.get("ollama", [])),
         models=cache.get("ollama", []),
         base_url=settings.ollama_base_url,
     )
-    result["lmstudio"] = ProviderInfo(
+    result["lmstudio"] = LocalProviderInfo(
         available=bool(cache.get("lmstudio", [])),
         models=cache.get("lmstudio", []),
         base_url=settings.lmstudio_base_url,
     )
-    # Cloud providers: curated static list, base_url=None.
+    # Cloud providers: curated static list; api_key_configured derived from
+    # Settings.{provider}_api_key (D-09 — bare api_key never crosses the wire).
     for name in ("openai", "anthropic"):
         entry = curated[name]
         models_field = entry["models"]
-        result[name] = ProviderInfo(
+        result[name] = CloudProviderInfo(
             available=bool(entry["available"]),
             models=list(models_field) if isinstance(models_field, list) else [],
-            base_url=None,
+            api_key_configured=bool(getattr(settings, f"{name}_api_key", None)),
         )
     return result
 
@@ -557,40 +560,41 @@ async def refresh_providers(
     return ProviderRefreshResponse(providers=entries)
 
 
-@router.get("/api/chat/sessions", response_model=ChatSessionsListResponse)
-async def list_chat_sessions(
+@router.get("/api/chat/conversations", response_model=ChatConversationsListResponse)
+async def list_conversations(
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> ChatSessionsListResponse:
-    """List the authenticated user's active sessions (D-22, D-27).
+) -> ChatConversationsListResponse:
+    """List the authenticated user's active conversations (D-22, D-27).
 
-    Per RESEARCH.md Open Question 5 (RESOLVED): sessions are partitioned by
-    ``_metadata[session_id]['user_id']``. A user can only see their own sessions.
+    Per RESEARCH.md Open Question 5 (RESOLVED): conversations are partitioned by
+    ``_metadata[conversation_id]['user_id']``. A user can only see their own
+    conversations.
     """
-    sessions = await chat_service.list_sessions_for_user(current_user.username)
-    return ChatSessionsListResponse(sessions=sessions)
+    conversations = await chat_service.list_conversations_for_user(current_user.username)
+    return ChatConversationsListResponse(conversations=conversations)
 
 
 @router.get(
-    "/api/chat/sessions/{session_id}",
-    response_model=ChatSessionHistoryResponse,
+    "/api/chat/conversations/{conversation_id}",
+    response_model=ChatConversationHistoryResponse,
 )
-async def get_chat_session_history(
-    session_id: str,
+async def get_chat_conversation_history(
+    conversation_id: str,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-) -> ChatSessionHistoryResponse:
-    """Return the message history for a session the authenticated user owns.
+) -> ChatConversationHistoryResponse:
+    """Return the message history for a conversation the authenticated user owns.
 
     Used by the Sidebar's "RECENT CHATS" list — clicking a row navigates to
-    ``/app?session=<id>`` and the frontend hits this endpoint to seed the
-    chat with the prior turns plus the provider/model the session was bound
-    to. Both "missing session" and "not your session" collapse to ``404``
-    (same shape as missing) so existence isn't leaked across users — same
-    pattern as ``DELETE /api/chat/session/{id}`` and the per-user partition
-    on ``GET /api/chat/sessions``.
+    ``/app?conversation=<id>`` and the frontend hits this endpoint to seed the
+    chat with the prior turns plus the provider/model the conversation was bound
+    to. Both "missing conversation" and "not your conversation" collapse to
+    ``404`` (same shape as missing) so existence isn't leaked across users —
+    same pattern as ``DELETE /api/chat/conversation/{id}`` and the per-user
+    partition on ``GET /api/chat/conversations``.
     """
-    history = await chat_service.get_history_for_user(session_id, user_id=current_user.username)
+    history = await chat_service.get_history_for_user(conversation_id, user_id=current_user.username)
     if history is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return history

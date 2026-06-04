@@ -23,9 +23,9 @@ from tests.fixtures.llm import (
 async def test_greeting() -> None:
     """``greeting`` scenario emits content events only (no tool calls)."""
     service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    events = [e async for e in service.chat_stream("Hello", session_id)]
+    events = [e async for e in service.chat_stream("Hello", conversation_id)]
     types = [e.type for e in events]
 
     assert "content" in types
@@ -36,9 +36,9 @@ async def test_greeting() -> None:
 async def test_single_tool_call() -> None:
     """``single_tool_call`` scenario emits tool_call → tool_result → content."""
     service = make_chat_service_with_mock_llm(MockLLMStream.single_tool_call())
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    events = [e async for e in service.chat_stream("Find flights LAX to JFK", session_id)]
+    events = [e async for e in service.chat_stream("Find flights LAX to JFK", conversation_id)]
     types = [e.type for e in events]
 
     assert "tool_call" in types
@@ -69,9 +69,9 @@ async def test_single_tool_call() -> None:
 async def test_multi_turn() -> None:
     """``multi_turn`` scenario emits content events; assistant references prior turn."""
     service = make_chat_service_with_mock_llm(MockLLMStream.multi_turn())
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    events = [e async for e in service.chat_stream("Show me alternatives", session_id)]
+    events = [e async for e in service.chat_stream("Show me alternatives", conversation_id)]
     types = [e.type for e in events]
 
     assert "content" in types

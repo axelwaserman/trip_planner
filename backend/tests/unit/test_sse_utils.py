@@ -10,8 +10,8 @@ from tests.utils.sse import parse_sse_events
 
 # Minimal valid StreamEvent payload for tests.
 _SESSION_ID = "s1"
-_CONTENT_EVENT = f'{{"chunk":"hi","session_id":"{_SESSION_ID}","type":"content"}}'
-_TOOL_CALL_EVENT = f'{{"tool_name":"search_flights","tool_args":{{}},"session_id":"{_SESSION_ID}","type":"tool_call"}}'
+_CONTENT_EVENT = f'{{"chunk":"hi","conversation_id":"{_SESSION_ID}","type":"content"}}'
+_TOOL_CALL_EVENT = f'{{"tool_name":"search_flights","tool_args":{{}},"conversation_id":"{_SESSION_ID}","type":"tool_call"}}'
 
 
 def test_parse_single_data_event_from_str() -> None:
@@ -25,7 +25,7 @@ def test_parse_single_data_event_from_str() -> None:
     # Assert
     assert len(events) == 1
     assert events[0].type == "content"
-    assert events[0].session_id == _SESSION_ID
+    assert events[0].conversation_id == _SESSION_ID
 
 
 def test_parse_multiple_data_events_from_str() -> None:
@@ -120,7 +120,7 @@ def test_parse_malformed_json_raises_jsondecodeerror() -> None:
 def test_parse_pydantic_validation_error_propagates() -> None:
     """A data: line with valid JSON but invalid StreamEvent fields raises ValidationError."""
     # Arrange — "INVALID_TYPE" is not in any discriminated union member's type literal
-    text = f'data: {{"type": "INVALID_TYPE", "session_id": "{_SESSION_ID}"}}\n'
+    text = f'data: {{"type": "INVALID_TYPE", "conversation_id": "{_SESSION_ID}"}}\n'
 
     # Act / Assert
     with pytest.raises(ValidationError):

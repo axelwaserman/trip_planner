@@ -32,7 +32,7 @@ Usage:
     )
 
     service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
-    session_id, _ = await service.create_session(default_session_config(), user_id="t")
+    conversation_id, _ = await service.create_session(default_session_config(), user_id="t")
 """
 
 from __future__ import annotations

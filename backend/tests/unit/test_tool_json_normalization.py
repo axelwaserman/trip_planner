@@ -360,7 +360,7 @@ async def test_search_flights_returns_json_envelope_string() -> None:
     # Arrange — build a RunContext with ChatDeps that carries the mock client.
     deps = ChatDeps(
         flight_client=MockFlightAPIClient(seed=42),
-        session_id="test-session",
+        conversation_id="test-session",
         user_id="test-user",
     )
     ctx: RunContext[ChatDeps] = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
