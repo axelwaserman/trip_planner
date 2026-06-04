@@ -192,3 +192,87 @@ def test_get_providers_requires_auth(client: TestClient) -> None:
     """GET /api/providers without a Bearer token returns 401."""
     response = client.get("/api/providers")
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 / Plan 06-05a Task 4 — discriminated-shape locks (REQ-p5-provider-info-split)
+# ---------------------------------------------------------------------------
+
+
+def test_get_providers_returns_local_and_cloud_discriminated_shapes(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    """The post-split response uses LocalProviderInfo / CloudProviderInfo per entry.
+
+    Local providers (``ollama``/``lmstudio``) carry ``type=local`` + ``base_url``;
+    cloud providers (``openai``/``anthropic``) carry ``type=cloud`` +
+    ``api_key_configured: bool``. The bare ``api_key`` is NEVER on the wire
+    (D-09 lock from Phase 5).
+    """
+    # Pre-populate cache so the lazy refresh doesn't kick in.
+    import time as time_module
+
+    now = time_module.time()
+    client.app.state.provider_models_cache.clear()
+    client.app.state.provider_models_cache_timestamps.clear()
+    client.app.state.provider_models_cache["ollama"] = ["qwen3:4b"]
+    client.app.state.provider_models_cache_timestamps["ollama"] = now
+    client.app.state.provider_models_cache["lmstudio"] = []
+    client.app.state.provider_models_cache_timestamps["lmstudio"] = now
+
+    response = client.get("/api/providers", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+
+    # Local entry: type=local, non-empty base_url.
+    assert body["ollama"]["type"] == "local"
+    assert isinstance(body["ollama"]["base_url"], str)
+    assert body["ollama"]["base_url"] == settings.ollama_base_url
+
+    # Cloud entry: type=cloud, api_key_configured: bool, NO api_key field.
+    assert body["openai"]["type"] == "cloud"
+    assert isinstance(body["openai"]["api_key_configured"], bool)
+    assert "api_key" not in body["openai"], "D-09 lock — bare api_key must NEVER cross the wire"
+
+
+def test_get_providers_local_entries_carry_base_url_field_only(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    """Local entries serialise with exactly ``{type, available, models, base_url}``."""
+    import time as time_module
+
+    now = time_module.time()
+    client.app.state.provider_models_cache.clear()
+    client.app.state.provider_models_cache_timestamps.clear()
+    client.app.state.provider_models_cache["ollama"] = ["qwen3:4b"]
+    client.app.state.provider_models_cache_timestamps["ollama"] = now
+    client.app.state.provider_models_cache["lmstudio"] = []
+    client.app.state.provider_models_cache_timestamps["lmstudio"] = now
+
+    response = client.get("/api/providers", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body["lmstudio"].keys()) == {"type", "available", "models", "base_url"}
+
+
+def test_get_providers_cloud_entries_carry_api_key_configured_field_only(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    """Cloud entries serialise with exactly ``{type, available, models, api_key_configured}``."""
+    import time as time_module
+
+    now = time_module.time()
+    client.app.state.provider_models_cache.clear()
+    client.app.state.provider_models_cache_timestamps.clear()
+    client.app.state.provider_models_cache["ollama"] = ["qwen3:4b"]
+    client.app.state.provider_models_cache_timestamps["ollama"] = now
+    client.app.state.provider_models_cache["lmstudio"] = []
+    client.app.state.provider_models_cache_timestamps["lmstudio"] = now
+
+    response = client.get("/api/providers", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body["anthropic"].keys()) == {"type", "available", "models", "api_key_configured"}
