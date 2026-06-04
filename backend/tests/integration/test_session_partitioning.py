@@ -19,17 +19,20 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(autouse=True)
 def two_users(client: TestClient) -> Generator[None]:
-    """Seed alice + bob into the running EnvUserRepository for each test."""
-    from pwdlib import PasswordHash
-    from pwdlib.hashers.argon2 import Argon2Hasher
+    """Seed alice + bob into the in-memory test user repo for each test.
 
+    Phase 6 / Plan 06-04 (D-07): cross-user behaviour assertions still hit
+    the in-memory FastAPI ``TestClient`` route layer; the conftest's autouse
+    ``_inmemory_user_repo`` fixture installs an
+    :class:`InMemoryUserRepository` on ``app.state.user_repo`` for this.
+    """
     from app.auth.models import UserInDB
-    from app.auth.repository import EnvUserRepository  # noqa: TC001
+    from app.auth.repository import _password_hasher
+    from tests.fixtures.users import InMemoryUserRepository
 
-    hasher = PasswordHash([Argon2Hasher()])
-    user_repo: EnvUserRepository = client.app.state.user_repo
-    user_repo.add_user(UserInDB(username="alice", hashed_password=hasher.hash("alicepass"), disabled=False))
-    user_repo.add_user(UserInDB(username="bob", hashed_password=hasher.hash("bobpass"), disabled=False))
+    user_repo: InMemoryUserRepository = client.app.state.user_repo
+    user_repo.add_user(UserInDB(username="alice", hashed_password=_password_hasher.hash("alicepass"), disabled=False))
+    user_repo.add_user(UserInDB(username="bob", hashed_password=_password_hasher.hash("bobpass"), disabled=False))
     yield
     user_repo.remove_user("alice")
     user_repo.remove_user("bob")

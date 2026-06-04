@@ -179,9 +179,8 @@ class InMemoryMessageStore(MessageStore):
     State lives in a single private dict ``_store: dict[UUID,
     list[ModelMessage]]``. Round-trip via ``append`` then ``load`` returns a
     defensive copy of the stored list so callers cannot mutate the store's
-    internal state — same invariant as
-    :class:`app.auth.repository.EnvUserRepository.get_user`'s ``UserInDB``
-    returns.
+    internal state — same invariant as the canonical
+    :class:`app.auth.repository.UserRepository` ABC's ``UserInDB`` returns.
 
     Unlike the legacy :class:`InMemoryConversationStore`, this impl does NOT
     track a ``user_id → conversation_id`` index; that responsibility now

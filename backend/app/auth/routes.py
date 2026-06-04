@@ -86,7 +86,7 @@ async def get_current_user(
         raise credentials_exception from None
 
     try:
-        user_in_db = repo.get_user(username)
+        user_in_db = await repo.get_user(username)
     except UserNotFoundError:
         raise credentials_exception from None
     return user_in_db
@@ -128,7 +128,7 @@ async def login(
         HTTPException 400: Credentials are incorrect.
     """
     try:
-        user = repo.get_user(form_data.username)
+        user = await repo.get_user(form_data.username)
     except UserNotFoundError:
         # Run a dummy verify to equalise timing — prevents username enumeration.
         repo.verify_password(form_data.password, _DUMMY_HASH)

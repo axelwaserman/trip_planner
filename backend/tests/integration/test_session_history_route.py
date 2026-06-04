@@ -34,17 +34,14 @@ def client() -> Generator[TestClient]:
 
 @pytest.fixture
 def two_users(client: TestClient) -> Generator[None]:
-    """Seed alice + bob into the running EnvUserRepository."""
-    from pwdlib import PasswordHash
-    from pwdlib.hashers.argon2 import Argon2Hasher
-
+    """Seed alice + bob into the in-memory test user repo (Plan 06-04)."""
     from app.auth.models import UserInDB
-    from app.auth.repository import EnvUserRepository  # noqa: TC001
+    from app.auth.repository import _password_hasher
+    from tests.fixtures.users import InMemoryUserRepository
 
-    hasher = PasswordHash([Argon2Hasher()])
-    user_repo: EnvUserRepository = client.app.state.user_repo
-    user_repo.add_user(UserInDB(username="alice", hashed_password=hasher.hash("alicepass"), disabled=False))
-    user_repo.add_user(UserInDB(username="bob", hashed_password=hasher.hash("bobpass"), disabled=False))
+    user_repo: InMemoryUserRepository = client.app.state.user_repo
+    user_repo.add_user(UserInDB(username="alice", hashed_password=_password_hasher.hash("alicepass"), disabled=False))
+    user_repo.add_user(UserInDB(username="bob", hashed_password=_password_hasher.hash("bobpass"), disabled=False))
     yield
     user_repo.remove_user("alice")
     user_repo.remove_user("bob")

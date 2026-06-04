@@ -9,7 +9,7 @@ models  # noqa: F401`` to expose the full schema to ``alembic --autogenerate``
 
 Schema (D-02 verbatim, Phase 6 CONTEXT.md):
 
-* ``user`` — auth principal; replaces the Phase 5 ``EnvUserRepository`` env-driven map (Plan 06-04).
+* ``user`` — auth principal; replaces the Phase 5 env-backed user map (Plan 06-04).
 * ``conversation`` — chat conversation metadata; ``user_id`` FK with
   ``ON DELETE CASCADE`` enforces ownership cleanup at the storage layer
   (V4 Access Control, threat T-06-02-01).
@@ -42,9 +42,9 @@ from sqlmodel import Field, SQLModel
 class User(SQLModel, table=True):
     """Auth principal row.
 
-    Replaces the Phase 5 ``EnvUserRepository`` env-driven map (Plan 06-04
-    deletes that path). ``hashed_password`` stores a pwdlib argon2 hash
-    produced at seed time (Plan 06-06); plaintext is never persisted.
+    Replaces the Phase 5 env-backed user map (Plan 06-04 deletes that
+    path). ``hashed_password`` stores a pwdlib argon2 hash produced at seed
+    time (Plan 06-06); plaintext is never persisted.
     """
 
     __tablename__ = "user"

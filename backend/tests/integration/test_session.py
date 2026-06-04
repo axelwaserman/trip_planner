@@ -16,17 +16,19 @@ def client() -> TestClient:
 
 @pytest.fixture
 def two_users(client: TestClient) -> Generator[None]:
-    """Seed alice + bob into the running EnvUserRepository for cross-user tests."""
-    from pwdlib import PasswordHash
-    from pwdlib.hashers.argon2 import Argon2Hasher
+    """Seed alice + bob into the in-memory test user repo for cross-user tests.
 
+    Phase 6 / Plan 06-04 (D-07): the autouse ``_inmemory_user_repo`` conftest
+    fixture installs an :class:`InMemoryUserRepository` on
+    ``app.state.user_repo``; this fixture borrows it to seed alice/bob.
+    """
     from app.auth.models import UserInDB
-    from app.auth.repository import EnvUserRepository  # noqa: TC001
+    from app.auth.repository import _password_hasher
+    from tests.fixtures.users import InMemoryUserRepository
 
-    hasher = PasswordHash([Argon2Hasher()])
-    user_repo: EnvUserRepository = client.app.state.user_repo
-    user_repo.add_user(UserInDB(username="alice", hashed_password=hasher.hash("alicepass"), disabled=False))
-    user_repo.add_user(UserInDB(username="bob", hashed_password=hasher.hash("bobpass"), disabled=False))
+    user_repo: InMemoryUserRepository = client.app.state.user_repo
+    user_repo.add_user(UserInDB(username="alice", hashed_password=_password_hasher.hash("alicepass"), disabled=False))
+    user_repo.add_user(UserInDB(username="bob", hashed_password=_password_hasher.hash("bobpass"), disabled=False))
     yield
     user_repo.remove_user("alice")
     user_repo.remove_user("bob")
