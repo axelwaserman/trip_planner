@@ -350,7 +350,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 06-03-PLAN.md — Storage ABCs: MessageStore + ConversationRepository (InMemory + Postgres)
+- [x] 06-03-PLAN.md — Storage ABCs: MessageStore + ConversationRepository (InMemory + Postgres)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -410,7 +410,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.8. Validators + Test Hygiene + Orphan Cleanup | v1 | 2/2 | Complete   | 2026-05-19 |
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
-| 6. Postgres + Redis + docker-compose | v1.5 | 2/7 | In Progress|  |
+| 6. Postgres + Redis + docker-compose | v1.5 | 3/7 | In Progress|  |
 | 7. Real Flight API | v2 | 0 / TBD | Not started | - |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
