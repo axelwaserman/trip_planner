@@ -1,0 +1,16 @@
+# Copy to seed.toml; replace passwords; run `just db-seed`. Phase 6 — REQ-p5-db-seed.
+#
+# The real `seed.toml` is gitignored (.gitignore line `backend/seed.toml`); only
+# this `.example` placeholder is committed. The seed script (`scripts/seed.py`)
+# argon2-hashes each password before INSERT, so plaintext never touches the DB.
+# `<change-me>` is a literal placeholder — replace it before invoking the seed.
+
+[[users]]
+username = "admin"
+password = "<change-me>"
+disabled = false
+
+[[users]]
+username = "demo"
+password = "<change-me>"
+disabled = false
