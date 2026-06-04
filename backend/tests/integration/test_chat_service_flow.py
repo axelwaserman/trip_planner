@@ -12,6 +12,7 @@ AIMessages").
 """
 
 from collections.abc import Generator
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -72,7 +73,7 @@ async def test_chat_stream_emits_tool_events_for_flight_query() -> None:
     assert parsed.query.origin == "LAX"
 
     # History assertions: the ConversationStore returns PydanticAI's ModelMessage list.
-    msgs = await service._conversation_store.load(session_id)
+    msgs = await service._message_store.load(UUID(session_id))
     assert any(
         isinstance(m, ModelRequest)
         and any(isinstance(p, UserPromptPart) and p.content == "Find flights LAX to JFK" for p in m.parts)
@@ -113,7 +114,7 @@ async def test_chat_stream_retains_history_across_turns() -> None:
     _ = [e async for e in service.chat_stream("Hello", session_id)]
     _ = [e async for e in service.chat_stream("Show me alternatives", session_id)]
 
-    msgs = await service._conversation_store.load(session_id)
+    msgs = await service._message_store.load(UUID(session_id))
 
     user_prompts = [p for m in msgs if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, UserPromptPart)]
     assistant_texts = [p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)]

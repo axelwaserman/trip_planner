@@ -1,18 +1,16 @@
 """Unit tests for ChatService.chat_stream() with the FunctionModel-backed mock.
 
-Phase 5 / Plan 05-04 (Wave 3): the LangChain-shape tests that patched
-``search_flights.ainvoke`` to inject errors retire here. The Phase 4.7
-contract — ``ErrorEvent.error_code`` taxonomy + ``raw_detail`` scrubbing —
-is preserved by the rewritten ``ChatService.chat_stream`` exception handler;
-the new tests trigger errors via the ``FunctionModel.stream_function``
-substrate (the ``streams: Callable[[], None]`` widening on
-``make_chat_service_with_mock_llm``) instead of patching the tool surface.
+Phase 6 / Plan 06-04: history assertions migrate from
+``service._conversation_store.load(session_id)`` to
+``service._message_store.load(UUID(session_id))`` after the D-05/D-06 split.
 
-Greeting/content scenarios continue to drive the fixture's ``MockLLMStream``
-classmethods unchanged. History assertions migrate from
-``service.get_session_history(session_id).messages`` to
-``await service._conversation_store.load(session_id)``.
+Phase 5 / Plan 05-04 (Wave 3): the LangChain-shape tests that patched
+``search_flights.ainvoke`` to inject errors retired in favour of the
+``FunctionModel.stream_function`` substrate (the ``streams: Callable[[], None]``
+widening on ``make_chat_service_with_mock_llm``).
 """
+
+from uuid import UUID
 
 import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
@@ -38,7 +36,7 @@ async def test_chat_stream_emits_content_events_for_greeting() -> None:
     assert len(non_content_events) == 0
 
     # History: one ModelRequest (with UserPromptPart) and one ModelResponse (with TextPart).
-    msgs = await service._conversation_store.load(session_id)
+    msgs = await service._message_store.load(UUID(session_id))
     user_msgs = [p for m in msgs if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, UserPromptPart)]
     assistant_msgs = [p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)]
     assert len(user_msgs) == 1

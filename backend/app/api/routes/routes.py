@@ -548,7 +548,7 @@ async def list_chat_sessions(
     Per RESEARCH.md Open Question 5 (RESOLVED): sessions are partitioned by
     ``_metadata[session_id]['user_id']``. A user can only see their own sessions.
     """
-    sessions = chat_service.list_sessions_for_user(current_user.username)
+    sessions = await chat_service.list_sessions_for_user(current_user.username)
     return ChatSessionsListResponse(sessions=sessions)
 
 
@@ -571,7 +571,7 @@ async def get_chat_session_history(
     pattern as ``DELETE /api/chat/session/{id}`` and the per-user partition
     on ``GET /api/chat/sessions``.
     """
-    history = chat_service.get_history_for_user(session_id, user_id=current_user.username)
+    history = await chat_service.get_history_for_user(session_id, user_id=current_user.username)
     if history is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return history

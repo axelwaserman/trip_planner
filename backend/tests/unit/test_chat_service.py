@@ -1,13 +1,13 @@
-"""Unit tests for ChatService session lifecycle (Phase 5 / Plan 05-04 rewrite).
+"""Unit tests for ChatService session lifecycle (Phase 6 / Plan 06-04 rewire).
 
-Phase 5 / Plan 05-04 (Wave 3): the Phase 4.5 file mocked ``BoundProvider``
-and exercised the ``_bound_providers`` cache shape — both retired in this
-plan. The rewritten file pivots onto the per-session ``_agents`` dict and
-the ``ConversationStore`` seam, driving the rewritten
-``make_chat_service_with_mock_llm`` fixture.
+Phase 6 / Plan 06-04: the Phase 5 single ``ConversationStore`` collaborator
+split into ``MessageStore`` (events) + ``ConversationRepository`` (meta-CRUD).
+History assertions migrate from ``service._conversation_store.load(...)`` to
+``service._message_store.load(UUID(session_id))``.
 """
 
 import time
+from uuid import UUID
 
 import pytest
 from pydantic_ai import Agent
@@ -115,20 +115,20 @@ class TestAgentsLifecycle:
         assert session_id not in service._last_activity
 
 
-class TestConversationStorePersistence:
-    """Persistence assertions: messages flow into the ConversationStore on success."""
+class TestMessageStorePersistence:
+    """Persistence assertions: messages flow into the MessageStore on success."""
 
     async def test_user_message_persisted_after_stream(self) -> None:
         """A successful turn appends both user and assistant messages to the store."""
         service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
         session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-        msgs_before = await service._conversation_store.load(session_id)
+        msgs_before = await service._message_store.load(UUID(session_id))
         assert msgs_before == []
 
         _events = [e async for e in service.chat_stream("Plan a trip", session_id)]
 
-        msgs_after = await service._conversation_store.load(session_id)
+        msgs_after = await service._message_store.load(UUID(session_id))
         assert len(msgs_after) >= 2  # at minimum: ModelRequest + ModelResponse
 
     async def test_persist_user_message_false_skips_append(self) -> None:
@@ -138,7 +138,7 @@ class TestConversationStorePersistence:
 
         _events = [e async for e in service.chat_stream("synthetic retry", session_id, persist_user_message=False)]
 
-        msgs = await service._conversation_store.load(session_id)
+        msgs = await service._message_store.load(UUID(session_id))
         assert msgs == []
 
 

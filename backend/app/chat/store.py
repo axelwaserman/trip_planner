@@ -1,29 +1,25 @@
-"""Persistent chat conversation storage (D-05, D-08, D-11).
+"""Persistent chat message storage (D-05).
 
-Phase 6 / Plan 06-03 splits the Phase 5 :class:`ConversationStore` ABC into
-two narrower abstractions per CONTEXT.md D-05/D-06:
+Phase 6 / Plan 06-03 split the Phase 5 :class:`ConversationStore` ABC into
+two narrower abstractions per CONTEXT.md D-05/D-06; Phase 6 / Plan 06-04
+deleted the legacy :class:`ConversationStore` shim once :class:`ChatService`
+was rewired onto the split:
 
 * :class:`MessageStore` (this module) — append-only event log: the
   ``list[ModelMessage]`` round-trip used by :meth:`ChatService.chat_stream`,
-  plus :meth:`MessageStore.first_user_message_preview` so the
-  ``ChatService._first_message_preview`` `getattr(_store)` peek (CR-04 from
-  Phase 5 verification) can finally retire.
+  plus :meth:`MessageStore.first_user_message_preview` — the canonical CR-04
+  fix from Phase 5 verification.
 * :class:`app.chat.repository.ConversationRepository` (sibling module) —
   meta-CRUD: ``create`` / ``get`` / ``list_for_user`` / ``bump_last_activity``
   / ``delete``. Conversation metadata (provider/model/timestamps) lives in
   SQL on the ``conversation`` row, not on a Python ``_metadata`` dict.
 
-The Phase 5 :class:`ConversationStore` ABC and :class:`InMemoryConversationStore`
-are retained as a deprecated shim for the duration of this wave so the existing
-:class:`ChatService` keeps importing cleanly. Plan 06-04 deletes them once the
-service is rewired onto the new ABCs.
-
-Per D-09, the in-memory impls store only what the in-memory tests need; the
+Per D-09, the in-memory impl stores only what the in-memory tests need; the
 authoritative user-scoped index lives on
 :class:`app.chat.repository.PostgresConversationRepository`.
 
 Per CLAUDE.md "all I/O must be ``async def``", every method on every store
-is ``async def`` even though the in-memory impls never block — the ABC must
+is ``async def`` even though the in-memory impl never blocks — the ABC must
 match what the Postgres impl requires.
 """
 
@@ -51,10 +47,6 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
     from sqlmodel.ext.asyncio.session import AsyncSession
-
-    # ChatSessionInfo is annotation-only (return type of legacy ConversationStore.list_for_user);
-    # moving to TYPE_CHECKING avoids the runtime cycle through app.chat.__init__.
-    from app.chat.models import ChatSessionInfo
 
 
 # Truncation length for first_user_message_preview — kept module-level (not on
@@ -385,87 +377,3 @@ def _extract_first_user_prompt_preview(messages: list[ModelMessage]) -> str | No
     return None
 
 
-# ---------------------------------------------------------------------------
-# Legacy ConversationStore ABC + InMemoryConversationStore — DEPRECATED.
-# Plan 06-04 deletes these once ChatService is rewired to consume MessageStore
-# + ConversationRepository directly. Until then they keep the existing
-# ChatService importable so this wave does not break the build.
-# ---------------------------------------------------------------------------
-
-
-class ConversationStore(ABC):
-    """DEPRECATED: split into MessageStore (this file) + ConversationRepository (chat/repository.py); Plan 04 deletes after ChatService rewire.
-
-    Phase 5 contract retained verbatim so the existing :class:`ChatService`
-    keeps importing during this wave. New code MUST consume
-    :class:`MessageStore` + :class:`app.chat.repository.ConversationRepository`
-    instead.
-    """
-
-    @abstractmethod
-    async def append(self, session_id: str, messages: list[ModelMessage]) -> None:
-        """DEPRECATED: see :class:`MessageStore.append`.
-
-        Args:
-            session_id: Server-generated session UUID; used as the storage key.
-            messages: One or more ``ModelMessage`` instances to append.
-        """
-        ...
-
-    @abstractmethod
-    async def load(self, session_id: str) -> list[ModelMessage]:
-        """DEPRECATED: see :class:`MessageStore.load`.
-
-        Args:
-            session_id: Server-generated session UUID.
-
-        Returns:
-            A list of ``ModelMessage``; empty list when the session is unknown.
-        """
-        ...
-
-    @abstractmethod
-    async def delete(self, session_id: str) -> None:
-        """DEPRECATED: see :class:`MessageStore.delete`.
-
-        Args:
-            session_id: Server-generated session UUID.
-        """
-        ...
-
-    @abstractmethod
-    async def list_for_user(self, user_id: str) -> list[ChatSessionInfo]:
-        """DEPRECATED: see :class:`app.chat.repository.ConversationRepository.list_for_user`.
-
-        Args:
-            user_id: Authenticated username (the JWT ``sub`` claim).
-
-        Returns:
-            A list of :class:`ChatSessionInfo` entries (Phase 5 in-memory
-            impl always returned empty).
-        """
-        ...
-
-
-class InMemoryConversationStore(ConversationStore):
-    """DEPRECATED: split into InMemoryMessageStore + InMemoryConversationRepository; Plan 04 deletes after ChatService rewire."""
-
-    def __init__(self) -> None:
-        self._store: dict[str, list[ModelMessage]] = {}
-
-    async def append(self, session_id: str, messages: list[ModelMessage]) -> None:
-        """Append ``messages`` immutably (``existing + messages``)."""
-        existing = self._store.get(session_id, [])
-        self._store[session_id] = existing + messages
-
-    async def load(self, session_id: str) -> list[ModelMessage]:
-        """Return a defensive copy of the session's history (empty list when unknown)."""
-        return list(self._store.get(session_id, []))
-
-    async def delete(self, session_id: str) -> None:
-        """Drop the session entry. ``dict.pop(..., None)`` makes this a no-op for unknowns."""
-        self._store.pop(session_id, None)
-
-    async def list_for_user(self, user_id: str) -> list[ChatSessionInfo]:
-        """Phase 5 placeholder — always returns empty; ChatService composes from _metadata."""
-        return []

@@ -99,11 +99,13 @@ def test_get_history_returns_user_and_assistant_turns_in_order(
     session_id = session_response.json()["session_id"]
 
     chat_service = client.app.state.chat_service
-    # Phase 5 / Plan 05-04: seed PydanticAI's ModelRequest/ModelResponse parts
-    # directly via the InMemoryConversationStore's ``_store`` dict. The empty
-    # TextPart simulates a tool-call-only assistant turn; the route must
-    # filter it out (Phase 4.7 contract preserved).
-    chat_service._conversation_store._store[session_id] = [
+    # Phase 6 / Plan 06-04: seed PydanticAI's ModelRequest/ModelResponse parts
+    # directly via the InMemoryMessageStore's ``_store`` UUID-keyed dict. The
+    # empty TextPart simulates a tool-call-only assistant turn; the route
+    # must filter it out (Phase 4.7 contract preserved).
+    from uuid import UUID
+
+    chat_service._message_store._store[UUID(session_id)] = [
         ModelRequest(parts=[UserPromptPart(content="Plan a trip to Tokyo")]),
         ModelResponse(parts=[TextPart(content="Sure — what dates?")]),
         ModelRequest(parts=[UserPromptPart(content="June 1-7")]),
@@ -133,7 +135,9 @@ def test_get_history_returns_404_when_user_does_not_own_session(client: TestClie
     alice_session_id = session_response.json()["session_id"]
 
     chat_service = client.app.state.chat_service
-    chat_service._conversation_store._store[alice_session_id] = [
+    from uuid import UUID
+
+    chat_service._message_store._store[UUID(alice_session_id)] = [
         ModelRequest(parts=[UserPromptPart(content="alice's secret trip plan")]),
     ]
 

@@ -11,6 +11,7 @@ partition behaviour is identical; only the seeding shape changes.
 
 from collections.abc import Generator
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,29 +79,34 @@ def test_two_users_get_independent_session_lists(
     # Seed one session per user directly via metadata.
     # We bypass the create_session route because that requires a live provider
     # probe; the partition behaviour is the unit-of-test here.
-    chat_service._metadata["alice-1"] = {
+    # Phase 6 / Plan 06-04: session ids must be UUID-strings — the new
+    # MessageStore.first_user_message_preview takes a UUID so opaque ids
+    # like "alice-1" no longer parse.
+    alice_session_id = str(uuid4())
+    bob_session_id = str(uuid4())
+    chat_service._metadata[alice_session_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "alice",
         "created_at": datetime.now(UTC).isoformat(),
     }
-    chat_service._metadata["bob-1"] = {
+    chat_service._metadata[bob_session_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "bob",
         "created_at": datetime.now(UTC).isoformat(),
     }
 
-    # Act 3 — alice lists sessions, sees ONLY alice-1
+    # Act 3 — alice lists sessions, sees ONLY her own
     r2 = client.get("/api/chat/sessions", headers=alice_headers)
     assert r2.status_code == 200
     alice_sessions = r2.json()["sessions"]
     assert len(alice_sessions) == 1
-    assert alice_sessions[0]["session_id"] == "alice-1"
+    assert alice_sessions[0]["session_id"] == alice_session_id
 
-    # Act 4 — bob lists sessions, sees ONLY bob-1
+    # Act 4 — bob lists sessions, sees ONLY his own
     r3 = client.get("/api/chat/sessions", headers=bob_headers)
     assert r3.status_code == 200
     bob_sessions = r3.json()["sessions"]
     assert len(bob_sessions) == 1
-    assert bob_sessions[0]["session_id"] == "bob-1"
+    assert bob_sessions[0]["session_id"] == bob_session_id

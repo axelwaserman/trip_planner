@@ -158,11 +158,14 @@ class TestChatInvalidSession:
         alice_session_id = session_response.json()["session_id"]
 
         chat_service = client.app.state.chat_service
-        # Phase 5 / Plan 05-04: history lives in the ConversationStore. The
-        # in-memory impl exposes ``_store`` as a dict for synchronous test
-        # access; we read the entry directly here so this method stays sync.
-        store = chat_service._conversation_store
-        original_history_len = len(store._store.get(alice_session_id, []))
+        # Phase 6 / Plan 06-04: history lives in the MessageStore (D-05/D-06
+        # split). The in-memory impl exposes ``_store`` as a UUID-keyed dict
+        # for synchronous test access; we read the entry directly here so
+        # this method stays sync.
+        from uuid import UUID
+
+        store = chat_service._message_store
+        original_history_len = len(store._store.get(UUID(alice_session_id), []))
 
         # Bob tries to post a message to alice's session.
         response = client.post(
@@ -173,5 +176,5 @@ class TestChatInvalidSession:
         assert response.status_code == 404
 
         # Alice's history must NOT have been mutated by bob's attempt.
-        new_history_len = len(store._store.get(alice_session_id, []))
+        new_history_len = len(store._store.get(UUID(alice_session_id), []))
         assert new_history_len == original_history_len

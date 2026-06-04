@@ -52,7 +52,8 @@ from pydantic_ai.models.function import (
 )
 
 from app.chat import ChatService
-from app.chat.store import InMemoryConversationStore
+from app.chat.repository import InMemoryConversationRepository
+from app.chat.store import InMemoryMessageStore
 from app.llm.base import LLMProvider
 from app.llm.factory import LLMProviderFactory, SessionLLMConfig
 from app.tools.flight_client import MockFlightAPIClient
@@ -231,8 +232,10 @@ def make_chat_service_with_mock_llm(streams: StreamsArg) -> ChatService:
 
     Phase 5 / Plan 05-04: signature preserved per D-18 (existing call sites
     pass ``list[list[Chunk]]`` from the ``MockLLMStream`` classmethods).
-    Internals now construct an :class:`InMemoryConversationStore` and thread
-    it through ``ChatService(conversation_store=...)`` per D-08.
+
+    Phase 6 / Plan 06-04: the legacy ``InMemoryConversationStore`` retired
+    in favour of the D-05/D-06 split — :class:`InMemoryMessageStore` for
+    events + :class:`InMemoryConversationRepository` for meta-CRUD.
 
     The ``streams`` argument additionally accepts a zero-arg callable for
     error-injection tests (Wave 0 ``test_stream_error_event.py`` contract);
@@ -245,5 +248,6 @@ def make_chat_service_with_mock_llm(streams: StreamsArg) -> ChatService:
     return ChatService(
         flight_client=flight_client,
         factory=factory,
-        conversation_store=InMemoryConversationStore(),
+        message_store=InMemoryMessageStore(),
+        conversation_repo=InMemoryConversationRepository(),
     )
