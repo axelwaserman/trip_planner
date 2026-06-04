@@ -261,7 +261,7 @@ describe('ToolExecutionCard', () => {
       error_code: 'tool_error' as const,
       message: 'Tool search_flights failed: simulated outage',
       retryable: true,
-      session_id: 'sess-1',
+      conversation_id: 'conv-1',
     }
     const onRetry = vi.fn()
 
@@ -289,7 +289,7 @@ describe('ToolExecutionCard', () => {
       error_code: 'tool_error' as const,
       message: 'Tool search_flights failed: bad request param',
       retryable: false,
-      session_id: 'sess-1',
+      conversation_id: 'conv-1',
     }
 
     // Act
@@ -314,7 +314,7 @@ describe('ToolExecutionCard', () => {
       error_code: 'tool_error' as const,
       message: 'Tool failed after result',
       retryable: true,
-      session_id: 'sess-1',
+      conversation_id: 'conv-1',
     }
 
     // Act

@@ -30,24 +30,30 @@ export interface Message {
 
 // Discriminated union replacing the flat StreamEvent interface (Phase 4.7 REQ-streamevent-hierarchy).
 // Each member has a required literal `type` field so TypeScript can narrow exhaustively.
+//
+// Field ordering note (Phase 6 / Plan 06-05a + 06-05b): `conversation_id` is
+// declared LAST in every event interface to mirror the Pydantic per-subclass
+// JSON serialisation order on the backend (StreamEvent subclasses in
+// `backend/app/chat/models.py`). Any code that does ordered key iteration
+// observes the same wire-byte order on both sides.
 
 export interface ContentEvent {
   type: 'content'
   chunk: string
-  session_id: string
+  conversation_id: string
 }
 
 export interface ThinkingEvent {
   type: 'thinking'
   chunk: string
-  session_id: string
+  conversation_id: string
 }
 
 export interface ToolCallEvent {
   type: 'tool_call'
   tool_name: string
   tool_args: Record<string, unknown>
-  session_id: string
+  conversation_id: string
 }
 
 export interface ToolResultEvent {
@@ -55,9 +61,11 @@ export interface ToolResultEvent {
   tool_name: string
   tool_result: string
   elapsed_ms: number
-  session_id: string
+  conversation_id: string
 }
 
+// `session_error` is retained verbatim — wire-level snake_case error codes
+// are part of the contract per CLAUDE.md and are exempt from the D-03 rename.
 export type ErrorCode = 'session_error' | 'tool_error' | 'stream_error'
 
 export interface ErrorEvent {
@@ -67,7 +75,7 @@ export interface ErrorEvent {
   retryable: boolean
   tool_name?: string
   raw_detail?: string
-  session_id: string
+  conversation_id: string
 }
 
 export type ChatStreamEvent =

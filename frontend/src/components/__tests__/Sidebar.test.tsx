@@ -1,16 +1,16 @@
 /**
  * Vitest spec for the Sidebar component.
  *
- * Mocks the useSessions hook so tests don't depend on a real fetch call.
+ * Mocks the useConversations hook so tests don't depend on a real fetch call.
  * The hook contract is exercised separately in
- * `frontend/src/hooks/__tests__/useSessions.test.ts`.
+ * `frontend/src/hooks/__tests__/useConversations.test.ts`.
  *
  * Covers:
  *   1. Renders RECENT CHATS eyebrow + helper text + Settings link
- *   2. Renders empty-state copy when sessions list is empty
- *   3. Renders chat items with `provider · model` badge from sessions
+ *   2. Renders empty-state copy when conversations list is empty
+ *   3. Renders chat items with `provider · model` badge from conversations
  *   4. Clicking "New chat" navigates to /app
- *   5. Active session gets the accent.solid 3px left border
+ *   5. Active conversation gets the accent.solid 3px left border
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -19,29 +19,29 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ChakraProvider } from '@chakra-ui/react'
 import { system } from '../../theme'
 import { Sidebar } from '../Sidebar'
-import type { ChatSession } from '../../hooks/useSessions'
+import type { ChatConversation } from '../../hooks/useConversations'
 import {
   __resetForTests as resetChatStore,
-  setSession,
-} from '../../lib/chatSessionStore'
+  setConversation,
+} from '../../lib/chatConversationStore'
 
-// Mocked module exports for useSessions — each test sets the desired shape
+// Mocked module exports for useConversations — each test sets the desired shape
 // before rendering.
-const useSessionsMock = vi.fn<
+const useConversationsMock = vi.fn<
   () => {
-    sessions: ChatSession[]
+    conversations: ChatConversation[]
     isLoading: boolean
     error: string | null
     refetch: () => void
   }
 >()
 
-vi.mock('../../hooks/useSessions', () => ({
-  useSessions: () => useSessionsMock(),
+vi.mock('../../hooks/useConversations', () => ({
+  useConversations: () => useConversationsMock(),
 }))
 
 function renderSidebar(
-  { activeSessionId, initialPath = '/app' }: { activeSessionId?: string; initialPath?: string } = {}
+  { activeConversationId, initialPath = '/app' }: { activeConversationId?: string; initialPath?: string } = {}
 ) {
   return render(
     <ChakraProvider value={system}>
@@ -51,7 +51,7 @@ function renderSidebar(
             path="/app"
             element={
               <>
-                <Sidebar username="alice" activeSessionId={activeSessionId} />
+                <Sidebar username="alice" activeConversationId={activeConversationId} />
                 <div data-testid="route-marker">app-route</div>
               </>
             }
@@ -60,7 +60,7 @@ function renderSidebar(
             path="/settings/providers"
             element={
               <>
-                <Sidebar username="alice" activeSessionId={activeSessionId} />
+                <Sidebar username="alice" activeConversationId={activeConversationId} />
                 <div data-testid="route-marker">settings-route</div>
               </>
             }
@@ -73,8 +73,8 @@ function renderSidebar(
 
 describe('Sidebar', () => {
   beforeEach(() => {
-    useSessionsMock.mockReturnValue({
-      sessions: [],
+    useConversationsMock.mockReturnValue({
+      conversations: [],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -95,9 +95,9 @@ describe('Sidebar', () => {
     expect(screen.getByText('Settings')).toBeInTheDocument()
   })
 
-  it('renders empty-state copy when sessions list is empty', () => {
-    useSessionsMock.mockReturnValue({
-      sessions: [],
+  it('renders empty-state copy when conversations list is empty', () => {
+    useConversationsMock.mockReturnValue({
+      conversations: [],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -106,11 +106,11 @@ describe('Sidebar', () => {
     expect(screen.getByText('No chats yet. Start one below.')).toBeInTheDocument()
   })
 
-  it('renders chat items with provider · model badge from sessions', () => {
-    useSessionsMock.mockReturnValue({
-      sessions: [
+  it('renders chat items with provider · model badge from conversations', () => {
+    useConversationsMock.mockReturnValue({
+      conversations: [
         {
-          session_id: 's1',
+          conversation_id: 'c1',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
@@ -169,18 +169,18 @@ describe('Sidebar', () => {
     expect(search).toMatch(/[?&]n=\d+/)
   })
 
-  it('active session gets the accent.solid 3px left border', () => {
-    useSessionsMock.mockReturnValue({
-      sessions: [
+  it('active conversation gets the accent.solid 3px left border', () => {
+    useConversationsMock.mockReturnValue({
+      conversations: [
         {
-          session_id: 's-active',
+          conversation_id: 'c-active',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
           first_message_preview: 'Active session',
         },
         {
-          session_id: 's-other',
+          conversation_id: 'c-other',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
@@ -192,7 +192,7 @@ describe('Sidebar', () => {
       refetch: vi.fn(),
     })
 
-    const { container } = renderSidebar({ activeSessionId: 's-active' })
+    const { container } = renderSidebar({ activeConversationId: 'c-active' })
 
     const activeButton = screen.getByText('Active session').closest('button')
     const otherButton = screen.getByText('Other session').closest('button')
@@ -215,36 +215,36 @@ describe('Sidebar', () => {
     expect(container).toBeTruthy()
   })
 
-  it('refetches sessions when activeSessionId points at a row not yet in the list', () => {
-    // Simulates: user clicks "New chat" → useChat creates a session and
+  it('refetches conversations when activeConversationId points at a row not yet in the list', () => {
+    // Simulates: user clicks "New chat" → useChat creates a conversation and
     // navigates to /app?session=<new_id>. App.tsx threads the new id into
-    // Sidebar.activeSessionId. The hook's session list still doesn't have
-    // the row yet — Sidebar must call refetch() so it appears.
+    // Sidebar.activeConversationId. The hook's conversation list still doesn't
+    // have the row yet — Sidebar must call refetch() so it appears.
     const refetch = vi.fn()
-    useSessionsMock.mockReturnValue({
-      sessions: [], // No rows yet — simulates the just-created session
+    useConversationsMock.mockReturnValue({
+      conversations: [], // No rows yet — simulates the just-created conversation
       isLoading: false,
       error: null,
       refetch,
     })
 
-    renderSidebar({ activeSessionId: 'sess-just-created' })
+    renderSidebar({ activeConversationId: 'conv-just-created' })
 
     expect(refetch).toHaveBeenCalled()
   })
 
-  it('renders a spinner on rows whose session is in flight', () => {
-    useSessionsMock.mockReturnValue({
-      sessions: [
+  it('renders a spinner on rows whose conversation is in flight', () => {
+    useConversationsMock.mockReturnValue({
+      conversations: [
         {
-          session_id: 'sess-streaming',
+          conversation_id: 'conv-streaming',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
           first_message_preview: 'Live one',
         },
         {
-          session_id: 'sess-idle',
+          conversation_id: 'conv-idle',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
@@ -256,8 +256,8 @@ describe('Sidebar', () => {
       refetch: vi.fn(),
     })
 
-    // Mark sess-streaming as in-flight in the store.
-    setSession('sess-streaming', () => ({
+    // Mark conv-streaming as in-flight in the store.
+    setConversation('conv-streaming', () => ({
       messages: [],
       isAwaitingFirstChunk: false,
       isStreaming: true,
@@ -273,12 +273,12 @@ describe('Sidebar', () => {
     expect(screen.getAllByText('ollama · qwen3:4b')).toHaveLength(2)
   })
 
-  it('does not refetch when the active session is already in the list', () => {
+  it('does not refetch when the active conversation is already in the list', () => {
     const refetch = vi.fn()
-    useSessionsMock.mockReturnValue({
-      sessions: [
+    useConversationsMock.mockReturnValue({
+      conversations: [
         {
-          session_id: 'sess-known',
+          conversation_id: 'conv-known',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
@@ -290,7 +290,7 @@ describe('Sidebar', () => {
       refetch,
     })
 
-    renderSidebar({ activeSessionId: 'sess-known' })
+    renderSidebar({ activeConversationId: 'conv-known' })
 
     expect(refetch).not.toHaveBeenCalled()
   })

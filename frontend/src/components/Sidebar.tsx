@@ -4,21 +4,25 @@
  * Layout (UI-SPEC §"Sidebar (new)"):
  *   - Logo + "Trip Planner" wordmark.
  *   - "+ New chat" full-width primary button.
- *   - RECENT CHATS eyebrow + chat list (one row per session).
+ *   - RECENT CHATS eyebrow + chat list (one row per conversation).
  *   - Helper text: `Sessions reset when the server restarts.` (D-22 honest framing).
  *   - Settings nav link with a 3px accent left-border when active.
  *   - User pill (re-uses UserMenu verbatim).
  *
- * Sessions come from `useSessions()` which calls GET /api/chat/sessions
- * (per-user filtered server-side, Plan 06b output).
+ * Conversations come from `useConversations()` which calls
+ * GET /api/chat/conversations (per-user filtered server-side, Plan 06b output).
  *
- * Active-session highlight: 3px `accent.solid` left border on the matching
+ * Active-conversation highlight: 3px `accent.solid` left border on the matching
  * chat item — the indicator the UI-SPEC §"Color" reserved-for list dedicates
  * to active list items (item 3).
  *
  * Mobile (base breakpoint): the Sidebar is rendered inside a hand-rolled
  * fixed overlay by AppShell, gated by an `isOpen` prop. Desktop (lg): a
  * 260px persistent column.
+ *
+ * The `?session=<id>` URL search-param key is preserved to keep bookmarked
+ * chat links stable across the Phase 6 rename — the wire-level conversation
+ * rename covers request bodies and SSE field names, not URL routing keys.
  */
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
@@ -26,70 +30,70 @@ import { Box, Button, Flex, Heading, Spinner, Stack, Text } from '@chakra-ui/rea
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { MessageSquarePlus, Settings as SettingsIcon } from 'lucide-react'
 import {
-  getStreamingSessionIds,
-  getUnreadSessionIds,
-  getErrorSessionIds,
+  getStreamingConversationIds,
+  getUnreadConversationIds,
+  getErrorConversationIds,
   subscribe as subscribeToStore,
-} from '../lib/chatSessionStore'
-import { useSessions } from '../hooks/useSessions'
+} from '../lib/chatConversationStore'
+import { useConversations } from '../hooks/useConversations'
 import { UserMenu } from './chat/UserMenu'
 
 export interface SidebarProps {
   username?: string
-  activeSessionId?: string
+  activeConversationId?: string
   onNewChat?: () => void
   onNavigate?: () => void
 }
 
 export function Sidebar({
   username,
-  activeSessionId,
+  activeConversationId,
   onNewChat,
   onNavigate,
 }: SidebarProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { sessions, error, refetch } = useSessions()
+  const { conversations, error, refetch } = useConversations()
   // Live "this row is generating" set, sourced from the same store useChat
   // writes to. Background streams (user switched away mid-response) keep
   // their flag on so the Sidebar dot stays visible until the stream ends.
-  const streamingSessionIds = useSyncExternalStore(
+  const streamingConversationIds = useSyncExternalStore(
     subscribeToStore,
-    useCallback(() => getStreamingSessionIds(), [])
+    useCallback(() => getStreamingConversationIds(), [])
   )
-  const unreadSessionIds = useSyncExternalStore(
+  const unreadConversationIds = useSyncExternalStore(
     subscribeToStore,
-    useCallback(() => getUnreadSessionIds(), [])
+    useCallback(() => getUnreadConversationIds(), [])
   )
-  const errorSessionIds = useSyncExternalStore(
+  const errorConversationIds = useSyncExternalStore(
     subscribeToStore,
-    useCallback(() => getErrorSessionIds(), [])
+    useCallback(() => getErrorConversationIds(), [])
   )
 
   const settingsActive = location.pathname === '/settings/providers'
 
-  // Track how many sessions were streaming on the previous render.
+  // Track how many conversations were streaming on the previous render.
   // When the count drops (a stream finished), refetch so the sidebar
   // re-orders by latest message.
-  const prevStreamingSizeRef = useRef(streamingSessionIds.size)
+  const prevStreamingSizeRef = useRef(streamingConversationIds.size)
   useEffect(() => {
     const prev = prevStreamingSizeRef.current
-    prevStreamingSizeRef.current = streamingSessionIds.size
-    if (streamingSessionIds.size < prev) {
+    prevStreamingSizeRef.current = streamingConversationIds.size
+    if (streamingConversationIds.size < prev) {
       refetch()
     }
-  }, [streamingSessionIds, refetch])
+  }, [streamingConversationIds, refetch])
 
-  // Refetch the sessions list whenever the active session changes — picks
-  // up new sessions useChat just created (it replaces the URL with
-  // /app?session=<new_id> on success) and ensures the new row appears
-  // alongside its highlight. Refetch is a no-op when activeSessionId is
+  // Refetch the conversations list whenever the active conversation changes
+  // — picks up new conversations useChat just created (it replaces the URL
+  // with /app?session=<new_id> on success) and ensures the new row appears
+  // alongside its highlight. Refetch is a no-op when activeConversationId is
   // still undefined.
   useEffect(() => {
-    if (!activeSessionId) return
-    if (sessions.some((s) => s.session_id === activeSessionId)) return
+    if (!activeConversationId) return
+    if (conversations.some((c) => c.conversation_id === activeConversationId)) return
     refetch()
-  }, [activeSessionId, sessions, refetch])
+  }, [activeConversationId, conversations, refetch])
 
   function handleNewChat() {
     if (onNewChat) {
@@ -97,14 +101,14 @@ export function Sidebar({
     }
     if (onNavigate) onNavigate()
     // Bump `?n=<token>` so useChat's effect re-runs and creates a fresh
-    // session. Plain `navigate('/app')` was a no-op when already on /app —
-    // useChat only initialises once per mount, so the messages list and
-    // session_id stuck around. The token's value is irrelevant; it just
+    // conversation. Plain `navigate('/app')` was a no-op when already on /app
+    // — useChat only initialises once per mount, so the messages list and
+    // conversation_id stuck around. The token's value is irrelevant; it just
     // has to differ from whatever's currently in the URL.
     navigate(`/app?n=${Date.now()}`)
   }
 
-  function handleSessionClick(id: string) {
+  function handleConversationClick(id: string) {
     if (onNavigate) onNavigate()
     navigate(`/app?session=${id}`)
   }
@@ -169,7 +173,7 @@ export function Sidebar({
           RECENT CHATS
         </Text>
 
-        {sessions.length === 0 ? (
+        {conversations.length === 0 ? (
           <Stack gap="1" px="4" py="2">
             <Text fontSize="13px" color="fg.muted">
               No chats yet. Start one below.
@@ -182,20 +186,20 @@ export function Sidebar({
           </Stack>
         ) : (
           <Stack gap="0">
-            {sessions.map((s) => {
-              const isActive = activeSessionId === s.session_id
-              const isStreaming = streamingSessionIds.has(s.session_id)
-              const hasUnread = !isActive && unreadSessionIds.has(s.session_id)
-              const hasError = !isActive && errorSessionIds.has(s.session_id)
+            {conversations.map((c) => {
+              const isActive = activeConversationId === c.conversation_id
+              const isStreaming = streamingConversationIds.has(c.conversation_id)
+              const hasUnread = !isActive && unreadConversationIds.has(c.conversation_id)
+              const hasError = !isActive && errorConversationIds.has(c.conversation_id)
               const preview =
-                s.first_message_preview && s.first_message_preview.trim().length > 0
-                  ? s.first_message_preview
+                c.first_message_preview && c.first_message_preview.trim().length > 0
+                  ? c.first_message_preview
                   : 'New chat'
               return (
                 <Box
-                  key={s.session_id}
+                  key={c.conversation_id}
                   as="button"
-                  onClick={() => handleSessionClick(s.session_id)}
+                  onClick={() => handleConversationClick(c.conversation_id)}
                   w="full"
                   h="48px"
                   overflow="hidden"
@@ -254,7 +258,7 @@ export function Sidebar({
                     textOverflow="ellipsis"
                     whiteSpace="nowrap"
                   >
-                    {`${s.provider} · ${s.model}`}
+                    {`${c.provider} · ${c.model}`}
                   </Text>
                 </Box>
               )
