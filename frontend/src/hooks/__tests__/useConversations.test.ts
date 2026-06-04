@@ -1,19 +1,19 @@
 /**
- * Vitest spec for the useSessions hook.
+ * Vitest spec for the useConversations hook.
  *
  * Covers the four contract behaviors:
- *   1. Calls GET /api/chat/sessions on mount (with apiFetch's auth header path).
- *   2. Parses {sessions: [...]} on a 200 response.
+ *   1. Calls GET /api/chat/conversations on mount (with apiFetch's auth header path).
+ *   2. Parses {conversations: [...]} on a 200 response.
  *   3. Sets a non-null error on a non-2xx response.
  *   4. refetch() re-runs the request.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { useSessions } from '../useSessions'
+import { useConversations } from '../useConversations'
 
-function mockSessionsFetch(
-  body: unknown = { sessions: [] },
+function mockConversationsFetch(
+  body: unknown = { conversations: [] },
   ok: boolean = true,
   status: number = 200
 ) {
@@ -24,7 +24,7 @@ function mockSessionsFetch(
   })
 }
 
-describe('useSessions', () => {
+describe('useConversations', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.clearAllMocks()
@@ -35,25 +35,25 @@ describe('useSessions', () => {
     vi.unstubAllGlobals()
   })
 
-  it('calls /api/chat/sessions on mount', async () => {
-    const fetchMock = mockSessionsFetch()
+  it('calls /api/chat/conversations on mount', async () => {
+    const fetchMock = mockConversationsFetch()
     vi.stubGlobal('fetch', fetchMock)
 
-    renderHook(() => useSessions())
+    renderHook(() => useConversations())
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/chat/sessions',
+        '/api/chat/conversations',
         expect.any(Object)
       )
     })
   })
 
-  it('returns parsed sessions on a 200 response', async () => {
-    const fetchMock = mockSessionsFetch({
-      sessions: [
+  it('returns parsed conversations on a 200 response', async () => {
+    const fetchMock = mockConversationsFetch({
+      conversations: [
         {
-          session_id: 's1',
+          conversation_id: 'c1',
           created_at: '2026-05-17T00:00:00Z',
           provider: 'ollama',
           model: 'qwen3:4b',
@@ -63,21 +63,21 @@ describe('useSessions', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { result } = renderHook(() => useSessions())
+    const { result } = renderHook(() => useConversations())
 
     await waitFor(() => {
-      expect(result.current.sessions.length).toBe(1)
-      expect(result.current.sessions[0].session_id).toBe('s1')
-      expect(result.current.sessions[0].first_message_preview).toBe('Hello')
+      expect(result.current.conversations.length).toBe(1)
+      expect(result.current.conversations[0].conversation_id).toBe('c1')
+      expect(result.current.conversations[0].first_message_preview).toBe('Hello')
       expect(result.current.isLoading).toBe(false)
     })
   })
 
   it('sets a non-null error on a non-2xx response', async () => {
-    const fetchMock = mockSessionsFetch({}, false, 500)
+    const fetchMock = mockConversationsFetch({}, false, 500)
     vi.stubGlobal('fetch', fetchMock)
 
-    const { result } = renderHook(() => useSessions())
+    const { result } = renderHook(() => useConversations())
 
     await waitFor(() => {
       expect(result.current.error).not.toBeNull()
@@ -86,10 +86,10 @@ describe('useSessions', () => {
   })
 
   it('refetch re-runs the request', async () => {
-    const fetchMock = mockSessionsFetch()
+    const fetchMock = mockConversationsFetch()
     vi.stubGlobal('fetch', fetchMock)
 
-    const { result } = renderHook(() => useSessions())
+    const { result } = renderHook(() => useConversations())
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1)

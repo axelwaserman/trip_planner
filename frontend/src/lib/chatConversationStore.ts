@@ -1,5 +1,5 @@
 /**
- * chatSessionStore — module-level subscribable store keyed by session_id.
+ * chatConversationStore — module-level subscribable store keyed by conversation_id.
  *
  * Why this exists: useChat used to keep `messages`/`isStreaming` as local
  * React state, so a switch from conv A → conv B mid-stream wiped A's
@@ -8,13 +8,13 @@
  * the streaming flag lived inside ChatInterface.
  *
  * The store solves both:
- *   - Per-session message lists + flags survive across `useChat` resets,
+ *   - Per-conversation message lists + flags survive across `useChat` resets,
  *     so the user can switch chats and come back to a still-running
  *     conversation with full progress visible.
- *   - The Sidebar subscribes to `getStreamingSessionIds()` so streaming
+ *   - The Sidebar subscribes to `getStreamingConversationIds()` so streaming
  *     rows can show a live indicator.
  *
- * The store is intentionally simple: a `Map<sessionId, SessionState>`
+ * The store is intentionally simple: a `Map<conversationId, ConversationState>`
  * snapshot, a `Set` of listeners, and a "version" tick that bumps on
  * every write so React's `useSyncExternalStore` can detect changes
  * without deep-comparing snapshots.
@@ -22,25 +22,25 @@
 
 import type { Message } from '../types/chat'
 
-export interface SessionState {
+export interface ConversationState {
   messages: Message[]
   isAwaitingFirstChunk: boolean
   isStreaming: boolean
-  /** True when the session finished streaming while the user was looking at a different chat. */
+  /** True when the conversation finished streaming while the user was looking at a different chat. */
   hasUnread: boolean
   /** True when the stream ended with an error while the user was away. */
   hasError: boolean
 }
 
-const EMPTY_STATE: SessionState = Object.freeze({
+const EMPTY_STATE: ConversationState = Object.freeze({
   messages: [],
   isAwaitingFirstChunk: false,
   isStreaming: false,
   hasUnread: false,
   hasError: false,
-}) as SessionState
+}) as ConversationState
 
-const sessions = new Map<string, SessionState>()
+const conversations = new Map<string, ConversationState>()
 const listeners = new Set<() => void>()
 
 // Cached Set snapshots — useSyncExternalStore requires identity-stable
@@ -56,7 +56,7 @@ function rebuildIdsIfNeeded() {
   const streaming = new Set<string>()
   const unread = new Set<string>()
   const error = new Set<string>()
-  for (const [id, state] of sessions.entries()) {
+  for (const [id, state] of conversations.entries()) {
     if (state.isStreaming) streaming.add(id)
     if (state.hasUnread) unread.add(id)
     if (state.hasError) error.add(id)
@@ -81,46 +81,46 @@ export function subscribe(listener: () => void): () => void {
   }
 }
 
-export function getSnapshot(sessionId: string | null): SessionState {
-  if (!sessionId) return EMPTY_STATE
-  const existing = sessions.get(sessionId)
+export function getSnapshot(conversationId: string | null): ConversationState {
+  if (!conversationId) return EMPTY_STATE
+  const existing = conversations.get(conversationId)
   return existing ?? EMPTY_STATE
 }
 
-export function setSession(
-  sessionId: string,
-  updater: (prev: SessionState) => SessionState
+export function setConversation(
+  conversationId: string,
+  updater: (prev: ConversationState) => ConversationState
 ): void {
-  const prev = sessions.get(sessionId) ?? EMPTY_STATE
+  const prev = conversations.get(conversationId) ?? EMPTY_STATE
   const next = updater(prev)
-  sessions.set(sessionId, next)
+  conversations.set(conversationId, next)
   notify()
 }
 
-export function clearSession(sessionId: string): void {
-  if (sessions.delete(sessionId)) {
+export function clearConversation(conversationId: string): void {
+  if (conversations.delete(conversationId)) {
     notify()
   }
 }
 
-export function getStreamingSessionIds(): ReadonlySet<string> {
+export function getStreamingConversationIds(): ReadonlySet<string> {
   rebuildIdsIfNeeded()
   return streamingIdsSnapshot
 }
 
-export function getUnreadSessionIds(): ReadonlySet<string> {
+export function getUnreadConversationIds(): ReadonlySet<string> {
   rebuildIdsIfNeeded()
   return unreadIdsSnapshot
 }
 
-export function getErrorSessionIds(): ReadonlySet<string> {
+export function getErrorConversationIds(): ReadonlySet<string> {
   rebuildIdsIfNeeded()
   return errorIdsSnapshot
 }
 
 // Test-only: drop everything. Lets vitest specs reset between cases.
 export function __resetForTests(): void {
-  sessions.clear()
+  conversations.clear()
   listeners.clear()
   streamingIdsSnapshot = new Set()
   unreadIdsSnapshot = new Set()

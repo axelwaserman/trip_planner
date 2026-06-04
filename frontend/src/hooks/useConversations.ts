@@ -1,6 +1,6 @@
 /**
- * useSessions — fetches the per-user filtered session list from
- * GET /api/chat/sessions (Plan 06b output) for the app-shell Sidebar.
+ * useConversations — fetches the per-user filtered conversation list from
+ * GET /api/chat/conversations (Plan 06b output) for the app-shell Sidebar.
  *
  * The endpoint is auth-protected (uses apiFetch which carries the JWT) AND
  * server-side filtered to the authenticated user — the frontend trusts the
@@ -19,28 +19,28 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../lib/auth'
 
-export interface ChatSession {
-  // Backend wire shape (app/models.py::ChatSessionInfo). The frontend
+export interface ChatConversation {
+  // Backend wire shape (app/chat/models.py::ChatConversationInfo). The frontend
   // matches the backend names verbatim — no transform layer.
-  session_id: string
+  conversation_id: string
   created_at: string
   provider: string
   model: string
   first_message_preview?: string | null
 }
 
-interface SessionsResponse {
-  sessions: ChatSession[]
+interface ConversationsResponse {
+  conversations: ChatConversation[]
 }
 
-function isSessionsResponse(value: unknown): value is SessionsResponse {
+function isConversationsResponse(value: unknown): value is ConversationsResponse {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
-  return Array.isArray(v.sessions)
+  return Array.isArray(v.conversations)
 }
 
-export interface UseSessionsResult {
-  sessions: ChatSession[]
+export interface UseConversationsResult {
+  conversations: ChatConversation[]
   isLoading: boolean
   error: string | null
   refetch: () => void
@@ -48,15 +48,15 @@ export interface UseSessionsResult {
 
 const FETCH_FAILED_MESSAGE = "Couldn't load recent chats."
 
-export function useSessions(): UseSessionsResult {
-  const [sessions, setSessions] = useState<ChatSession[]>([])
+export function useConversations(): UseConversationsResult {
+  const [conversations, setConversations] = useState<ChatConversation[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
   const refetch = useCallback(() => {
     setIsLoading(true)
     setError(null)
-    apiFetch('/api/chat/sessions')
+    apiFetch('/api/chat/conversations')
       .then(async (response) => {
         if (!response.ok) {
           setError(FETCH_FAILED_MESSAGE)
@@ -64,20 +64,20 @@ export function useSessions(): UseSessionsResult {
           return
         }
         const body: unknown = await response.json()
-        if (!isSessionsResponse(body)) {
+        if (!isConversationsResponse(body)) {
           setError(FETCH_FAILED_MESSAGE)
           setIsLoading(false)
           return
         }
-        // Deduplicate by session_id — guards against any transient double-send
-        // during new-session creation races.
+        // Deduplicate by conversation_id — guards against any transient double-send
+        // during new-conversation creation races.
         const seen = new Set<string>()
-        const unique = body.sessions.filter((s) => {
-          if (seen.has(s.session_id)) return false
-          seen.add(s.session_id)
+        const unique = body.conversations.filter((c) => {
+          if (seen.has(c.conversation_id)) return false
+          seen.add(c.conversation_id)
           return true
         })
-        setSessions(unique)
+        setConversations(unique)
         setIsLoading(false)
       })
       .catch(() => {
@@ -92,5 +92,5 @@ export function useSessions(): UseSessionsResult {
     refetch()
   }, [refetch])
 
-  return { sessions, isLoading, error, refetch }
+  return { conversations, isLoading, error, refetch }
 }
