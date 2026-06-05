@@ -26,6 +26,7 @@ dependencies = [
     # tooling raises `ValueError: the greenlet library is required` at first await.
     # Adding the `[asyncio]` extra makes the install platform-agnostic.
     "sqlalchemy[asyncio]>=2.0.50",
+    "tenacity>=9.1.2",
 ]
 
 [dependency-groups]

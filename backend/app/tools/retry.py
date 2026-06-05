@@ -1,10 +1,26 @@
-"""Retry decorator with exponential backoff for async functions."""
+"""Retry decorator with exponential backoff for async functions.
 
-import asyncio
+Thin wrapper over `tenacity` (D-10 from phase 07-real-flight-api): the project-wide
+retry primitive is implemented via `tenacity.retry` rather than a hand-rolled
+sleep loop. The public signature of :func:`retry_on_failure` is preserved
+bit-for-bit so every existing call site keeps working.
+
+Key invariants (regression-locked by ``tests/unit/test_retry.py``):
+
+* The decorator only retries when the raised exception is an instance of one of
+  the configured ``exceptions`` AND has ``retryable=True`` — non-retryable
+  ``APIError`` subclasses raise immediately on the first attempt.
+* ``reraise=True`` is mandatory: after all retries are exhausted, the ORIGINAL
+  ``APIError`` subclass surfaces to callers — never ``tenacity.RetryError``.
+  This preserves the ``APIError`` hierarchy and the ``retryable`` flag semantics
+  upstream code depends on (Pitfall 5 in 07-RESEARCH.md).
+"""
+
 import logging
 from collections.abc import Awaitable, Callable
-from functools import wraps
 from typing import ParamSpec, TypeVar
+
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.exceptions import APIError
 
@@ -21,55 +37,42 @@ def retry_on_failure(
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Retry decorator with exponential backoff for async functions.
 
-    Retries the decorated function on specified exceptions with exponential
-    backoff. Only retries if the exception has `retryable=True` attribute.
+    Implemented via ``tenacity.retry``: the decorated coroutine is retried while
+    the raised exception matches ``exceptions`` AND has ``retryable=True``.
+    Non-retryable errors (e.g. ``APIClientError(retryable=False)``) raise on the
+    first attempt without sleeping.
 
     Args:
-        max_retries: Maximum number of retry attempts (default: 3)
-        backoff_base: Base for exponential backoff calculation (default: 2.0)
-                     Delay = backoff_base ^ attempt
-        exceptions: Tuple of exception types to catch and potentially retry
+        max_retries: Maximum number of retry attempts after the initial call
+            (default: 3). The decorator therefore makes up to
+            ``max_retries + 1`` total attempts.
+        backoff_base: Multiplier passed to :func:`tenacity.wait_exponential`;
+            the wait between attempts ``n`` and ``n+1`` is
+            ``backoff_base * 2^(n-1)`` seconds (default: 2.0).
+        exceptions: Tuple of exception types eligible for retry. Defaults to
+            ``(APIError,)``. An exception only triggers a retry if it is an
+            instance of one of these types AND its ``retryable`` attribute is
+            truthy.
 
     Returns:
-        Decorated async function with retry logic
+        A decorator that wraps an async function with the retry policy. After
+        all retries are exhausted, the original exception is raised — not
+        ``tenacity.RetryError`` (the ``reraise=True`` invariant).
 
     Example:
         >>> @retry_on_failure(max_retries=3, backoff_base=2.0)
-        ... async def fetch_data():
+        ... async def fetch_data() -> dict[str, str]:
         ...     return await api_client.get("/data")
     """
 
-    def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
-        @wraps(func)
-        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            last_exception: Exception | None = None
+    def _is_retryable(exc: BaseException) -> bool:
+        # Mirrors the hand-rolled implementation's predicate exactly: an exception
+        # must be one of the configured types AND carry retryable=True.
+        return isinstance(exc, exceptions) and getattr(exc, "retryable", False)
 
-            for attempt in range(max_retries + 1):
-                try:
-                    return await func(*args, **kwargs)
-                except exceptions as e:
-                    last_exception = e
-
-                    # Check if error is retryable
-                    if isinstance(e, APIError) and not e.retryable:
-                        logger.warning(f"{func.__name__} failed with non-retryable error: {e}")
-                        raise
-
-                    if attempt < max_retries:
-                        delay = backoff_base**attempt
-                        logger.warning(
-                            f"{func.__name__} failed (attempt {attempt + 1}/{max_retries + 1}): "
-                            f"{e}. Retrying in {delay}s..."
-                        )
-                        await asyncio.sleep(delay)
-                    else:
-                        logger.error(f"{func.__name__} failed after {max_retries + 1} attempts: {e}")
-
-            # Raise the last exception after all retries exhausted
-            if last_exception:
-                raise last_exception
-            raise RuntimeError("Unexpected retry logic error")
-
-        return wrapper
-
-    return decorator
+    return retry(
+        stop=stop_after_attempt(max_retries + 1),
+        wait=wait_exponential(multiplier=backoff_base),
+        retry=retry_if_exception(_is_retryable),
+        reraise=True,
+    )
