@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from tenacity import RetryError
 
 from app.exceptions import APIClientError, APIServerError, APITimeoutError
 from app.tools.retry import retry_on_failure
@@ -168,3 +169,26 @@ async def test_retry_passes_args_and_kwargs() -> None:
 
     result = await func_with_args(42, "test", c=True)
     assert result == "42-test-True"
+
+
+@pytest.mark.asyncio
+async def test_retry_raises_original_exception_not_retry_error() -> None:
+    """Regression lock: ``reraise=True`` ensures the original ``APIError`` subclass
+    surfaces to callers after retries are exhausted — never ``tenacity.RetryError``.
+
+    Without ``reraise=True``, tenacity wraps the final exception in ``RetryError``,
+    breaking the ``APIError`` hierarchy and ``retryable`` flag semantics that
+    upstream code relies on (07-RESEARCH.md Pitfall 5).
+    """
+
+    @retry_on_failure(max_retries=2, backoff_base=0.01)
+    async def always_fails() -> str:
+        raise APIServerError(message="always fails")
+
+    with pytest.raises(APIServerError, match="always fails") as exc_info:
+        await always_fails()
+
+    # The exception MUST be the original APIError subclass, not a RetryError
+    # wrapping it. This is the invariant we're regression-locking.
+    assert not isinstance(exc_info.value, RetryError)
+    assert isinstance(exc_info.value, APIServerError)
