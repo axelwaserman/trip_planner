@@ -19,6 +19,7 @@ Locks four invariants of :mod:`app.flights.amadeus_client`:
 """
 
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pybreaker
@@ -27,7 +28,7 @@ from pyreqwest.exceptions import StatusError
 
 from app.exceptions import APIClientError, APIServerError
 from app.flights.amadeus_client import AmadeusFlightClient
-from app.flights.models import FlightQuery
+from app.flights.models import Flight, FlightQuery
 from app.tools.flight_search import normalize_amadeus_offer
 
 
@@ -224,3 +225,69 @@ def test_unknown_cabin_falls_back_to_economy() -> None:
     )
     # Missing fields fall back gracefully (no IndexError).
     assert AmadeusFlightClient._extract_booking_class({}) == "economy"
+
+
+@pytest.mark.asyncio
+async def test_search_offset_returns_correct_slice() -> None:
+    """``search(limit=2, offset=2)`` returns the third + fourth flights (CR-01).
+
+    Regression test for the pre-fix double-application bug: pre-Task-1
+    code requested ``max=str(limit)`` from Amadeus AND sliced
+    ``[offset : offset + limit]`` post-fetch, so any ``offset > 0``
+    silently produced wrong/empty results because the underlying fetch
+    only returned ``limit`` items, none of which sat past index ``offset``.
+
+    Strategy: stub ``_search_impl`` to return four flights regardless of
+    args (the stub stands in for what an over-fetching Amadeus call would
+    yield under Path A). With ``sort_by="departure"`` and monotonically
+    increasing departures the post-sort order matches the stub's insertion
+    order, so the slice ``[2:4]`` must yield ``["F2", "F3"]``.
+    """
+    client = _make_client()
+    base_dt = datetime.now(UTC) + timedelta(days=30)
+    flights = [
+        Flight(
+            id=f"F{i}",
+            origin="LAX",
+            destination="JFK",
+            departure=base_dt + timedelta(hours=i),
+            arrival=base_dt + timedelta(hours=i + 5),
+            price=Decimal("100"),
+            currency="USD",
+            carrier="Test Carrier",
+            flight_number=f"TT{100 + i}",
+            duration_minutes=300,
+            stops=0,
+            booking_class="economy",
+        )
+        for i in range(4)
+    ]
+
+    impl_mock = AsyncMock(return_value=flights)
+    query = FlightQuery(
+        origin="LAX",
+        destination="JFK",
+        departure_date=_future_date(),
+        passengers=1,
+    )
+
+    with (
+        patch.object(client, "_search_impl", impl_mock),
+        patch("tenacity.nap.time.sleep", return_value=None),
+    ):
+        result = await client.search(query, sort_by="departure", limit=2, offset=2)
+
+    # Path A semantics: the slice [offset : offset + limit] of the
+    # filtered+sorted four-flight list yields exactly F2 and F3.
+    assert [f.id for f in result] == ["F2", "F3"]
+    # No retry loop fired — the stub returns successfully on the first call.
+    assert impl_mock.await_count == 1
+    # Path A also forwards limit + offset = 4 down into _search_impl.
+    call_args = impl_mock.await_args
+    assert call_args is not None
+    # _fetch_with_retry_breaker invokes _search_impl as
+    # ``self._search_impl(query, limit, offset)`` via ``call_with_breaker``.
+    forwarded_args = call_args.args
+    # call_with_breaker forwards ``(query, limit, offset)`` positionally.
+    assert forwarded_args[1] == 2  # limit unchanged
+    assert forwarded_args[2] == 2  # offset preserved through the chain
