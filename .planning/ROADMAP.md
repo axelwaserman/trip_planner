@@ -372,7 +372,15 @@ Plans:
   3. Real-API integration tests exist and are gated on the `AMADEUS_*` secrets being present in the E2E job; PR CI does not require API keys.
   4. Default `pytest` continues to pass with the mock client as the DI default; documentation describes credential setup for local and CI use.
 
-**Plans**: TBD
+**Plans**: 6 plans across 4 waves
+Plans:
+
+- [ ] 07-01-PLAN.md — Wave 1: Replace retry.py internals with tenacity wrapper (preserve public API; add reraise=True regression test)
+- [ ] 07-02-PLAN.md — Wave 1: Add Settings.amadeus_env (Literal) + amadeus_api_key/secret (SecretStr) + tests
+- [ ] 07-03-PLAN.md — Wave 2: Async-safe call_with_breaker module around pybreaker (Pitfall 4 regression-locked)
+- [ ] 07-04-PLAN.md — Wave 3: AmadeusFlightClient — token cache + retry+breaker+pyreqwest search + APIError mapping + Pitfall 2 fix
+- [ ] 07-05-PLAN.md — Wave 4: Lifespan auto-fallback + /health flight_provider field + integration tests
+- [ ] 07-06-PLAN.md — Wave 4: e2e_amadeus dir + just test-amadeus + CI amadeus-e2e job + README credential setup
 
 ### Phase 8: Production Hardening (slim)
 
