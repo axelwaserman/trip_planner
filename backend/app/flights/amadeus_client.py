@@ -322,7 +322,12 @@ class AmadeusFlightClient(FlightAPIClient):
             max_duration: Inclusive upper bound on total duration (minutes).
             max_stops: Inclusive upper bound on the number of stops.
             limit: Maximum number of offers to return.
-            offset: Pagination offset.
+            offset: Pagination offset. Folded into ``_search_impl``'s
+                Amadeus ``max`` parameter as ``limit + offset`` so the
+                post-fetch slice ``[offset : offset + limit]`` is
+                well-formed (CR-01). Amadeus exposes no native numeric
+                offset; over-fetching + slicing is the documented
+                workaround.
 
         Returns:
             A list of :class:`Flight` objects matching the criteria, sorted
@@ -370,9 +375,16 @@ class AmadeusFlightClient(FlightAPIClient):
 
         Args:
             query: Validated :class:`FlightQuery`.
-            limit: Forwarded as the Amadeus ``max`` parameter.
-            offset: Currently unused — Amadeus has no offset; the caller
-                applies offset to the parsed result list.
+            limit: Forwarded into the Amadeus ``max`` parameter as
+                ``limit + offset`` (see ``offset`` below) so the post-fetch
+                slice in :meth:`search` is well-formed.
+            offset: Folded into the Amadeus ``max`` parameter as
+                ``limit + offset`` — Amadeus has no native numeric offset,
+                so we over-fetch and let :meth:`search` slice
+                ``[offset : offset + limit]`` from the filtered/sorted list.
+                Passing ``offset`` through here ensures we request enough
+                offers to satisfy the slice; otherwise pages past the first
+                would silently return empty (CR-01).
 
         Returns:
             Parsed :class:`Flight` list (unfiltered/unsorted/unpaginated).
@@ -383,7 +395,6 @@ class AmadeusFlightClient(FlightAPIClient):
             APIServerError: For 5xx responses.
             APITimeoutError: For timeouts and connection failures.
         """
-        _ = offset  # offset is applied post-fetch; Amadeus has no native offset
         token = await self._get_token()
         search_url = f"{self._base_url}{self._SEARCH_PATH}"
         params: dict[str, str] = {
@@ -391,7 +402,10 @@ class AmadeusFlightClient(FlightAPIClient):
             "destinationLocationCode": query.destination,
             "departureDate": str(query.departure_date),
             "adults": str(query.passengers),
-            "max": str(limit),
+            # CR-01: request limit+offset so the post-fetch slice in
+            # ``search()`` is well-formed. Amadeus has no native numeric
+            # offset; over-fetching is the documented workaround.
+            "max": str(limit + offset),
             "currencyCode": "USD",
         }
         try:
