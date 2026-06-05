@@ -22,7 +22,7 @@ module.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -180,6 +180,12 @@ def normalize_amadeus_offer(offer: dict[str, Any], dictionaries: dict[str, Any])
 
         dep_at: datetime = datetime.fromisoformat(seg["departure"]["at"])
         arr_at: datetime = datetime.fromisoformat(seg["arrival"]["at"])
+        # Pitfall 2: Amadeus sandbox returns naive datetimes; attach UTC as a
+        # safe fallback. Phase 8 will resolve airport-local TZ via lookup.
+        if dep_at.tzinfo is None:
+            dep_at = dep_at.replace(tzinfo=UTC)
+        if arr_at.tzinfo is None:
+            arr_at = arr_at.replace(tzinfo=UTC)
 
         segments.append(
             FlightSegment(
