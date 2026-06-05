@@ -27,6 +27,9 @@ dependencies = [
     # Adding the `[asyncio]` extra makes the install platform-agnostic.
     "sqlalchemy[asyncio]>=2.0.50",
     "tenacity>=9.1.2",
+    # Phase 7 — D-12 (circuit breaker). Pinned <2.0 because call_with_breaker accesses
+    # state._handle_error (single-underscore "protected" API) per RESEARCH Pattern 3.
+    "pybreaker>=1.4.1,<2.0",
 ]
 
 [dependency-groups]
