@@ -29,24 +29,28 @@ import asyncio
 import logging
 import re
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, NoReturn
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pybreaker
 from pyreqwest.client import ClientBuilder
+from pyreqwest.exceptions import ConnectError, RequestTimeoutError, StatusError
 
 from app.exceptions import (
     APIClientError,
     APIError,
     APIRateLimitError,
     APIServerError,
+    APITimeoutError,
     FlightSearchError,
 )
+from app.flights.models import Flight
+from app.tools.circuit_breaker import call_with_breaker
 from app.tools.flight_client import FlightAPIClient
+from app.tools.retry import retry_on_failure
 
 if TYPE_CHECKING:
-    from decimal import Decimal
-
-    from app.flights.models import Flight, FlightQuery, SortBy
+    from app.flights.models import BookingClass, FlightQuery, SortBy
 
 logger = logging.getLogger(__name__)
 
@@ -297,12 +301,234 @@ class AmadeusFlightClient(FlightAPIClient):
         limit: int = 20,
         offset: int = 0,
     ) -> list[Flight]:
-        """Search Amadeus for flight offers (Task 2 implementation).
+        """Search Amadeus for flight offers, then filter / sort / paginate.
+
+        Composition order is fixed by D-12: ``_fetch_with_retry_breaker``
+        applies ``@retry_on_failure`` (Plan 01) on the outside,
+        ``call_with_breaker`` (Plan 03) inside, and the pyreqwest GET
+        innermost. Each retry attempt therefore re-checks the breaker
+        (retry-outside, breaker-inside, HTTP-innermost).
+
+        An open breaker (``pybreaker.CircuitBreakerError``) is mapped to
+        :class:`APIServerError(retryable=False)` so tenacity's
+        ``retry_if_exception`` predicate (which gates on
+        ``isinstance(exc, exceptions) and getattr(exc, "retryable", False)``)
+        does NOT retry into the open breaker (D-13).
+
+        Args:
+            query: Validated :class:`FlightQuery`.
+            sort_by: ``"price"`` (default), ``"duration"``, or ``"departure"``.
+            max_price: Inclusive upper bound on price (Decimal).
+            max_duration: Inclusive upper bound on total duration (minutes).
+            max_stops: Inclusive upper bound on the number of stops.
+            limit: Maximum number of offers to return.
+            offset: Pagination offset.
+
+        Returns:
+            A list of :class:`Flight` objects matching the criteria, sorted
+            and sliced. Empty list when Amadeus returns no offers.
+        """
+        flights = await self._fetch_with_retry_breaker(query, limit, offset)
+        flights = _apply_filters(flights, max_price, max_duration, max_stops)
+        flights = _sort_flights(flights, sort_by)
+        return flights[offset : offset + limit]
+
+    @retry_on_failure(max_retries=3, backoff_base=2.0)
+    async def _fetch_with_retry_breaker(
+        self, query: FlightQuery, limit: int, offset: int
+    ) -> list[Flight]:
+        """Run ``_search_impl`` under retry+breaker composition (D-12 / D-13).
+
+        The decorator order is structural — ``@retry_on_failure`` decorates
+        this private method, and the body invokes ``call_with_breaker``
+        wrapping ``_search_impl``. Mapping ``CircuitBreakerError`` ->
+        ``APIServerError(retryable=False)`` happens here so tenacity's
+        ``retry_if_exception`` predicate sees ``retryable=False`` and skips
+        retries into the open breaker (D-13).
+        """
+        try:
+            return await call_with_breaker(
+                self._breaker,
+                self._search_impl,
+                query,
+                limit,
+                offset,
+            )
+        except pybreaker.CircuitBreakerError as exc:
+            raise APIServerError(
+                message="Amadeus circuit breaker open",
+                retryable=False,
+            ) from exc
+
+    async def _search_impl(self, query: FlightQuery, limit: int, offset: int) -> list[Flight]:
+        """Inner Amadeus search call: pyreqwest GET + status mapping + parse.
+
+        On HTTP 401 the token cache is invalidated *before* raising so the
+        next user-driven retry refreshes the token (OQ-1 / T-07-04). The 401
+        itself is mapped to :class:`APIClientError(retryable=False)` so
+        tenacity does not auto-loop on a stale token.
+
+        Args:
+            query: Validated :class:`FlightQuery`.
+            limit: Forwarded as the Amadeus ``max`` parameter.
+            offset: Currently unused — Amadeus has no offset; the caller
+                applies offset to the parsed result list.
+
+        Returns:
+            Parsed :class:`Flight` list (unfiltered/unsorted/unpaginated).
 
         Raises:
-            NotImplementedError: Until Task 2 wires retry+breaker+pyreqwest.
+            APIClientError: For 401 / non-429 4xx responses.
+            APIRateLimitError: For 429 responses.
+            APIServerError: For 5xx responses.
+            APITimeoutError: For timeouts and connection failures.
         """
-        raise NotImplementedError("AmadeusFlightClient.search lands in Task 2")
+        _ = offset  # offset is applied post-fetch; Amadeus has no native offset
+        token = await self._get_token()
+        search_url = f"{self._base_url}{self._SEARCH_PATH}"
+        params: dict[str, str] = {
+            "originLocationCode": query.origin,
+            "destinationLocationCode": query.destination,
+            "departureDate": str(query.departure_date),
+            "adults": str(query.passengers),
+            "max": str(limit),
+            "currencyCode": "USD",
+        }
+        try:
+            async with (
+                ClientBuilder().timeout(timedelta(seconds=15)).error_for_status(True).build() as client
+            ):
+                resp = (
+                    await client.get(search_url)
+                    .bearer_auth(token)
+                    .query(params)
+                    .build()
+                    .send()
+                )
+                body: dict[str, Any] = await resp.json()
+        except StatusError as exc:
+            status = int(exc.details.get("status", 0))
+            if status == 401:
+                # OQ-1: invalidate the cache BEFORE raising so the next
+                # user-driven call refreshes the token. The 401 itself is
+                # not retryable (T-07-04 caps the loop at one refresh per
+                # user-driven call).
+                self._access_token = None
+                self._expires_at = datetime.min.replace(tzinfo=UTC)
+            _raise_from_http_status(status, exc)
+        except RequestTimeoutError as exc:
+            raise APITimeoutError(
+                message="Amadeus request timed out",
+                retryable=True,
+            ) from exc
+        except ConnectError as exc:
+            raise APITimeoutError(
+                message="Amadeus connection failed",
+                retryable=True,
+            ) from exc
+
+        return self._parse_flight_offers(body)
+
+    def _parse_flight_offers(self, body: dict[str, Any]) -> list[Flight]:
+        """Convert an Amadeus ``flight-offers`` response body to a ``list[Flight]``.
+
+        Constructs :class:`Flight` directly from the offer dictionaries (rather
+        than going through :func:`normalize_amadeus_offer`, which produces the
+        richer :class:`FlightResult`). This keeps the ABC return type intact
+        and avoids a Pydantic round-trip.
+
+        Naive ``departure.at`` / ``arrival.at`` values get UTC attached
+        (Pitfall 2). Unknown cabin codes fall back to ``"economy"`` with a
+        ``logger.warning`` rather than raising — Amadeus sandbox has been
+        observed to surface non-IATA cabin strings.
+
+        Args:
+            body: Parsed Amadeus ``flight-offers`` JSON body.
+
+        Returns:
+            List of constructed :class:`Flight` objects (may be empty).
+        """
+        offers = body.get("data", [])
+        carriers_dict: dict[str, str] = body.get("dictionaries", {}).get("carriers", {})
+        flights: list[Flight] = []
+        for offer in offers:
+            itinerary = offer["itineraries"][0]
+            segments = itinerary["segments"]
+            first_seg = segments[0]
+            last_seg = segments[-1]
+
+            dep_at_str: str = first_seg["departure"]["at"]
+            arr_at_str: str = last_seg["arrival"]["at"]
+            dep_at = datetime.fromisoformat(dep_at_str)
+            arr_at = datetime.fromisoformat(arr_at_str)
+            # Pitfall 2: Amadeus returns naive local datetimes — attach UTC
+            # as a safe fallback. Phase 8 will resolve airport-local TZ.
+            if dep_at.tzinfo is None:
+                dep_at = dep_at.replace(tzinfo=UTC)
+            if arr_at.tzinfo is None:
+                arr_at = arr_at.replace(tzinfo=UTC)
+
+            carrier_code: str = first_seg["carrierCode"]
+            carrier_name: str = carriers_dict.get(carrier_code, carrier_code)
+            flight_number = f"{carrier_code}{first_seg['number']}"
+
+            duration_minutes = _iso_pt_to_minutes(itinerary["duration"])
+            stops = len(segments) - 1
+
+            booking_class = self._extract_booking_class(offer)
+
+            flight = Flight(
+                id=offer["id"],
+                origin=first_seg["departure"]["iataCode"],
+                destination=last_seg["arrival"]["iataCode"],
+                departure=dep_at,
+                arrival=arr_at,
+                price=Decimal(str(offer["price"]["total"])),
+                currency=offer["price"]["currency"],
+                carrier=carrier_name,
+                flight_number=flight_number,
+                duration_minutes=duration_minutes,
+                stops=stops,
+                booking_class=booking_class,
+            )
+            flights.append(flight)
+        return flights
+
+    @staticmethod
+    def _extract_booking_class(offer: dict[str, Any]) -> BookingClass:
+        """Extract a normalized booking class string from an Amadeus offer.
+
+        Amadeus exposes the cabin code at
+        ``travelerPricings[0].fareDetailsBySegment[0].cabin``. The codes
+        follow IATA conventions (``ECONOMY`` / ``PREMIUM_ECONOMY`` /
+        ``BUSINESS`` / ``FIRST``); we lowercase them to satisfy the project's
+        :data:`BookingClass` literal. Unknown values are logged and fall back
+        to ``"economy"`` rather than raising — sandbox responses occasionally
+        surface non-IATA strings.
+
+        Args:
+            offer: A single Amadeus ``FlightOffer`` dict.
+
+        Returns:
+            Lowercase cabin code; ``"economy"`` on missing or unknown values.
+        """
+        try:
+            cabin: str = offer["travelerPricings"][0]["fareDetailsBySegment"][0]["cabin"]
+        except (KeyError, IndexError):
+            return "economy"
+        normalized = cabin.lower()
+        if normalized == "economy":
+            return "economy"
+        if normalized == "premium_economy":
+            return "premium_economy"
+        if normalized == "business":
+            return "business"
+        if normalized == "first":
+            return "first"
+        logger.warning(
+            "Unknown Amadeus cabin code %r; falling back to 'economy'", cabin
+        )
+        return "economy"
 
     async def get_flight_details(self, flight_id: str) -> Flight:
         """Get detailed information for a specific Amadeus offer.
