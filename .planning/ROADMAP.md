@@ -362,40 +362,21 @@ Plans:
 
 ### Phase 7: Real Flight API
 
-**Goal**: The agent calls Amadeus through the existing `FlightAPIClient` ABC, with `pyreqwest` for outbound HTTP, retry + circuit breaker, and clean error mapping; the mock remains the test default.
+**Status**: vendor-switch reset — Amadeus integration removed (self-service access closed); re-planning around Duffel.
+
+**Goal**: The agent calls a real flight provider (Duffel) through the existing `FlightAPIClient` ABC, with `pyreqwest` for outbound HTTP, retry + circuit breaker, and clean error mapping; the mock remains the test default.
 **Depends on**: Phase 6
 **Requirements**: REQ-real-flight-api
 **Success Criteria** (what must be TRUE):
 
-  1. An Amadeus client implements `FlightAPIClient`, uses **`pyreqwest`** for async I/O (not `aiohttp`/`httpx`), and reuses the existing retry decorator (exponential backoff + circuit breaker) and `APIError` hierarchy.
-  2. With real credentials configured, `search_flights` returns live results in the vendor-neutral JSON contract from Phase 4.6; without credentials, the system falls back to the mock client.
-  3. Real-API integration tests exist and are gated on the `AMADEUS_*` secrets being present in the E2E job; PR CI does not require API keys.
+  1. A Duffel client implements `FlightAPIClient`, uses **`pyreqwest`** for async I/O (not `aiohttp`/`httpx`), and reuses the existing retry decorator (exponential backoff + circuit breaker) and `APIError` hierarchy.
+  2. With a real Duffel API token configured, `search_flights` returns live results in the vendor-neutral JSON contract from Phase 4.6; without the token, the system falls back to the mock client.
+  3. Real-API integration tests exist and are gated on the Duffel API token being present in the E2E job; PR CI does not require API keys.
   4. Default `pytest` continues to pass with the mock client as the DI default; documentation describes credential setup for local and CI use.
 
-**Plans**: 6 plans across 4 waves
-Plans:
+**Plans**: TBD (vendor-switch re-plan pending — run `/gsd:discuss-phase 7` then `/gsd:plan-phase 7`).
 
-**Wave 1**
-
-- [x] 07-01-PLAN.md — Wave 1: Replace retry.py internals with tenacity wrapper (preserve public API; add reraise=True regression test)
-- [x] 07-02-PLAN.md — Wave 1: Add Settings.amadeus_env (Literal) + amadeus_api_key/secret (SecretStr) + tests
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 07-03-PLAN.md — Wave 2: Async-safe call_with_breaker module around pybreaker (Pitfall 4 regression-locked)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 07-04-PLAN.md — Wave 3: AmadeusFlightClient — token cache + retry+breaker+pyreqwest search + APIError mapping + Pitfall 2 fix
-
-**Wave 4** *(blocked on Wave 3 completion)*
-
-- [x] 07-05-PLAN.md — Wave 4: Lifespan auto-fallback + /health flight_provider field + integration tests
-- [x] 07-06-PLAN.md — Wave 4: e2e_amadeus dir + just test-amadeus + CI amadeus-e2e job + README credential setup
-
-**Wave 5** *(gap closure — blocked on Wave 4 completion)*
-
-- [x] 07-07-PLAN.md — Wave 5: Gap closure — fix CR-01 (pagination offset double-application) + CR-02 (_refresh_token 401 mishandling); regression-lock both with unit + e2e tests
+> Prior Amadeus-based plans (07-01..07-07) shipped and were verified at 25/25, then dropped wholesale when Amadeus closed self-service signups. The vendor-agnostic plumbing (`tenacity`-backed `retry_on_failure`, `pybreaker`-backed `call_with_breaker`, `pyreqwest`, lifespan auto-fallback shape, `/health` `flight_provider` field, `FlightAPIClient` ABC) survives in `backend/app/`; the Amadeus-specific client + tests + settings + CI job were removed. See git history (`d4fd3b2..72f819b`) for the prior shipped artifacts.
 
 ### Phase 8: Production Hardening (slim)
 

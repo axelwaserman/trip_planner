@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
 status: executing
-stopped_at: Phase 7 context gathered
-last_updated: "2026-06-05T08:41:48.439Z"
-last_activity: 2026-06-05 -- Phase 07 execution started
+stopped_at: Phase 7 vendor-switch reset (Amadeus dropped; re-planning around Duffel)
+last_updated: "2026-06-05T12:30:00.000Z"
+last_activity: 2026-06-05 -- Phase 07 vendor-switch reset (Amadeus removed)
 progress:
   total_phases: 16
-  completed_phases: 7
-  total_plans: 46
-  completed_plans: 45
-  percent: 44
+  completed_phases: 6
+  total_plans: 39
+  completed_plans: 38
+  percent: 38
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 
 ## Current Position
 
-Phase: 07 (real-flight-api) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 07
-Last activity: 2026-06-05 -- Phase 07 execution started
+Phase: 07 (real-flight-api) — VENDOR-SWITCH RESET
+Plan: 0 of 0 (re-plan pending — run `/gsd:discuss-phase 7` then `/gsd:plan-phase 7`)
+Status: Phase 7 reset after Amadeus dropped self-service access; switching to Duffel.
+Last activity: 2026-06-05 -- Phase 07 vendor-switch reset (Amadeus removed)
 
-Progress: [███████░░░] 69% (11/16 phases complete)
+Progress: [██████░░░░] 38% (6/16 phases complete)
 
 ## Performance Metrics
 
@@ -121,6 +121,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-06-05T04:44:14.286Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-real-flight-api/07-CONTEXT.md
+Last session: 2026-06-05T12:30:00.000Z
+Stopped at: Phase 7 vendor-switch reset (Amadeus dropped — switching to Duffel)
+Resume: run `/gsd:discuss-phase 7` to relock decisions against Duffel, then `/gsd:plan-phase 7`

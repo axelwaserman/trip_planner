@@ -23,11 +23,11 @@ def test_health() -> None:
 
 
 def test_health_flight_provider_is_mock_without_credentials() -> None:
-    """Default test env has no AMADEUS_* creds -> flight_provider == "mock".
+    """Default test env has no real-flight-API creds -> flight_provider == "mock".
 
-    The integration ``conftest.py`` does not pre-populate ``AMADEUS_*`` env
-    vars, so the lifespan branch hits the missing-creds fallback and reports
-    ``flight_provider == "mock"`` on /health.
+    The lifespan currently constructs ``MockFlightAPIClient`` unconditionally
+    (Phase 7 vendor switch in progress); the real-client branch will return
+    when the Duffel integration lands.
     """
     with TestClient(app) as client:
         response = client.get("/health")

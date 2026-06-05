@@ -1,9 +1,8 @@
 """Configuration management for the application."""
 
 import logging
-from typing import Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -97,18 +96,6 @@ class Settings(BaseSettings):
     # Override via ``OPENAI_O_SERIES_MODEL_PREFIXES`` (comma-separated) if
     # OpenAI adds a new o-series family.
     openai_o_series_model_prefixes: tuple[str, ...] = ("o1", "o3")
-
-    # Amadeus Flight API (Phase 7 — D-04, D-05). amadeus_env selects which
-    # base URL the lifespan branch maps to in Plan 03/04 ("test" → sandbox,
-    # "prod" → production, "mock" → in-process MockFlightAPIClient). The
-    # Literal narrowing is the T-07-01 mitigation: no user-controlled string
-    # can ever reach base_url construction, only one of three known values.
-    # SecretStr wraps the credentials so accidental f-string / repr calls
-    # render as '**********' instead of leaking the key (T-07-02), layered
-    # on top of the existing ApiKeyScrubber log filter.
-    amadeus_env: Literal["test", "prod", "mock"] = "test"
-    amadeus_api_key: SecretStr | None = None
-    amadeus_api_secret: SecretStr | None = None
 
     def model_post_init(self, __context: object) -> None:
         """Emit warnings when insecure defaults are still in use."""

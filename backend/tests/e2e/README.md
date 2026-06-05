@@ -13,8 +13,8 @@ Forward-looking — these are the tests later phases will land here:
 
 - Auth flow against a running backend: `POST /api/auth/token`
   → `GET /api/auth/me` → one chat turn.
-- Real travel-API tests gated on a CI-available secret (e.g. `AMADEUS_*`),
-  skipped (never failed) when the secret is absent.
+- Real travel-API tests gated on a CI-available secret (e.g. the Duffel
+  API token), skipped (never failed) when the secret is absent.
 
 ## What does NOT belong here
 

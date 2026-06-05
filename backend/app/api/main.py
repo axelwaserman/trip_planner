@@ -19,7 +19,6 @@ from app.chat import (
 )
 from app.config import settings
 from app.db.session import _async_sessionmaker, engine
-from app.flights.amadeus_client import AmadeusFlightClient
 from app.llm.factory import LLMProviderFactory
 from app.llm.log_scrubbing import ApiKeyScrubber, install_log_scrubber, uninstall_log_scrubber
 from app.tools.flight_client import FlightAPIClient, MockFlightAPIClient
@@ -55,34 +54,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     log_scrubber: ApiKeyScrubber = install_log_scrubber()
 
     # Initialize flight client.
-    # Phase 7 / Plan 07-05 (D-04, D-05): branch on amadeus_env + credential
-    # presence. ``amadeus_env == "mock"`` and missing creds both fall back to
-    # the mock client; only the missing-creds case logs WARN. Startup must
-    # never fail because of missing creds (D-05) — a developer with no Amadeus
-    # account still gets a working stack.
-    if (
-        settings.amadeus_env == "mock"
-        or settings.amadeus_api_key is None
-        or settings.amadeus_api_secret is None
-    ):
-        if settings.amadeus_env != "mock":
-            logger.warning("AMADEUS_* creds missing — falling back to MockFlightAPIClient")
-        flight_client: FlightAPIClient = MockFlightAPIClient(seed=42)
-        flight_provider = "mock"
-    else:
-        # D-04: only two base URLs are constructable; the Literal type on
-        # amadeus_env (config.py) keeps the input domain locked (T-07-01).
-        base_url = (
-            "https://test.api.amadeus.com"
-            if settings.amadeus_env == "test"
-            else "https://api.amadeus.com"
-        )
-        flight_client = AmadeusFlightClient(
-            api_key=settings.amadeus_api_key.get_secret_value(),
-            api_secret=settings.amadeus_api_secret.get_secret_value(),
-            base_url=base_url,
-        )
-        flight_provider = "real"
+    # Phase 7 (vendor switch): Amadeus integration removed; Duffel client lands
+    # in the next plan. Until then, the lifespan unconditionally constructs the
+    # mock client so the dev stack stays bootable.
+    flight_client: FlightAPIClient = MockFlightAPIClient(seed=42)
+    flight_provider = "mock"
 
     # Construct the per-app LLM factory; providers are built per-session.
     llm_factory = LLMProviderFactory(settings)
@@ -108,10 +84,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.message_store = message_store
     app.state.conversation_repo = conversation_repo
     app.state.chat_service = chat_service
-    # Phase 7 / Plan 07-05 (D-06): expose the flight client + provider choice.
-    # ``flight_provider`` lets /health surface the active mode without
-    # re-deriving the branch logic; ``flight_client`` lets Plan 06's
-    # e2e_amadeus tests assert the constructed implementation directly.
+    # Expose the flight client + provider choice on app.state so /health can
+    # surface the active mode. The Duffel client (Phase 7 rework) will plug in
+    # here behind the same FlightAPIClient ABC.
     app.state.flight_client = flight_client
     app.state.flight_provider = flight_provider
     app.state.llm_factory = llm_factory
