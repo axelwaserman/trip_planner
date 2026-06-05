@@ -12,7 +12,8 @@ Asserts the four D-15 behaviours:
 * real ``MAD→BCN`` search returns ≥ 1 result (Pitfall 1 — sandbox-reliable route);
 * vendor-neutral ``Flight`` shape after normalisation;
 * error mapping for bad credentials (401 surfaces from ``_refresh_token`` as
-  ``APIError(retryable=True)`` per the catch-all wrap).
+  :class:`APIClientError(retryable=False)` via the new ``StatusError`` branch
+  added in Plan 07-07 — D-11 end-to-end).
 """
 
 import os
@@ -21,7 +22,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.exceptions import APIError
+from app.exceptions import APIClientError
 from app.flights.amadeus_client import AmadeusFlightClient
 from app.flights.models import FlightQuery
 
@@ -103,13 +104,19 @@ async def test_vendor_neutral_shape(amadeus_client: AmadeusFlightClient) -> None
 
 @pytest.mark.asyncio
 async def test_error_mapping_401_with_bad_credentials() -> None:
-    """Bad credentials surface as ``APIError`` from the token-refresh path.
+    """Bad credentials surface as ``APIClientError(retryable=False)`` from ``_refresh_token`` (D-11).
 
-    A 401 on ``/v1/security/oauth2/token`` returns a JSON error body that
-    lacks ``access_token``; ``_refresh_token``'s catch-all wraps any
-    underlying exception as ``APIError(retryable=True)`` (D-11 / T-07-02 —
-    the message deliberately omits the original exception text to avoid
-    echoing credentials from vendor error payloads).
+    Post-Plan-07-07 contract: ``error_for_status(True)`` on the OAuth POST
+    + the explicit ``except StatusError`` branch routes the 401 through
+    ``_raise_from_http_status`` -> ``APIClientError(retryable=False)``.
+    Previously the assertion was the broader ``APIError``, which matched
+    the buggy ``APIError(retryable=True)`` from the catch-all wrap and so
+    regression-locked the bug instead of the contract. The tighter
+    ``APIClientError`` + ``retryable is False`` pair locks the contract:
+    tenacity must NOT retry against bad credentials (T-07-04 mitigation),
+    and the message-scrubbing rationale (T-07-02 / T-07-03 — never echo
+    ``str(exc)``) is preserved by ``_raise_from_http_status`` constructing
+    messages from ``status`` only.
     """
     bad_client = AmadeusFlightClient(
         api_key="wrong",
@@ -117,5 +124,6 @@ async def test_error_mapping_401_with_bad_credentials() -> None:
         base_url="https://test.api.amadeus.com",
     )
 
-    with pytest.raises(APIError):
+    with pytest.raises(APIClientError) as exc_info:
         await bad_client._get_token()
+    assert exc_info.value.retryable is False
