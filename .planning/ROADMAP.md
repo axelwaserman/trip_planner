@@ -377,8 +377,8 @@ Plans:
 
 **Wave 1**
 
-- [ ] 07-01-PLAN.md — Wave 1: Replace retry.py internals with tenacity wrapper (preserve public API; add reraise=True regression test)
-- [ ] 07-02-PLAN.md — Wave 1: Add Settings.amadeus_env (Literal) + amadeus_api_key/secret (SecretStr) + tests
+- [x] 07-01-PLAN.md — Wave 1: Replace retry.py internals with tenacity wrapper (preserve public API; add reraise=True regression test)
+- [x] 07-02-PLAN.md — Wave 1: Add Settings.amadeus_env (Literal) + amadeus_api_key/secret (SecretStr) + tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -430,7 +430,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
 | 6. Postgres + Redis + docker-compose | v1.5 | 7/7 | Complete   | 2026-06-04 |
-| 7. Real Flight API | v2 | 0 / TBD | Not started | - |
+| 7. Real Flight API | v2 | 2/6 | In Progress|  |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
 ## Coverage
