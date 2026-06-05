@@ -395,7 +395,7 @@ Plans:
 
 **Wave 5** *(gap closure — blocked on Wave 4 completion)*
 
-- [ ] 07-07-PLAN.md — Wave 5: Gap closure — fix CR-01 (pagination offset double-application) + CR-02 (_refresh_token 401 mishandling); regression-lock both with unit + e2e tests
+- [x] 07-07-PLAN.md — Wave 5: Gap closure — fix CR-01 (pagination offset double-application) + CR-02 (_refresh_token 401 mishandling); regression-lock both with unit + e2e tests
 
 ### Phase 8: Production Hardening (slim)
 
@@ -434,7 +434,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
 | 6. Postgres + Redis + docker-compose | v1.5 | 7/7 | Complete   | 2026-06-04 |
-| 7. Real Flight API | v2 | 6/6 | Complete   | 2026-06-05 |
+| 7. Real Flight API | v2 | 7/7 | Complete   | 2026-06-05 |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
 ## Coverage
