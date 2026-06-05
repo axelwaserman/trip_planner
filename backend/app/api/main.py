@@ -108,8 +108,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.message_store = message_store
     app.state.conversation_repo = conversation_repo
     app.state.chat_service = chat_service
-    # Phase 7 / Plan 07-05 (D-06): expose the flight-provider choice so
-    # /health can surface it without re-deriving the branch logic.
+    # Phase 7 / Plan 07-05 (D-06): expose the flight client + provider choice.
+    # ``flight_provider`` lets /health surface the active mode without
+    # re-deriving the branch logic; ``flight_client`` lets Plan 06's
+    # e2e_amadeus tests assert the constructed implementation directly.
+    app.state.flight_client = flight_client
     app.state.flight_provider = flight_provider
     app.state.llm_factory = llm_factory
 
