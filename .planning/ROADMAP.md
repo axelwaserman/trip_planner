@@ -375,10 +375,21 @@ Plans:
 **Plans**: 6 plans across 4 waves
 Plans:
 
+**Wave 1**
+
 - [ ] 07-01-PLAN.md — Wave 1: Replace retry.py internals with tenacity wrapper (preserve public API; add reraise=True regression test)
 - [ ] 07-02-PLAN.md — Wave 1: Add Settings.amadeus_env (Literal) + amadeus_api_key/secret (SecretStr) + tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 07-03-PLAN.md — Wave 2: Async-safe call_with_breaker module around pybreaker (Pitfall 4 regression-locked)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 07-04-PLAN.md — Wave 3: AmadeusFlightClient — token cache + retry+breaker+pyreqwest search + APIError mapping + Pitfall 2 fix
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 07-05-PLAN.md — Wave 4: Lifespan auto-fallback + /health flight_provider field + integration tests
 - [ ] 07-06-PLAN.md — Wave 4: e2e_amadeus dir + just test-amadeus + CI amadeus-e2e job + README credential setup
 
