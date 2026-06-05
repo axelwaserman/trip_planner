@@ -70,6 +70,70 @@ This path is preserved for tight iteration loops where you don't want a
 container restart between code changes. The DATABASE_URL must point at a
 live Postgres or backend startup will fail.
 
+## Amadeus Flight API (Phase 7)
+
+The backend ships an `AmadeusFlightClient` that calls the real Amadeus REST API
+(`/v1/security/oauth2/token` + `/v2/shopping/flight-offers`). When credentials
+are absent the application auto-falls back to the in-process
+`MockFlightAPIClient` (D-05), so this section is **only** required if you want
+the real client active locally or in CI.
+
+### Required environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AMADEUS_API_KEY` | yes (for real client) | Amadeus client_id from the developer console. |
+| `AMADEUS_API_SECRET` | yes (for real client) | Amadeus client_secret from the developer console. |
+| `AMADEUS_ENV` | no (default `test`) | `test` selects the sandbox base URL `https://test.api.amadeus.com`; `prod` selects production. Set to `mock` to force the mock client even when keys are present. |
+
+Obtain a sandbox key pair from
+[https://developers.amadeus.com/self-service/](https://developers.amadeus.com/self-service/)
+(free, no credit card required).
+
+### Local dev setup
+
+```bash
+cp .env.example .env
+# Edit .env and append:
+#   AMADEUS_API_KEY=<your client_id>
+#   AMADEUS_API_SECRET=<your client_secret>
+just backend
+```
+
+Without the two env vars the backend boots with the mock client; with them it
+constructs the real `AmadeusFlightClient` against the sandbox.
+
+### Running the real-API tests locally
+
+```bash
+AMADEUS_API_KEY=... AMADEUS_API_SECRET=... just test-amadeus
+```
+
+Without the env vars, `just test-amadeus` is a no-op (the four tests in
+`backend/tests/e2e_amadeus/` are skipped via a module-level `pytestmark`).
+The default `just test`, `just test-unit`, `just test-integration`, and
+`just test-e2e` selectors do not collect this directory at all (D-14).
+
+### CI gating
+
+The GitHub Actions workflow defines an `amadeus-e2e` job that runs the real
+test suite. The job is gated on **two** conditions:
+
+1. The repository **variable** `AMADEUS_E2E_ENABLED` is set to the literal
+   string `true` (Settings → Secrets and variables → Actions → Variables).
+2. The repository **secrets** `AMADEUS_API_KEY` and `AMADEUS_API_SECRET` are
+   defined (Settings → Secrets and variables → Actions → Secrets).
+
+Pull-request CI does **not** run this job — secrets are not exposed to forks
+on `pull_request` events. The job runs on `push` to `master` and on manual
+`workflow_dispatch`. PR contributors without keys still pass the default CI
+(`backend`, `frontend`, `e2e`).
+
+The use of a repository variable as the gate, rather than a `secrets.* != ''`
+check inside `if:`, is a workaround for a GitHub Actions limitation: secret
+expressions are not supported in job-level `if:` conditions on `pull_request`
+events. The variable lets a maintainer flip the gate on once secrets exist.
+
 ## Project Structure
 
 ```

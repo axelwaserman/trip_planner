@@ -21,6 +21,10 @@ test:
 test-e2e:
     cd backend && uv run pytest -m "e2e" -v -s
 
+# Run real-API Amadeus integration tests (requires AMADEUS_API_KEY + AMADEUS_API_SECRET; skipped without)
+test-amadeus:
+    cd backend && uv run pytest tests/e2e_amadeus/ -v
+
 # Run unit tests only
 test-unit:
     cd backend && uv run pytest tests/unit/
