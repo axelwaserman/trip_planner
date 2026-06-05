@@ -230,21 +230,46 @@ class AmadeusFlightClient(FlightAPIClient):
     async def _refresh_token(self) -> str:
         """Fetch a new access token via OAuth2 client_credentials.
 
-        Wraps any underlying exception as ``APIError(retryable=True)`` so the
-        outer tenacity decorator can re-attempt (D-03). The error message
-        deliberately includes only the exception class name — never the
-        formatted exception text — to defend against credential echoing in
-        vendor error payloads (T-07-02 / T-07-03).
+        Maps HTTP status, timeout, and connection errors onto the project's
+        :class:`APIError` hierarchy (D-11) by mirroring the canonical
+        instrumentation in :meth:`_search_impl`:
+
+        * ``error_for_status(True)`` on the OAuth POST so non-2xx responses
+          raise :class:`pyreqwest.exceptions.StatusError` instead of being
+          parsed as JSON (CR-02 fix).
+        * Explicit branches for :class:`StatusError`,
+          :class:`RequestTimeoutError`, :class:`ConnectError` BEFORE the
+          catch-all so 401 maps to :class:`APIClientError(retryable=False)`,
+          429 to :class:`APIRateLimitError`, 5xx to
+          :class:`APIServerError`, and timeouts/connect to
+          :class:`APITimeoutError(retryable=True)`.
+        * The catch-all ``except Exception`` remains as
+          defense-in-depth for genuinely unexpected errors and still wraps
+          as ``APIError(retryable=True)`` with the class-name-only message
+          (T-07-02 / T-07-03 — never echo ``str(exc)``).
+        * A focused malformed-body guard maps a 2xx response missing
+          ``access_token`` / ``expires_in`` onto
+          :class:`APIError(retryable=False)` — vendor protocol violations
+          are not transient.
 
         Returns:
             The freshly-issued access token string.
 
         Raises:
-            APIError: With ``retryable=True`` for any underlying failure.
+            APIClientError: For 4xx including 401 (``retryable=False``).
+            APIRateLimitError: For 429 (``retryable=True``).
+            APIServerError: For 5xx (``retryable=True``).
+            APITimeoutError: For timeouts and connect failures
+                (``retryable=True``).
+            APIError: With ``retryable=False`` for malformed 2xx bodies;
+                with ``retryable=True`` from the catch-all for unexpected
+                failures.
         """
         token_url = f"{self._base_url}{self._TOKEN_PATH}"
         try:
-            async with ClientBuilder().timeout(timedelta(seconds=10)).build() as client:
+            async with (
+                ClientBuilder().timeout(timedelta(seconds=10)).error_for_status(True).build() as client
+            ):
                 resp = (
                     await client.post(token_url)
                     .form(
@@ -258,17 +283,49 @@ class AmadeusFlightClient(FlightAPIClient):
                     .send()
                 )
                 body = await resp.json()
+        except StatusError as exc:
+            # Mirror _search_impl's pattern: extract the wire status from
+            # exc.details and delegate to _raise_from_http_status. The
+            # helper constructs messages from `status` only — never from
+            # response bodies — preserving T-07-02 / T-07-03.
+            status = int(exc.details.get("status", 0))
+            _raise_from_http_status(status, exc)
+        except RequestTimeoutError as exc:
+            raise APITimeoutError(
+                message="Amadeus token refresh timed out",
+                retryable=True,
+            ) from exc
+        except ConnectError as exc:
+            raise APITimeoutError(
+                message="Amadeus token refresh connection failed",
+                retryable=True,
+            ) from exc
         except Exception as exc:
             # T-07-02: do NOT include str(exc) — Amadeus has been observed to
             # echo client_id back in error responses; the class name is
-            # sufficient to triage without leaking the secret.
+            # sufficient to triage without leaking the secret. This branch
+            # only fires for genuinely unexpected exceptions (e.g. asyncio
+            # cancellation framing, pyreqwest internals); HTTP-class
+            # failures are routed by the explicit branches above.
             raise APIError(
                 message=f"Amadeus token refresh failed: {type(exc).__name__}",
                 retryable=True,
             ) from exc
 
-        access_token: str = body["access_token"]
-        expires_in: int = int(body["expires_in"])
+        # Malformed-body guard: a 2xx response that is missing
+        # ``access_token`` / ``expires_in`` is a vendor protocol violation.
+        # Surface as APIError(retryable=False) rather than letting the
+        # KeyError bubble out as something callers might mistake for
+        # transient (CR-02). Message is a static string — no body content
+        # echoed (T-07-02 / T-07-03).
+        try:
+            access_token: str = body["access_token"]
+            expires_in: int = int(body["expires_in"])
+        except (KeyError, ValueError, TypeError) as exc:
+            raise APIError(
+                message="Amadeus token response malformed: missing access_token or expires_in",
+                retryable=False,
+            ) from exc
         self._access_token = access_token
         self._expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
         return access_token
