@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
-status: executing
-stopped_at: Phase 7 vendor-switch reset (Amadeus dropped; re-planning around Duffel)
-last_updated: "2026-06-05T12:30:00.000Z"
+status: Phase 7 reset after Amadeus dropped self-service access; switching to Duffel.
+stopped_at: Phase 7 context gathered (Duffel)
+last_updated: "2026-06-05T17:27:38.352Z"
 last_activity: 2026-06-05 -- Phase 07 vendor-switch reset (Amadeus removed)
 progress:
   total_phases: 16
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 39
-  completed_plans: 38
-  percent: 38
+  completed_plans: 39
+  percent: 44
 ---
 
 # Project State
@@ -121,6 +121,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-06-05T12:30:00.000Z
-Stopped at: Phase 7 vendor-switch reset (Amadeus dropped — switching to Duffel)
+Last session: 2026-06-05T17:27:38.344Z
+Stopped at: Phase 7 context gathered (Duffel)
 Resume: run `/gsd:discuss-phase 7` to relock decisions against Duffel, then `/gsd:plan-phase 7`
