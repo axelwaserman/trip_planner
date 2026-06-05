@@ -115,7 +115,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
   4. Provider misconfiguration (Ollama unreachable, cloud API key missing) renders a deterministic, human-readable error in the UI rather than a silent broken state.
   5. `AUTH_USERS=user1:pass1,...` remains the user source — no Postgres yet (deferred to Phase 5).
 
-**Plans**: 6 plans across 4 waves
+**Plans**: 7 plans across 5 waves
 Plans:
 
 - [x] 04.2-01-PLAN.md — Wave 0: Create 8 failing test stubs (4 backend, 4 frontend)
@@ -392,6 +392,10 @@ Plans:
 
 - [x] 07-05-PLAN.md — Wave 4: Lifespan auto-fallback + /health flight_provider field + integration tests
 - [x] 07-06-PLAN.md — Wave 4: e2e_amadeus dir + just test-amadeus + CI amadeus-e2e job + README credential setup
+
+**Wave 5** *(gap closure — blocked on Wave 4 completion)*
+
+- [ ] 07-07-PLAN.md — Wave 5: Gap closure — fix CR-01 (pagination offset double-application) + CR-02 (_refresh_token 401 mishandling); regression-lock both with unit + e2e tests
 
 ### Phase 8: Production Hardening (slim)
 
