@@ -34,10 +34,18 @@ from typing import Any
 # redacted. The Anthropic rule still runs first, so Anthropic keys remain
 # scrubbed via the more specific ``sk-ant-`` rule and never fall through to
 # the bare-``sk-`` rule.
+#
+# Duffel bearer (Phase 7 / Pitfall 7). The added pattern matches both sandbox
+# (``duffel_test_*``) and production (``duffel_live_*``) tokens; disjoint from
+# the ``sk-`` shapes so ordering relative to the OpenAI/Anthropic entries is
+# irrelevant. The 20-char lower bound on the body is a deliberate false-positive
+# guard — short literal substrings like the prefix alone in a debug message
+# must NOT be redacted.
 SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "sk-ant-[REDACTED]"),
     (re.compile(r"sk-(?:[a-z]+-)*[A-Za-z0-9_-]{20,}"), "sk-[REDACTED]"),
     (re.compile(r'("[A-Za-z0-9_]*api_key"\s*:\s*)"[^"]+"'), r'\1"[REDACTED]"'),
+    (re.compile(r"duffel_(test|live)_[A-Za-z0-9_-]{20,}"), "duffel_[REDACTED]"),
 )
 
 _UVICORN_LOGGER_NAMES: tuple[str, ...] = ("uvicorn.access", "uvicorn.error")
