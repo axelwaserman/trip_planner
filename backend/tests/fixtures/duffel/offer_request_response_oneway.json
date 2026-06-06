@@ -1,0 +1,61 @@
+{
+  "data": {
+    "id": "orq_0000Aoneway00000000001",
+    "offers": [
+      {
+        "id": "off_0000Aabcdefghijklmnop1",
+        "total_amount": "123.45",
+        "total_currency": "EUR",
+        "slices": [
+          {
+            "id": "sli_0000Aoneway00000000001",
+            "duration": "PT4H15M",
+            "origin": {"iata_code": "MAD", "name": "Adolfo Suárez Madrid–Barajas"},
+            "destination": {"iata_code": "BCN", "name": "Barcelona–El Prat"},
+            "segments": [
+              {
+                "id": "seg_0000Aoneway1",
+                "departing_at": "2026-07-15T08:30:00",
+                "arriving_at": "2026-07-15T10:00:00",
+                "origin": {"iata_code": "MAD", "name": "Adolfo Suárez Madrid–Barajas"},
+                "destination": {"iata_code": "PMI", "name": "Palma de Mallorca"},
+                "marketing_carrier": {"iata_code": "IB", "name": "Iberia"},
+                "marketing_carrier_flight_number": "3415",
+                "operating_carrier": {"iata_code": "IB", "name": "Iberia"},
+                "operating_carrier_flight_number": "3415",
+                "passengers": [
+                  {
+                    "passenger_id": "pas_0000A0001",
+                    "cabin_class": "economy",
+                    "cabin_class_marketing_name": "Economy"
+                  }
+                ]
+              },
+              {
+                "id": "seg_0000Aoneway2",
+                "departing_at": "2026-07-15T11:30:00",
+                "arriving_at": "2026-07-15T12:45:00",
+                "origin": {"iata_code": "PMI", "name": "Palma de Mallorca"},
+                "destination": {"iata_code": "BCN", "name": "Barcelona–El Prat"},
+                "marketing_carrier": {"iata_code": "IB", "name": "Iberia"},
+                "marketing_carrier_flight_number": "3088",
+                "operating_carrier": {"iata_code": "IB", "name": "Iberia"},
+                "operating_carrier_flight_number": "3088",
+                "passengers": [
+                  {
+                    "passenger_id": "pas_0000A0001",
+                    "cabin_class": "economy",
+                    "cabin_class_marketing_name": "Economy"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "passengers": [
+          {"id": "pas_0000A0001", "type": "adult"}
+        ]
+      }
+    ]
+  }
+}
