@@ -70,12 +70,58 @@ This path is preserved for tight iteration loops where you don't want a
 container restart between code changes. The DATABASE_URL must point at a
 live Postgres or backend startup will fail.
 
-## Real Flight API (Phase 7 — in flux)
+### Duffel Flight API (Phase 7)
 
-The backend ships only the in-process `MockFlightAPIClient` while Phase 7 is
-re-planned around a new vendor (Duffel). The previous Amadeus integration was
-removed after Amadeus closed self-service access. Once Phase 7 lands, this
-section will document the Duffel credential setup and the gated CI job.
+The real flight provider behind `FlightAPIClient` is Duffel. The lifespan
+auto-falls-back to `MockFlightAPIClient` when no token is configured (D-01 /
+D-02), so a fresh checkout boots without credentials.
+
+**Signup.** Create a sandbox account at <https://duffel.com/>. Sandbox tokens
+start with `duffel_test_*`; production tokens start with `duffel_live_*`.
+Vendor onboarding flow is owned by Duffel — do not duplicate it here.
+
+**Local development.** Set the token in either of two equivalent ways
+(`.env` is gitignored — never put credentials in `.env.example`):
+
+```bash
+# Option A — shell export
+export DUFFEL_API_TOKEN=duffel_test_...
+
+# Option B — .env file (preferred for local dev)
+echo 'DUFFEL_API_TOKEN=duffel_test_...' >> .env
+```
+
+`Settings.duffel_env` defaults to `test`, so a real token is picked up
+automatically. To force the mock client even with a real token present
+(useful when running unit/integration tests against a partial network),
+set `DUFFEL_ENV=mock`. See `.env.example` for the full list of Duffel rows.
+
+**Local test run.** With `DUFFEL_API_TOKEN` set:
+
+```bash
+just test-duffel    # runs backend/tests/e2e_duffel/ — 4 live tests
+```
+
+When `DUFFEL_API_TOKEN` is unset, the suite skips at collection time. The
+default `just test`, `just test-unit`, `just test-integration`, and
+`just test-e2e` targets do NOT run the Duffel suite live.
+
+**CI configuration (admin).** The `duffel-e2e` job in
+`.github/workflows/ci.yml` is gated on `vars.DUFFEL_E2E_ENABLED == 'true'`
+AND reads `secrets.DUFFEL_API_TOKEN` into the runtime env. Configure both
+under **Settings → Secrets and variables → Actions**:
+
+1. **Variables** — add `DUFFEL_E2E_ENABLED` = `true` (this drives
+   `vars.DUFFEL_E2E_ENABLED` in the workflow).
+2. **Secrets** — add `DUFFEL_API_TOKEN` = `duffel_test_...` (or
+   `duffel_live_*`).
+
+If either is missing the job is fully skipped — PR CI never requires the
+secret, and PRs from external forks never receive it.
+
+**Pitfall 1.** If `test_real_search_returns_results` fails with `count=0`,
+the Duffel sandbox is sparse for MAD→BCN on the chosen date. Switch the
+test query to LON→NYC manually — the test does not auto-switch.
 
 ## Project Structure
 
