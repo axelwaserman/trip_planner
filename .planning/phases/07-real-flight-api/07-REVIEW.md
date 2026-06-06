@@ -31,7 +31,24 @@ findings:
   warning: 5
   info: 9
   total: 14
-status: issues_found
+status: resolved
+resolution:
+  fixed_in_phase:
+    - WR-01: SecretStr wrapping on DuffelFlightClient instance (commit 824f3ea)
+    - WR-02: payload-shape error translation to APIServerError (commit 824f3ea)
+    - WR-03: _status_from_details defensive helper (commit 824f3ea)
+    - WR-04: search() docstring corrected (commit 824f3ea)
+    - WR-05: e2e CI job gated on vars.E2E_ENABLED (commit a0e0b11)
+    - IN-01: unused logger + logging import removed (commit 824f3ea)
+    - IN-02: README React 18 → 19 (commit a0e0b11)
+    - IN-03: duplicate stale Quick Start section removed (commit a0e0b11)
+    - IN-04: _PT_DURATION_RE rejects bare "PT" (commit 824f3ea)
+    - IN-07: scrubber regex uses non-capturing group (commit 824f3ea)
+  deferred:
+    - IN-05: cabin_class explicit-narrow check — design choice, validator already enforces; not actioned
+    - IN-06: round-trip return slice surfacing — v1 limitation per CONTEXT.md
+    - IN-08: cleanup_expired_conversations(max_age_seconds=0) — out of phase 7 scope
+    - IN-09: client-side max_stops reapply — defensive duplication, intentional
 ---
 
 # Phase 7: Code Review Report
