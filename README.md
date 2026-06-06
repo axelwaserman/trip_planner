@@ -151,60 +151,11 @@ trip_planner/
 - **mypy** - Static type checking
 
 ### Frontend
-- **React 18** - UI framework
+- **React 19** - UI framework
 - **TypeScript** - Type-safe JavaScript
 - **Vite** - Lightning-fast build tool
 - **Chakra UI v3** - Component library
 - **Framer Motion** - Animations
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.13+
-- Node.js 20+
-- [uv](https://github.com/astral-sh/uv) - Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- [Ollama](https://ollama.ai/) with gpt-oss20b model
-
-### Backend Setup
-
-```bash
-cd backend
-
-# Install dependencies
-uv sync --dev
-
-# Configure environment
-cp .env.example .env
-
-# Run server
-uv run uvicorn app.api.main:app --reload --host 127.0.0.1 --port 8000
-
-# Run tests
-uv run pytest
-
-# Lint and type check
-uv run ruff check .
-uv run mypy src/
-```
-
-Backend runs on http://localhost:8000
-
-### Frontend Setup
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Run dev server
-npm run dev
-```
-
-Frontend runs on http://localhost:5173
-
-API calls to `/api/*` are automatically proxied to the backend.
 
 ## Development Workflow
 

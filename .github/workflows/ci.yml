@@ -89,6 +89,11 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-latest
+    # Symmetric with duffel-e2e: backend/tests/e2e/ expects a real LLM (Ollama
+    # or equivalent). Skip the job by default; an admin opts in by setting
+    # vars.E2E_ENABLED=true on a runner with the LLM available. Without this
+    # gate the job hangs against localhost:11434 or fails on collect.
+    if: vars.E2E_ENABLED == 'true'
 
     steps:
       - name: Checkout
