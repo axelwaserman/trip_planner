@@ -1,0 +1,69 @@
+{
+  "data": {
+    "id": "orq_0000Around00000000000001",
+    "offers": [
+      {
+        "id": "off_0000Around0000000000001",
+        "total_amount": "245.90",
+        "total_currency": "EUR",
+        "slices": [
+          {
+            "id": "sli_0000Around0outbound0001",
+            "duration": "PT1H30M",
+            "origin": {"iata_code": "MAD", "name": "Adolfo Suárez Madrid–Barajas"},
+            "destination": {"iata_code": "BCN", "name": "Barcelona–El Prat"},
+            "segments": [
+              {
+                "id": "seg_0000Around0outbound1",
+                "departing_at": "2026-07-15T09:00:00",
+                "arriving_at": "2026-07-15T10:30:00",
+                "origin": {"iata_code": "MAD", "name": "Adolfo Suárez Madrid–Barajas"},
+                "destination": {"iata_code": "BCN", "name": "Barcelona–El Prat"},
+                "marketing_carrier": {"iata_code": "IB", "name": "Iberia"},
+                "marketing_carrier_flight_number": "1234",
+                "operating_carrier": {"iata_code": "IB", "name": "Iberia"},
+                "operating_carrier_flight_number": "1234",
+                "passengers": [
+                  {
+                    "passenger_id": "pas_0000A0001",
+                    "cabin_class": "economy",
+                    "cabin_class_marketing_name": "Economy"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "sli_0000Around0return000001",
+            "duration": "PT1H35M",
+            "origin": {"iata_code": "BCN", "name": "Barcelona–El Prat"},
+            "destination": {"iata_code": "MAD", "name": "Adolfo Suárez Madrid–Barajas"},
+            "segments": [
+              {
+                "id": "seg_0000Around0return01",
+                "departing_at": "2026-07-22T18:15:00",
+                "arriving_at": "2026-07-22T19:50:00",
+                "origin": {"iata_code": "BCN", "name": "Barcelona–El Prat"},
+                "destination": {"iata_code": "MAD", "name": "Adolfo Suárez Madrid–Barajas"},
+                "marketing_carrier": {"iata_code": "IB", "name": "Iberia"},
+                "marketing_carrier_flight_number": "5678",
+                "operating_carrier": {"iata_code": "IB", "name": "Iberia"},
+                "operating_carrier_flight_number": "5678",
+                "passengers": [
+                  {
+                    "passenger_id": "pas_0000A0001",
+                    "cabin_class": "economy",
+                    "cabin_class_marketing_name": "Economy"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "passengers": [
+          {"id": "pas_0000A0001", "type": "adult"}
+        ]
+      }
+    ]
+  }
+}
