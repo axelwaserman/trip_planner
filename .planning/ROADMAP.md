@@ -391,7 +391,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 07-04-PLAN.md — Wave 4: tests/e2e_duffel/ suite (D-12 four tests) + just test-duffel + CI duffel-e2e gated job + README credential setup
+- [x] 07-04-PLAN.md — Wave 4: tests/e2e_duffel/ suite (D-12 four tests) + just test-duffel + CI duffel-e2e gated job + README credential setup
 
 > Prior Amadeus-based plans (07-01..07-07) shipped and were verified at 25/25, then dropped wholesale when Amadeus closed self-service signups. The vendor-agnostic plumbing (`tenacity`-backed `retry_on_failure`, `pybreaker`-backed `call_with_breaker`, `pyreqwest`, lifespan auto-fallback shape, `/health` `flight_provider` field, `FlightAPIClient` ABC) survives in `backend/app/`; the Amadeus-specific client + tests + settings + CI job were removed. See git history (`d4fd3b2..72f819b`) for the prior shipped artifacts.
 
@@ -432,7 +432,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
 | 6. Postgres + Redis + docker-compose | v1.5 | 7/7 | Complete   | 2026-06-04 |
-| 7. Real Flight API | v2 | 3/4 | In Progress|  |
+| 7. Real Flight API | v2 | 4/4 | Complete   | 2026-06-06 |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
 ## Coverage
