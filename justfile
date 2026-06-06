@@ -25,9 +25,13 @@ test-e2e:
 test-unit:
     cd backend && uv run pytest tests/unit/
 
-# Run integration tests only  
+# Run integration tests only
 test-integration:
     cd backend && uv run pytest tests/integration/
+
+# Run real-API Duffel tests (gated on DUFFEL_API_TOKEN env var)
+test-duffel:
+    cd backend && uv run pytest tests/e2e_duffel/ -v
 
 # Lint backend code
 lint:

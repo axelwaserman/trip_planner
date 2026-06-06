@@ -117,3 +117,41 @@ jobs:
       - name: Run E2E tests
         working-directory: backend
         run: uv run pytest tests/e2e/
+
+  duffel-e2e:
+    name: Duffel E2E
+    runs-on: ubuntu-latest
+    # D-11 gate: full job skip when the repo-level toggle is unset/false.
+    # PR CI never requires the secret because the job never runs without
+    # an admin opting in via vars.DUFFEL_E2E_ENABLED=true.
+    if: vars.DUFFEL_E2E_ENABLED == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Cache uv virtualenv
+        uses: actions/cache@v4
+        with:
+          path: backend/.venv
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Run Duffel E2E tests
+        working-directory: backend
+        env:
+          DUFFEL_API_TOKEN: ${{ secrets.DUFFEL_API_TOKEN }}
+        run: uv run pytest tests/e2e_duffel/ -v
