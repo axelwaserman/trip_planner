@@ -1,4 +1,11 @@
-"""Unit tests for vendor-neutral FlightSearchResult normalization (REQ-tool-json-output)."""
+"""Unit tests for vendor-neutral FlightSearchResult normalization (REQ-tool-json-output).
+
+Phase 7 / Plan 07-03 (D-08): the module-level ``normalize_amadeus_offer`` and
+``normalize_skyscanner_itinerary`` helpers were deleted — vendor-specific
+normalization now lives on each :class:`FlightAPIClient` impl (e.g.
+``DuffelFlightClient._normalize_offer``). The regression-lock test below
+prevents reintroduction.
+"""
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -8,116 +15,22 @@ import pytest
 from app.flights.models import (
     Flight,
     FlightQuery,
-    FlightResult,
     FlightSearchResult,
 )
 from app.tools.flight_search import (
     _extract_carrier_iata,
     _to_flight_search_result,
     _to_iso_duration,
-    normalize_amadeus_offer,
-    normalize_skyscanner_itinerary,
     search_flights,
 )
 
-# ---------------------------------------------------------------------------
-# Acceptance fixtures
-# ---------------------------------------------------------------------------
 
-# Fixture 1: Amadeus FlightOffer (VERIFIED from amadeus4dev/amadeus-open-api-specification)
-# TZ-aware datetime strings used so fromisoformat() returns aware datetimes (Pitfall 1).
-AMADEUS_FLIGHT_OFFER = {
-    "type": "flight-offer",
-    "id": "1",
-    "itineraries": [
-        {
-            "duration": "PT5H25M",
-            "segments": [
-                {
-                    "id": "1",
-                    "departure": {
-                        "iataCode": "LAX",
-                        "terminal": "B",
-                        "at": "2026-06-15T08:00:00+00:00",
-                    },
-                    "arrival": {
-                        "iataCode": "JFK",
-                        "terminal": "4",
-                        "at": "2026-06-15T19:25:00+00:00",
-                    },
-                    "carrierCode": "DL",
-                    "number": "412",
-                    "duration": "PT5H25M",
-                    "numberOfStops": 0,
-                }
-            ],
-        }
-    ],
-    "price": {
-        "currency": "USD",
-        "total": "450.50",
-        "base": "380.00",
-    },
-    "travelerPricings": [
-        {
-            "fareDetailsBySegment": [
-                {
-                    "segmentId": "1",
-                    "cabin": "ECONOMY",
-                    "class": "Y",
-                }
-            ]
-        }
-    ],
-}
+def test_flight_search_module_no_amadeus_normalizers() -> None:
+    """D-08 lock: vendor-specific module-level normalizers are gone."""
+    from app.tools import flight_search
 
-AMADEUS_DICTIONARIES = {
-    "carriers": {"DL": "Delta Air Lines"},
-    "locations": {
-        "LAX": {"cityCode": "LA", "countryCode": "US"},
-        "JFK": {"cityCode": "NYC", "countryCode": "US"},
-    },
-}
-
-# Fixture 2: Skyscanner Itinerary [ASSUMED — Skyscanner partner API is partner-auth-gated;
-# field names based on RapidAPI playground + training knowledge. Validate against live docs
-# in Phase 7 and update normalize_skyscanner_itinerary() if field names differ.]
-# TZ-aware datetime strings used for consistency with Pitfall 1 guidance.
-SKYSCANNER_ITINERARY = {
-    "id": "iti_123",
-    "legs": [
-        {
-            "id": "leg_1",
-            "origin": {"iata": "LAX", "name": "Los Angeles International"},
-            "destination": {"iata": "JFK", "name": "John F. Kennedy International"},
-            "departure": "2026-06-15T08:00:00+00:00",
-            "arrival": "2026-06-15T19:25:00+00:00",
-            "durationInMinutes": 325,
-            "stopCount": 0,
-            "carriers": [{"iata": "DL", "name": "Delta Air Lines"}],
-            "segments": [
-                {
-                    "id": "seg_1",
-                    "origin": {"iata": "LAX"},
-                    "destination": {"iata": "JFK"},
-                    "departure": "2026-06-15T08:00:00+00:00",
-                    "arrival": "2026-06-15T19:25:00+00:00",
-                    "marketingCarrier": {"iata": "DL", "name": "Delta Air Lines"},
-                    "flightNumber": "412",
-                }
-            ],
-        }
-    ],
-    "price": {
-        "raw": 450.50,
-        "formatted": "$450.50",
-        "currency": "USD",
-    },
-}
-
-# Google Flights fixture omitted — no public REST API exists.
-# Per REQ-tool-json-output: "drop the third fixture and document the omission
-# if no representative sample exists."
+    assert not hasattr(flight_search, "normalize_amadeus_offer")
+    assert not hasattr(flight_search, "normalize_skyscanner_itinerary")
 
 
 # ---------------------------------------------------------------------------
@@ -173,8 +86,10 @@ def test_extract_carrier_iata_from_flight_number() -> None:
 def test_flight_search_result_envelope_shape() -> None:
     """FlightSearchResult.model_dump() exposes exactly the 4 required envelope keys."""
     # Arrange
+    from app.flights.models import FlightSearchQuery
+
     result = FlightSearchResult(
-        query={"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
+        query=FlightSearchQuery(origin="LAX", destination="JFK", departure_date="2026-06-15", passengers=1),
         results=[],
         count=0,
     )
@@ -241,103 +156,6 @@ def test_to_flight_search_result_empty_list() -> None:
     assert result.count == 0
     assert result.results == []
     assert result.status == "ok"
-
-
-def test_amadeus_offer_normalizes_without_lossy_collapse() -> None:
-    """normalize_amadeus_offer maps all fields without lossy collapses."""
-    # Arrange
-    offer = AMADEUS_FLIGHT_OFFER
-    dicts = AMADEUS_DICTIONARIES
-
-    # Act
-    result: FlightResult = normalize_amadeus_offer(offer, dicts)
-
-    # Assert
-    assert result.price.amount == Decimal("450.50")
-    assert result.price.currency == "USD"
-    assert result.segments[0].departure.iata_code == "LAX"
-    assert result.segments[0].departure.terminal == "B"
-    assert result.segments[0].arrival.iata_code == "JFK"
-    assert result.segments[0].arrival.terminal == "4"
-    assert result.segments[0].carrier.iata_code == "DL"
-    assert result.segments[0].carrier.name == "Delta Air Lines"
-    assert result.booking_class == "ECONOMY"
-    assert result.segments[0].number_of_stops == 0
-    assert result.segments[0].departure.city == "LA"  # resolved from dictionaries, not raw IATA
-    assert result.segments[0].arrival.city == "NYC"  # resolved from dictionaries, not raw IATA
-
-
-def test_amadeus_offer_carrier_name_comes_from_dictionaries() -> None:
-    """normalize_amadeus_offer resolves carrier.name from dictionaries — not just IATA code."""
-    # Arrange
-    offer = AMADEUS_FLIGHT_OFFER
-    dicts = AMADEUS_DICTIONARIES
-
-    # Act
-    result: FlightResult = normalize_amadeus_offer(offer, dicts)
-
-    # Assert — the lossy-collapse anti-pattern (Pitfall 3): name must not equal iata_code
-    assert result.segments[0].carrier.name != result.segments[0].carrier.iata_code
-    assert result.segments[0].carrier.name == "Delta Air Lines"
-    assert result.segments[0].carrier.iata_code == "DL"
-
-
-def test_skyscanner_itinerary_normalizes_without_lossy_collapse() -> None:
-    """normalize_skyscanner_itinerary maps all fields without lossy collapses."""
-    # Arrange
-    itin = SKYSCANNER_ITINERARY
-
-    # Act
-    result: FlightResult = normalize_skyscanner_itinerary(itin)
-
-    # Assert
-    assert result.price.amount == Decimal("450.50")
-    assert result.segments[0].departure.iata_code == "LAX"
-    assert result.segments[0].carrier.iata_code == "DL"
-    assert result.segments[0].carrier.name == "Delta Air Lines"
-    assert result.segments[0].number_of_stops == 0
-
-
-def test_skyscanner_price_decimal_precision() -> None:
-    """normalize_skyscanner_itinerary converts float price.raw to exact Decimal (Pitfall 2)."""
-    # Arrange — verify the fixture has a float raw price (not a string)
-    raw_price = SKYSCANNER_ITINERARY["price"]["raw"]
-    assert isinstance(raw_price, float), "Fixture must use float to exercise the precision guard"
-
-    # Act
-    result: FlightResult = normalize_skyscanner_itinerary(SKYSCANNER_ITINERARY)
-
-    # Assert — Decimal("450.50") exactly, not Decimal('450.4999...')
-    assert result.price.amount == Decimal("450.50"), (
-        f"Expected Decimal('450.50'), got {result.price.amount!r} — float-to-Decimal coercion via str() must be applied"
-    )
-
-
-def test_skyscanner_empty_legs_raises() -> None:
-    """normalize_skyscanner_itinerary raises ValueError when legs list is empty (CR-01)."""
-    with pytest.raises(ValueError, match="no legs"):
-        normalize_skyscanner_itinerary({"id": "x", "legs": [], "price": {"raw": 100.0, "currency": "USD"}})
-
-
-def test_skyscanner_empty_segments_raises() -> None:
-    """normalize_skyscanner_itinerary raises ValueError when segments list is empty (CR-02)."""
-    itin = {
-        "id": "x",
-        "legs": [
-            {
-                "id": "leg_1",
-                "durationInMinutes": 60,
-                "origin": {"iata": "LAX", "name": "Los Angeles International"},
-                "destination": {"iata": "JFK", "name": "John F. Kennedy International"},
-                "carriers": [{"iata": "DL", "name": "Delta Air Lines"}],
-                "segments": [],
-                "stopCount": 0,
-            }
-        ],
-        "price": {"raw": 100.0, "currency": "USD"},
-    }
-    with pytest.raises(ValueError, match="no segments"):
-        normalize_skyscanner_itinerary(itin)
 
 
 @pytest.mark.asyncio

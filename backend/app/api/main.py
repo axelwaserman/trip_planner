@@ -19,6 +19,7 @@ from app.chat import (
 )
 from app.config import settings
 from app.db.session import _async_sessionmaker, engine
+from app.flights.duffel_client import DuffelFlightClient
 from app.llm.factory import LLMProviderFactory
 from app.llm.log_scrubbing import ApiKeyScrubber, install_log_scrubber, uninstall_log_scrubber
 from app.tools.flight_client import FlightAPIClient, MockFlightAPIClient
@@ -54,11 +55,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     log_scrubber: ApiKeyScrubber = install_log_scrubber()
 
     # Initialize flight client.
-    # Phase 7 (vendor switch): Amadeus integration removed; Duffel client lands
-    # in the next plan. Until then, the lifespan unconditionally constructs the
-    # mock client so the dev stack stays bootable.
-    flight_client: FlightAPIClient = MockFlightAPIClient(seed=42)
-    flight_provider = "mock"
+    # D-02: lifespan auto-fallback. Boot must NEVER fail because of missing
+    # creds (Pitfall 6). flight_provider = "real" only when DuffelFlightClient
+    # is constructed. An empty SecretStr (from the empty DUFFEL_API_TOKEN= row
+    # in .env.example — see Plan 07-01 SUMMARY notes) is treated as "no token"
+    # so the fallback path runs uniformly for both None and SecretStr('').
+    duffel_token = settings.duffel_api_token
+    duffel_token_value = duffel_token.get_secret_value() if duffel_token is not None else ""
+    if settings.duffel_env == "mock" or not duffel_token_value:
+        if settings.duffel_env != "mock":
+            # Pitfall 6 / T-07-02: WARN but do not raise. The literal log line
+            # below is asserted by tests/integration/test_lifespan_flight_provider.py.
+            logger.warning("DUFFEL_API_TOKEN missing — falling back to MockFlightAPIClient")
+        flight_client: FlightAPIClient = MockFlightAPIClient(seed=42)
+        flight_provider = "mock"
+    else:
+        flight_client = DuffelFlightClient(
+            api_token=duffel_token_value,
+            base_url="https://api.duffel.com",
+        )
+        flight_provider = "real"
 
     # Construct the per-app LLM factory; providers are built per-session.
     llm_factory = LLMProviderFactory(settings)
