@@ -130,8 +130,40 @@ def test_scrub_does_not_double_redact_anthropic_key_via_bare_sk_rule() -> None:
     assert redacted == "token=sk-ant-[REDACTED]"
 
 
-def test_secret_patterns_shape_is_three_pairs() -> None:
-    assert len(SECRET_PATTERNS) == 3
+def test_secret_patterns_shape_is_four_pairs() -> None:
+    # Phase 7 / Pitfall 7 appended the Duffel bearer pattern.
+    assert len(SECRET_PATTERNS) == 4
+
+
+# Phase 7 / Pitfall 7 — Duffel bearer-token redaction. Token shape is
+# ``duffel_(test|live)_[A-Za-z0-9_-]{20,}`` per Duffel docs convention; the
+# ``{20,}`` lower bound prevents false positives on short prefix substrings
+# (e.g. a debug message that happens to mention the literal ``duffel_test_``).
+
+
+def test_scrub_redacts_duffel_test_token() -> None:
+    assert _scrub("token=duffel_test_abcdefghij1234567890") == "token=duffel_[REDACTED]"
+
+
+def test_scrub_redacts_duffel_live_token() -> None:
+    assert _scrub("token=duffel_live_abcdefghij1234567890") == "token=duffel_[REDACTED]"
+
+
+def test_scrub_short_duffel_prefix_does_not_match() -> None:
+    # ``duffel_test_short`` body is < 20 chars — must NOT be redacted; protects
+    # debug/log messages that mention the prefix without a real token.
+    assert _scrub("debug duffel_test_short was here") == "debug duffel_test_short was here"
+
+
+def test_scrub_duffel_token_inside_authorization_header_format() -> None:
+    redacted = _scrub("Authorization: Bearer duffel_live_xyz1234567890abcdefgh")
+    assert redacted == "Authorization: Bearer duffel_[REDACTED]"
+
+
+def test_scrub_existing_openai_key_still_redacted_after_addition() -> None:
+    # Regression-lock: the Duffel pattern must not break the OpenAI/Anthropic
+    # ordering (sk-ant- before bare sk-). Disjoint shapes, but pin the contract.
+    assert _scrub("key=sk-abcdefghij1234567890") == "key=sk-[REDACTED]"
 
 
 # ---------------------------------------------------------------------------
