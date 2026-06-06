@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
-status: Phase 7 reset after Amadeus dropped self-service access; switching to Duffel.
+status: executing
 stopped_at: Phase 7 context gathered (Duffel)
-last_updated: "2026-06-05T17:27:38.352Z"
-last_activity: 2026-06-05 -- Phase 07 vendor-switch reset (Amadeus removed)
+last_updated: "2026-06-06T04:19:12.898Z"
+last_activity: 2026-06-06 -- Phase 7 planning complete
 progress:
   total_phases: 16
   completed_phases: 7
-  total_plans: 39
+  total_plans: 43
   completed_plans: 39
   percent: 44
 ---
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-15)
 
 Phase: 07 (real-flight-api) — VENDOR-SWITCH RESET
 Plan: 0 of 0 (re-plan pending — run `/gsd:discuss-phase 7` then `/gsd:plan-phase 7`)
-Status: Phase 7 reset after Amadeus dropped self-service access; switching to Duffel.
-Last activity: 2026-06-05 -- Phase 07 vendor-switch reset (Amadeus removed)
+Status: Ready to execute
+Last activity: 2026-06-06 -- Phase 7 planning complete
 
 Progress: [██████░░░░] 38% (6/16 phases complete)
 

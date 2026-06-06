@@ -374,7 +374,24 @@ Plans:
   3. Real-API integration tests exist and are gated on the Duffel API token being present in the E2E job; PR CI does not require API keys.
   4. Default `pytest` continues to pass with the mock client as the DI default; documentation describes credential setup for local and CI use.
 
-**Plans**: TBD (vendor-switch re-plan pending — run `/gsd:discuss-phase 7` then `/gsd:plan-phase 7`).
+**Plans**: 4 plans across 4 waves
+Plans:
+
+**Wave 1**
+
+- [ ] 07-01-PLAN.md — Wave 1: Settings.duffel_api_token + Settings.duffel_env + ApiKeyScrubber regex + .env.example documentation (D-01, Pitfall 7, Pitfall 6)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 07-02-PLAN.md — Wave 2: DuffelFlightClient (~250 LOC) + recorded JSON fixtures + offline unit tests (D-03..D-14, Pitfall 4, T-07-02 message-no-body)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 07-03-PLAN.md — Wave 3: Lifespan D-02 auto-fallback + D-08 dead-code cleanup of flight_search.py + integration tests for /health and lifespan branches
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 07-04-PLAN.md — Wave 4: tests/e2e_duffel/ suite (D-12 four tests) + just test-duffel + CI duffel-e2e gated job + README credential setup
 
 > Prior Amadeus-based plans (07-01..07-07) shipped and were verified at 25/25, then dropped wholesale when Amadeus closed self-service signups. The vendor-agnostic plumbing (`tenacity`-backed `retry_on_failure`, `pybreaker`-backed `call_with_breaker`, `pyreqwest`, lifespan auto-fallback shape, `/health` `flight_provider` field, `FlightAPIClient` ABC) survives in `backend/app/`; the Amadeus-specific client + tests + settings + CI job were removed. See git history (`d4fd3b2..72f819b`) for the prior shipped artifacts.
 
