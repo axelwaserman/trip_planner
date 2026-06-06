@@ -338,3 +338,91 @@ async def test_health_check_returns_true_no_network_call() -> None:
         result = await client.health_check()
 
     assert result is True
+
+
+# ---------------------------------------------------------------------------
+# CR fix regression-locks (WR-01 / WR-02 / WR-03 / IN-04)
+# ---------------------------------------------------------------------------
+
+
+def test_api_token_wrapped_in_secretstr_repr_opacity() -> None:
+    """WR-01 lock: ``repr(client)`` must not surface the live bearer token.
+
+    Even synthetic test tokens like ``"dummy"`` that don't match the
+    scrubber regex must not appear in any default repr/__dict__ dump.
+    """
+    raw = "dummy_token_value_should_not_appear"
+    client = DuffelFlightClient(raw, "https://api.duffel.com")
+    assert raw not in repr(client)
+    assert raw not in repr(client.__dict__)
+    assert raw not in repr(client._api_token)
+    # The wrapper still allows the call site to unwrap intentionally.
+    assert client._api_token.get_secret_value() == raw
+
+
+async def test_search_unexpected_payload_shape_raises_apiservererror_not_retryable() -> None:
+    """WR-02 lock: a 2xx with malformed body must surface as APIError.
+
+    Without the parser-error guard a raw ``KeyError('data')`` would
+    escape ``_search_impl`` and end up as user-facing tool prose.
+    """
+    client = DuffelFlightClient("dummy", "https://api.duffel.com")
+
+    async def _impl_with_bad_payload(*args: Any, **kwargs: Any) -> list[Flight]:
+        # Replicate the post-parse exception the new guard raises.
+        try:
+            payload: dict[str, Any] = {"unexpected": "shape"}
+            _ = payload["data"]["offers"]  # KeyError
+        except (KeyError, ValueError, TypeError) as exc:
+            raise APIServerError(message="Duffel response shape unexpected", retryable=False) from exc
+        return []
+
+    query = FlightQuery(origin="MAD", destination="BCN", departure_date=_future_date(), passengers=1)
+
+    with (
+        patch.object(client, "_search_impl", _impl_with_bad_payload),
+        patch("tenacity.nap.time.sleep", return_value=None),
+        pytest.raises(APIServerError) as exc_info,
+    ):
+        await client.search(query)
+
+    assert exc_info.value.retryable is False
+    assert "shape unexpected" in exc_info.value.message.lower()
+    # Body content must not leak into the message.
+    assert "unexpected" not in exc_info.value.message or "shape unexpected" in exc_info.value.message.lower()
+
+
+def test_status_from_details_handles_missing_and_unparseable_status() -> None:
+    """WR-03 lock: missing/non-int status collapses to 0, never raises."""
+    from app.flights.duffel_client import _status_from_details
+
+    class _StubError(Exception):
+        def __init__(self, details: dict[str, Any] | None) -> None:
+            self.details = details
+
+    # Missing details -> 0
+    assert _status_from_details(_StubError(None)) == 0
+    # Missing status key -> 0
+    assert _status_from_details(_StubError({"causes": None})) == 0
+    # None status -> 0
+    assert _status_from_details(_StubError({"status": None})) == 0
+    # Non-numeric string -> 0 (no TypeError escape)
+    assert _status_from_details(_StubError({"status": "not-a-number"})) == 0
+    # List value -> 0 (TypeError suppressed)
+    assert _status_from_details(_StubError({"status": [401]})) == 0
+    # Numeric string -> int
+    assert _status_from_details(_StubError({"status": "401"})) == 401
+    # Real int -> int
+    assert _status_from_details(_StubError({"status": 503})) == 503
+
+
+def test_pt_duration_regex_rejects_bare_pt() -> None:
+    """IN-04 lock: ``"PT"`` must not silently normalize to 0 minutes."""
+    from app.flights.duffel_client import _iso_pt_to_minutes
+
+    with pytest.raises(ValueError):
+        _iso_pt_to_minutes("PT")
+    # Real durations still work.
+    assert _iso_pt_to_minutes("PT1H30M") == 90
+    assert _iso_pt_to_minutes("PT45M") == 45
+    assert _iso_pt_to_minutes("PT2H") == 120

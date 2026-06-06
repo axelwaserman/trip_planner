@@ -20,13 +20,13 @@ httpx, or requests.
 
 from __future__ import annotations
 
-import logging
 import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import pybreaker
+from pydantic import SecretStr
 from pyreqwest.client import ClientBuilder
 from pyreqwest.exceptions import ConnectError, RequestTimeoutError, StatusError
 
@@ -44,15 +44,15 @@ from app.tools.retry import retry_on_failure
 if TYPE_CHECKING:
     from app.flights.models import BookingClass, FlightQuery, SortBy
 
-logger = logging.getLogger(__name__)
-
 # D-03: Duffel wire-version constant. Bumping this is a code change, not a
 # config change — kept as a module constant per CLAUDE.md carve-out for
 # wire-version contract values (StrEnum / Settings rules do not apply).
 _DUFFEL_VERSION = "v2"
 
 # Parses Duffel ``slices[].duration`` strings of the form ``"PT1H30M"``.
-_PT_DURATION_RE = re.compile(r"^PT(?:(\d+)H)?(?:(\d+)M)?$")
+# Lookahead ``(?=\d)`` requires at least one digit — bare ``"PT"`` would
+# otherwise match with both groups None and yield a 0-minute Flight (IN-04).
+_PT_DURATION_RE = re.compile(r"^PT(?=\d)(?:(\d+)H)?(?:(\d+)M)?$")
 
 
 def _iso_pt_to_minutes(s: str) -> int:
@@ -106,6 +106,24 @@ def _sort_flights(flights: list[Flight], sort_by: SortBy) -> list[Flight]:
     if sort_by == "departure":
         return sorted(flights, key=lambda f: f.departure)
     return flights
+
+
+def _status_from_details(exc: Exception) -> int:
+    """Return an HTTP status int from a pyreqwest ``StatusError.details`` dict.
+
+    Defends against missing or non-int/non-numeric-string ``status`` values
+    (WR-03): unparseable shapes collapse to ``0`` so ``_raise_from_http_status``
+    routes them through the unknown-status branch instead of letting
+    ``int(...)`` raise outside the translation contract.
+    """
+    details = getattr(exc, "details", None) or {}
+    raw = details.get("status")
+    if raw is None:
+        return 0
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _raise_from_http_status(status: int, exc: Exception) -> NoReturn:
@@ -179,7 +197,12 @@ class DuffelFlightClient(FlightAPIClient):
                 T-07-02-03 (SSRF accepted because lifespan injects a
                 fixed string).
         """
-        self._api_token = api_token
+        # Defence-in-depth: wrap on the instance so an accidental ``repr(self)``
+        # / ``print(self.__dict__)`` / ``%r`` against the client surfaces
+        # ``SecretStr('**********')`` instead of the live token. Synthetic
+        # test tokens that don't match the scrubber regex (e.g. literal
+        # ``"dummy"``) are protected by this layer.
+        self._api_token: SecretStr = SecretStr(api_token)
         self._base_url = base_url.rstrip("/")
         self._breaker = pybreaker.CircuitBreaker(
             fail_max=5,
@@ -230,16 +253,14 @@ class DuffelFlightClient(FlightAPIClient):
                 await (
                     client.get(url)
                     .query({"limit": "1"})
-                    .bearer_auth(self._api_token)
+                    .bearer_auth(self._api_token.get_secret_value())
                     .header("Duffel-Version", _DUFFEL_VERSION)
                     .header("Accept", "application/json")
                     .build()
                     .send()
                 )
         except StatusError as exc:
-            details = getattr(exc, "details", None) or {}
-            status = int(details.get("status", 0))
-            _raise_from_http_status(status, exc)
+            _raise_from_http_status(_status_from_details(exc), exc)
         except RequestTimeoutError as exc:
             raise APITimeoutError(message="Duffel request timed out", retryable=True) from exc
         except ConnectError as exc:
@@ -348,7 +369,7 @@ class DuffelFlightClient(FlightAPIClient):
                 resp = await (
                     client.post(url)
                     .query({"return_offers": "true"})
-                    .bearer_auth(self._api_token)
+                    .bearer_auth(self._api_token.get_secret_value())
                     .header("Duffel-Version", _DUFFEL_VERSION)
                     .header("Accept", "application/json")
                     .body_json(body)
@@ -357,18 +378,27 @@ class DuffelFlightClient(FlightAPIClient):
                 )
                 payload: dict[str, Any] = await resp.json()
         except StatusError as exc:
-            details = getattr(exc, "details", None) or {}
-            status = int(details.get("status", 0))
-            _raise_from_http_status(status, exc)
+            _raise_from_http_status(_status_from_details(exc), exc)
         except RequestTimeoutError as exc:
             raise APITimeoutError(message="Duffel request timed out", retryable=True) from exc
         except ConnectError as exc:
             raise APITimeoutError(message="Duffel connection failed", retryable=True) from exc
 
-        offers: list[dict[str, Any]] = payload["data"]["offers"]
-        # D-06: cap at the impl boundary too — defence in depth against the
-        # CR-01-class double-application bug from the prior Amadeus phase.
-        return [self._normalize_offer(o) for o in offers[:limit]]
+        # WR-02: a 2xx with an unexpected body shape (missing data/offers,
+        # missing slices/segments/marketing_carrier/total_amount) must surface
+        # as a non-retryable APIError, not a raw KeyError that escapes the
+        # retry/breaker contract and ends up in user-facing tool prose.
+        try:
+            offers: list[dict[str, Any]] = payload["data"]["offers"]
+            # D-06: cap at the impl boundary too — defence in depth against
+            # the CR-01-class double-application bug from the prior Amadeus
+            # phase.
+            return [self._normalize_offer(o) for o in offers[:limit]]
+        except (KeyError, ValueError, TypeError) as exc:
+            raise APIServerError(
+                message="Duffel response shape unexpected",
+                retryable=False,
+            ) from exc
 
     @retry_on_failure(max_retries=3, backoff_base=2.0)
     async def _fetch_with_retry_breaker(self, query: FlightQuery, limit: int, max_stops: int | None) -> list[Flight]:
@@ -400,10 +430,11 @@ class DuffelFlightClient(FlightAPIClient):
     ) -> list[Flight]:
         """Search Duffel for offers matching ``query`` and return Flights.
 
-        D-06: ``offset`` is honored but capped — Duffel's single-round-trip
-        flow does not support ``offset > 0``; we return ``offers[:limit]``
-        regardless of the caller's value. This avoids the CR-01-class
-        double-application bug from the prior Amadeus phase.
+        D-06: ``offset`` is ignored — Duffel's single-round-trip flow does
+        not paginate; documented for ABC compatibility (CR-01-class
+        regression-lock). The parameter is preserved on the signature so
+        callers written against :class:`FlightAPIClient` can pass it without
+        a TypeError; the value is dropped before the fetch.
 
         Args:
             query: Vendor-neutral flight query.

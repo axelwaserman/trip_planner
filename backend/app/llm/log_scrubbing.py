@@ -45,7 +45,7 @@ SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "sk-ant-[REDACTED]"),
     (re.compile(r"sk-(?:[a-z]+-)*[A-Za-z0-9_-]{20,}"), "sk-[REDACTED]"),
     (re.compile(r'("[A-Za-z0-9_]*api_key"\s*:\s*)"[^"]+"'), r'\1"[REDACTED]"'),
-    (re.compile(r"duffel_(test|live)_[A-Za-z0-9_-]{20,}"), "duffel_[REDACTED]"),
+    (re.compile(r"duffel_(?:test|live)_[A-Za-z0-9_-]{20,}"), "duffel_[REDACTED]"),
 )
 
 _UVICORN_LOGGER_NAMES: tuple[str, ...] = ("uvicorn.access", "uvicorn.error")
