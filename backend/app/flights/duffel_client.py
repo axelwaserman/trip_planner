@@ -193,8 +193,57 @@ class DuffelFlightClient(FlightAPIClient):
         RESEARCH OQ-1: hitting Duffel for a liveness probe is wasteful and
         burns sandbox quota; ``/health`` callers want to know that the
         client is constructed and the lifespan branch chose ``"real"``. The
-        actual auth probe lives in the gated e2e_duffel suite (D-12).
+        actual auth probe lives in the gated e2e_duffel suite (D-12) and
+        calls :meth:`_auth_probe` directly.
         """
+        return True
+
+    async def _auth_probe(self) -> bool:
+        """Verify the bearer token via the lightweight reference endpoint.
+
+        RESEARCH §Code Example 4: ``GET /air/airlines?limit=1`` is reference
+        data and bypasses the offer-request per-search quota — the cheapest
+        possible auth verification. Used exclusively by the gated
+        ``tests/e2e_duffel/`` suite (D-12). NOT called from
+        :meth:`health_check` because liveness must not depend on outbound
+        network or sandbox quota.
+
+        Uses the same pyreqwest builder shape as :meth:`_search_impl` and
+        the same :func:`_raise_from_http_status` translation so a 401 from
+        an invalid token surfaces as :class:`APIClientError`
+        ``retryable=False`` (D-04 mapping). ``error_for_status(True)``
+        guarantees non-2xx responses raise before the JSON parser sees a
+        body it cannot parse (CR-02-class regression-lock).
+
+        Returns:
+            ``True`` on a 2xx response. The response body is irrelevant.
+
+        Raises:
+            APIClientError: 401, 422, or other 4xx (non-retryable).
+            APIRateLimitError: 429 (retryable).
+            APIServerError: 5xx or unknown (retryable).
+            APITimeoutError: connect or request timeout (retryable).
+        """
+        url = f"{self._base_url}/air/airlines"
+        try:
+            async with ClientBuilder().timeout(timedelta(seconds=10)).error_for_status(True).build() as client:
+                await (
+                    client.get(url)
+                    .query({"limit": "1"})
+                    .bearer_auth(self._api_token)
+                    .header("Duffel-Version", _DUFFEL_VERSION)
+                    .header("Accept", "application/json")
+                    .build()
+                    .send()
+                )
+        except StatusError as exc:
+            details = getattr(exc, "details", None) or {}
+            status = int(details.get("status", 0))
+            _raise_from_http_status(status, exc)
+        except RequestTimeoutError as exc:
+            raise APITimeoutError(message="Duffel request timed out", retryable=True) from exc
+        except ConnectError as exc:
+            raise APITimeoutError(message="Duffel connection failed", retryable=True) from exc
         return True
 
     def _build_offer_request_body(self, query: FlightQuery, max_stops: int | None) -> dict[str, Any]:
