@@ -383,7 +383,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 07-02-PLAN.md — Wave 2: DuffelFlightClient (~250 LOC) + recorded JSON fixtures + offline unit tests (D-03..D-14, Pitfall 4, T-07-02 message-no-body)
+- [x] 07-02-PLAN.md — Wave 2: DuffelFlightClient (~250 LOC) + recorded JSON fixtures + offline unit tests (D-03..D-14, Pitfall 4, T-07-02 message-no-body)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -432,7 +432,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
 | 6. Postgres + Redis + docker-compose | v1.5 | 7/7 | Complete   | 2026-06-04 |
-| 7. Real Flight API | v2 | 1/4 | In Progress|  |
+| 7. Real Flight API | v2 | 2/4 | In Progress|  |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
 ## Coverage
