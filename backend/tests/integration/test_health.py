@@ -25,9 +25,9 @@ def test_health() -> None:
 def test_health_flight_provider_is_mock_without_credentials() -> None:
     """Default test env has no real-flight-API creds -> flight_provider == "mock".
 
-    The lifespan currently constructs ``MockFlightAPIClient`` unconditionally
-    (Phase 7 vendor switch in progress); the real-client branch will return
-    when the Duffel integration lands.
+    Default test env has no real-flight-API creds AND duffel_env defaults to
+    'test', so D-02 fallback selects MockFlightAPIClient. Real-client branch is
+    exercised in test_lifespan_flight_provider.py.
     """
     with TestClient(app) as client:
         response = client.get("/health")
