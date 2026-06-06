@@ -1,8 +1,9 @@
 """Configuration management for the application."""
 
 import logging
+from typing import Literal
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,18 @@ class Settings(BaseSettings):
     # Anthropic Configuration (optional)
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-3-5-sonnet-20241022"
+
+    # Duffel Configuration (Phase 7 — D-01).
+    # ``duffel_api_token`` defaults to ``None`` so a fresh checkout boots
+    # without a Duffel account (Pitfall 6); the lifespan auto-fallback in
+    # Plan 07-03 swaps in ``MockFlightAPIClient`` when the token is absent.
+    # ``SecretStr`` keeps the raw token out of ``repr()``/debug dumps as a
+    # first-line defence; the ``ApiKeyScrubber`` regex (Pitfall 7) is the
+    # second-line defence at the log-formatter boundary. ``duffel_env``'s
+    # ``"mock"`` literal forces the mock client even when a token is present
+    # (useful for tests that need real creds in env but a deterministic client).
+    duffel_api_token: SecretStr | None = None
+    duffel_env: Literal["test", "live", "mock"] = "test"
 
     # Database (Phase 6 — D-01, D-11). database_url drives create_async_engine
     # in app/db/session.py; pool knobs are tunables on Settings per CLAUDE.md
