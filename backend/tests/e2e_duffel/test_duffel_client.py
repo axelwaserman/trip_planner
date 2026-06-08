@@ -21,7 +21,6 @@ Asserts the four D-12 behaviours:
 
 from __future__ import annotations
 
-import os
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -31,10 +30,12 @@ from app.exceptions import APIClientError
 from app.flights.duffel_client import DuffelFlightClient
 from app.flights.models import FlightQuery
 
-DUFFEL_AVAILABLE = bool(os.environ.get("DUFFEL_API_TOKEN"))
+# Token resolution lives in conftest._resolve_duffel_token (env -> backend/.env -> repo-root .env).
+from tests.e2e_duffel.conftest import DUFFEL_AVAILABLE
+
 pytestmark = pytest.mark.skipif(
     not DUFFEL_AVAILABLE,
-    reason="DUFFEL_API_TOKEN not set",
+    reason="DUFFEL_API_TOKEN not set (env or .env)",
 )
 
 
