@@ -34,7 +34,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
 - [x] **Phase 4.9: Pre-Phase-5 Prep** — split monolithic `models.py` into domain modules (auth, chat, providers, flights); extract `UserRepository` interface; add TypeScript/React skill + CLAUDE.md skill routing; fix 6 frontend bugs (empty-session new-session, font harmonization, second thinking block, settings URL error, LM Studio stale cache, sidebar overflow). (completed 2026-05-21)
 - [x] **Phase 5: PydanticAI Migration** — port `ChatService` from LangChain `bind_tools()` to PydanticAI `Agent`; preserve SSE event contract; remove `langchain*` deps; convert `LLMProvider`/`BoundProvider` from `typing.Protocol` to `abc.ABC`; ADR-001 → Superseded. **Resequenced ahead of Postgres** (PR #20 review, 2026-06-02): the agent surface is still small, so doing PydanticAI first avoids shaping the Phase 6 `Message` SQLModel against LangChain's `BaseChatMessageHistory` and folds the Protocol→ABC tech debt into the same change. **Status: Planned (2026-06-03) — 6 plans / 21 tasks across 6 waves; see `.planning/phases/05-pydanticai-migration/05-0*-PLAN.md`.** (completed 2026-06-03)
 - [x] **Phase 6: Postgres + Redis + docker-compose** — `psycopg` async + `sqlmodel` ORM; `User`/`Conversation`/`Message` tables (the `Message` shape now targets PydanticAI's `ModelMessage` directly, no JSON-payload escape hatch needed); named volumes; `OLLAMA_BASE_URL` overridable; CORS resolved by compose network; `AUTH_USERS` env-seed retired. (completed 2026-06-04)
-- [ ] **Phase 7: Real Flight API** — Amadeus client behind existing `FlightAPIClient` ABC; **outbound HTTP via `pyreqwest`**; reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests.
+- [x] **Phase 7: Real Flight API** — Amadeus client behind existing `FlightAPIClient` ABC; **outbound HTTP via `pyreqwest`**; reuse retry + circuit breaker + `APIError` hierarchy; gated integration tests. (completed 2026-06-05)
 - [ ] **Phase 8: Production Hardening (slim)** — CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy headers; Chakra-aware `rehype-sanitize`; `structlog` + `RequestLoggingMiddleware`; backend coverage 60 → 80; frontend `{ branches: 70, lines: 80 }`. **No rate limiting** (ADR-009).
 
 ## Phase Details
@@ -115,7 +115,7 @@ Trip Planner is an AI-powered chat agent that calls travel tools live and surfac
   4. Provider misconfiguration (Ollama unreachable, cloud API key missing) renders a deterministic, human-readable error in the UI rather than a silent broken state.
   5. `AUTH_USERS=user1:pass1,...` remains the user source — no Postgres yet (deferred to Phase 5).
 
-**Plans**: 6 plans across 4 waves
+**Plans**: 7 plans across 5 waves
 Plans:
 
 - [x] 04.2-01-PLAN.md — Wave 0: Create 8 failing test stubs (4 backend, 4 frontend)
@@ -362,17 +362,38 @@ Plans:
 
 ### Phase 7: Real Flight API
 
-**Goal**: The agent calls Amadeus through the existing `FlightAPIClient` ABC, with `pyreqwest` for outbound HTTP, retry + circuit breaker, and clean error mapping; the mock remains the test default.
+**Status**: vendor-switch reset — Amadeus integration removed (self-service access closed); re-planning around Duffel.
+
+**Goal**: The agent calls a real flight provider (Duffel) through the existing `FlightAPIClient` ABC, with `pyreqwest` for outbound HTTP, retry + circuit breaker, and clean error mapping; the mock remains the test default.
 **Depends on**: Phase 6
 **Requirements**: REQ-real-flight-api
 **Success Criteria** (what must be TRUE):
 
-  1. An Amadeus client implements `FlightAPIClient`, uses **`pyreqwest`** for async I/O (not `aiohttp`/`httpx`), and reuses the existing retry decorator (exponential backoff + circuit breaker) and `APIError` hierarchy.
-  2. With real credentials configured, `search_flights` returns live results in the vendor-neutral JSON contract from Phase 4.6; without credentials, the system falls back to the mock client.
-  3. Real-API integration tests exist and are gated on the `AMADEUS_*` secrets being present in the E2E job; PR CI does not require API keys.
+  1. A Duffel client implements `FlightAPIClient`, uses **`pyreqwest`** for async I/O (not `aiohttp`/`httpx`), and reuses the existing retry decorator (exponential backoff + circuit breaker) and `APIError` hierarchy.
+  2. With a real Duffel API token configured, `search_flights` returns live results in the vendor-neutral JSON contract from Phase 4.6; without the token, the system falls back to the mock client.
+  3. Real-API integration tests exist and are gated on the Duffel API token being present in the E2E job; PR CI does not require API keys.
   4. Default `pytest` continues to pass with the mock client as the DI default; documentation describes credential setup for local and CI use.
 
-**Plans**: TBD
+**Plans**: 4 plans across 4 waves
+Plans:
+
+**Wave 1**
+
+- [x] 07-01-PLAN.md — Wave 1: Settings.duffel_api_token + Settings.duffel_env + ApiKeyScrubber regex + .env.example documentation (D-01, Pitfall 7, Pitfall 6)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 07-02-PLAN.md — Wave 2: DuffelFlightClient (~250 LOC) + recorded JSON fixtures + offline unit tests (D-03..D-14, Pitfall 4, T-07-02 message-no-body)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 07-03-PLAN.md — Wave 3: Lifespan D-02 auto-fallback + D-08 dead-code cleanup of flight_search.py + integration tests for /health and lifespan branches
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 07-04-PLAN.md — Wave 4: tests/e2e_duffel/ suite (D-12 four tests) + just test-duffel + CI duffel-e2e gated job + README credential setup
+
+> Prior Amadeus-based plans (07-01..07-07) shipped and were verified at 25/25, then dropped wholesale when Amadeus closed self-service signups. The vendor-agnostic plumbing (`tenacity`-backed `retry_on_failure`, `pybreaker`-backed `call_with_breaker`, `pyreqwest`, lifespan auto-fallback shape, `/health` `flight_provider` field, `FlightAPIClient` ABC) survives in `backend/app/`; the Amadeus-specific client + tests + settings + CI job were removed. See git history (`d4fd3b2..72f819b`) for the prior shipped artifacts.
 
 ### Phase 8: Production Hardening (slim)
 
@@ -411,7 +432,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4.1 → 4.2 → 4.3 → 4.4 �
 | 4.9. Pre-Phase-5 Prep | v1.5 | 5/5 | Complete   | 2026-05-21 |
 | 5. PydanticAI Migration | v1.5 | 6/6 | Complete   | 2026-06-03 |
 | 6. Postgres + Redis + docker-compose | v1.5 | 7/7 | Complete   | 2026-06-04 |
-| 7. Real Flight API | v2 | 0 / TBD | Not started | - |
+| 7. Real Flight API | v2 | 4/4 | Complete   | 2026-06-06 |
 | 8. Production Hardening (slim) | v2 | 0 / TBD | Not started | - |
 
 ## Coverage

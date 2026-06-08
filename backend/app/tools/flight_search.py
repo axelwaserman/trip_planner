@@ -22,9 +22,8 @@ module.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
-from typing import Any
 
 from pydantic_ai import (
     RunContext,  # noqa: TC002 - PydanticAI evaluates RunContext[ChatDeps] via get_type_hints at Agent construction time; runtime import required (see module docstring)
@@ -79,12 +78,13 @@ def _to_iso_duration(minutes: int) -> str:
 
 
 def _to_flight_search_result(flights: list[Flight], query: FlightQuery) -> FlightSearchResult:
-    """Translate a list of mock Flight objects into a vendor-neutral FlightSearchResult.
+    """Translate a list of Flight objects into a vendor-neutral FlightSearchResult.
 
     Each ``Flight`` becomes exactly one ``FlightResult`` with one ``FlightSegment``.
-    The mock client does not provide city names, so both ``city`` and ``iata_code``
-    are set to the airport's IATA code as a placeholder. Phase 7's real Amadeus
-    client will populate ``city`` from ``dictionaries.locations``.
+    ``Flight.origin`` / ``destination`` carry IATA codes; ``city`` stays the same
+    IATA code for v1 (airport-IATA→city lookup is deferred per CONTEXT.md). The
+    Duffel client (D-08) does its own normalization on the way in, so this helper
+    only reshapes already-normalized vendor-neutral data.
 
     Args:
         flights: List of ``Flight`` objects returned by the ``FlightAPIClient``.
@@ -135,163 +135,6 @@ def _to_flight_search_result(flights: list[Flight], query: FlightQuery) -> Fligh
         ),
         results=results,
         count=len(results),
-    )
-
-
-def normalize_amadeus_offer(offer: dict[str, Any], dictionaries: dict[str, Any]) -> FlightResult:
-    """Normalize an Amadeus FlightOffer dict into a vendor-neutral FlightResult.
-
-    Reads carrier names from the ``dictionaries.carriers`` lookup and city names
-    from ``dictionaries.locations`` to avoid lossy field collapses (Pitfall 3).
-    Booking class is extracted from ``travelerPricings[0].fareDetailsBySegment[0].cabin``.
-
-    Args:
-        offer: A single Amadeus ``FlightOffer`` dict (from ``response.data[]``).
-        dictionaries: The Amadeus response ``dictionaries`` object containing
-            ``carriers`` and ``locations`` lookup dicts.
-
-    Returns:
-        A single ``FlightResult`` with normalized segments, price, and booking class.
-
-    Note:
-        Amadeus ``departure.at`` is a local datetime string with no TZ offset.
-        The Phase 4.6 test fixture supplies TZ-aware strings so this phase is
-        exercised correctly. Phase 7 must attach a TZ from airport lookup for
-        production use.
-    """
-    itinerary = offer["itineraries"][0]
-    total_duration: str = itinerary["duration"]
-    booking_class: str = offer["travelerPricings"][0]["fareDetailsBySegment"][0]["cabin"]
-    price_amount = Decimal(str(offer["price"]["total"]))
-    price_currency: str = offer["price"]["currency"]
-
-    segments: list[FlightSegment] = []
-    for seg in itinerary["segments"]:
-        carrier_code: str = seg["carrierCode"]
-        carrier_name: str = dictionaries["carriers"].get(carrier_code, carrier_code)
-
-        dep_iata: str = seg["departure"]["iataCode"]
-        arr_iata: str = seg["arrival"]["iataCode"]
-        dep_city: str = dictionaries["locations"].get(dep_iata, {}).get("cityCode", dep_iata)
-        arr_city: str = dictionaries["locations"].get(arr_iata, {}).get("cityCode", arr_iata)
-
-        dep_terminal: str | None = seg["departure"].get("terminal")
-        arr_terminal: str | None = seg["arrival"].get("terminal")
-
-        dep_at: datetime = datetime.fromisoformat(seg["departure"]["at"])
-        arr_at: datetime = datetime.fromisoformat(seg["arrival"]["at"])
-
-        segments.append(
-            FlightSegment(
-                id=seg["id"],
-                departure=FlightEndpoint(
-                    iata_code=dep_iata,
-                    city=dep_city,
-                    terminal=dep_terminal,
-                    at=dep_at,
-                ),
-                arrival=FlightEndpoint(
-                    iata_code=arr_iata,
-                    city=arr_city,
-                    terminal=arr_terminal,
-                    at=arr_at,
-                ),
-                carrier=CarrierInfo(iata_code=carrier_code, name=carrier_name),
-                flight_number=seg["number"],
-                duration=seg["duration"],
-                number_of_stops=seg.get("numberOfStops", 0),
-            )
-        )
-
-    return FlightResult(
-        id=offer["id"],
-        segments=segments,
-        total_duration=total_duration,
-        price=PriceInfo(amount=price_amount, currency=price_currency),
-        booking_class=booking_class,
-    )
-
-
-def normalize_skyscanner_itinerary(itin: dict[str, Any]) -> FlightResult:
-    """Normalize a Skyscanner itinerary dict into a vendor-neutral FlightResult.
-
-    Skyscanner uses ``itinerary.legs[]`` where each leg maps to an O/D pair
-    (equivalent to an Amadeus ``itinerary``). The leg's nested ``segments[]``
-    map to our ``FlightResult.segments[]``. This avoids the extra nesting level
-    confusion described in RESEARCH.md Pitfall 6.
-
-    For per-segment duration, the leg-level ``durationInMinutes`` is applied to
-    the first segment; any additional segments receive ``"PT0H"`` as a fallback
-    (leg-level breakdown by segment is not provided in the Skyscanner fixture).
-
-    Args:
-        itin: A single Skyscanner itinerary dict (assumed field names per
-            RESEARCH.md Fixture 2 — field names are [ASSUMED] from RapidAPI
-            playground; validate against live API docs in Phase 7).
-
-    Returns:
-        A single ``FlightResult`` normalized from the first leg of the itinerary.
-    """
-    from datetime import datetime  # local import to avoid polluting module namespace
-
-    legs: list[dict[str, Any]] = itin.get("legs", [])
-    if not legs:
-        raise ValueError("Skyscanner itinerary has no legs; cannot normalize.")
-    leg = legs[0]
-    total_duration: str = _to_iso_duration(leg["durationInMinutes"])
-    price_amount = Decimal(str(itin["price"]["raw"]))
-    price_currency: str = itin["price"]["currency"]
-
-    # Leg-level carrier for segments that don't have per-segment carrier info
-    leg_carrier = leg["carriers"][0] if leg.get("carriers") else {"iata": "ZZ", "name": "Unknown"}
-
-    segments: list[FlightSegment] = []
-    leg_segments: list[dict[str, Any]] = leg.get("segments", [])
-    if not leg_segments:
-        raise ValueError(f"Skyscanner leg '{leg.get('id')}' has no segments; cannot normalize.")
-    for idx, seg in enumerate(leg_segments):
-        seg_carrier = seg.get("marketingCarrier", leg_carrier)
-        carrier_iata: str = seg_carrier.get("iata", "ZZ")
-        carrier_name: str = seg_carrier.get("name", carrier_iata)
-
-        origin_iata: str = seg["origin"]["iata"]
-        dest_iata: str = seg["destination"]["iata"]
-        # Use name from leg endpoints (leg has richer city info than per-segment origin)
-        origin_city: str = leg["origin"].get("name", origin_iata) if idx == 0 else origin_iata
-        dest_city: str = leg["destination"].get("name", dest_iata) if idx == len(leg_segments) - 1 else dest_iata
-
-        dep_at: datetime = datetime.fromisoformat(seg["departure"])
-        arr_at: datetime = datetime.fromisoformat(seg["arrival"])
-
-        # Apply leg duration to first segment; "PT0H" for additional segments
-        seg_duration: str = total_duration if idx == 0 else "PT0H"
-
-        segments.append(
-            FlightSegment(
-                id=seg["id"],
-                departure=FlightEndpoint(
-                    iata_code=origin_iata,
-                    city=origin_city,
-                    at=dep_at,
-                ),
-                arrival=FlightEndpoint(
-                    iata_code=dest_iata,
-                    city=dest_city,
-                    at=arr_at,
-                ),
-                carrier=CarrierInfo(iata_code=carrier_iata, name=carrier_name),
-                flight_number=seg["flightNumber"],
-                duration=seg_duration,
-                number_of_stops=seg.get("numberOfStops", leg.get("stopCount", 0)),
-            )
-        )
-
-    return FlightResult(
-        id=itin["id"],
-        segments=segments,
-        total_duration=total_duration,
-        price=PriceInfo(amount=price_amount, currency=price_currency),
-        booking_class="ECONOMY",  # Skyscanner fixture does not expose cabin class
     )
 
 

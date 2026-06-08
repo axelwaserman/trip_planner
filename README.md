@@ -70,6 +70,59 @@ This path is preserved for tight iteration loops where you don't want a
 container restart between code changes. The DATABASE_URL must point at a
 live Postgres or backend startup will fail.
 
+### Duffel Flight API (Phase 7)
+
+The real flight provider behind `FlightAPIClient` is Duffel. The lifespan
+auto-falls-back to `MockFlightAPIClient` when no token is configured (D-01 /
+D-02), so a fresh checkout boots without credentials.
+
+**Signup.** Create a sandbox account at <https://duffel.com/>. Sandbox tokens
+start with `duffel_test_*`; production tokens start with `duffel_live_*`.
+Vendor onboarding flow is owned by Duffel — do not duplicate it here.
+
+**Local development.** Set the token in either of two equivalent ways
+(`.env` is gitignored — never put credentials in `.env.example`):
+
+```bash
+# Option A — shell export
+export DUFFEL_API_TOKEN=duffel_test_...
+
+# Option B — .env file (preferred for local dev)
+echo 'DUFFEL_API_TOKEN=duffel_test_...' >> .env
+```
+
+`Settings.duffel_env` defaults to `test`, so a real token is picked up
+automatically. To force the mock client even with a real token present
+(useful when running unit/integration tests against a partial network),
+set `DUFFEL_ENV=mock`. See `.env.example` for the full list of Duffel rows.
+
+**Local test run.** With `DUFFEL_API_TOKEN` set:
+
+```bash
+just test-duffel    # runs backend/tests/e2e_duffel/ — 4 live tests
+```
+
+When `DUFFEL_API_TOKEN` is unset, the suite skips at collection time. The
+default `just test`, `just test-unit`, `just test-integration`, and
+`just test-e2e` targets do NOT run the Duffel suite live.
+
+**CI configuration (admin).** The `duffel-e2e` job in
+`.github/workflows/ci.yml` is gated on `vars.DUFFEL_E2E_ENABLED == 'true'`
+AND reads `secrets.DUFFEL_API_TOKEN` into the runtime env. Configure both
+under **Settings → Secrets and variables → Actions**:
+
+1. **Variables** — add `DUFFEL_E2E_ENABLED` = `true` (this drives
+   `vars.DUFFEL_E2E_ENABLED` in the workflow).
+2. **Secrets** — add `DUFFEL_API_TOKEN` = `duffel_test_...` (or
+   `duffel_live_*`).
+
+If either is missing the job is fully skipped — PR CI never requires the
+secret, and PRs from external forks never receive it.
+
+**Pitfall 1.** If `test_real_search_returns_results` fails with `count=0`,
+the Duffel sandbox is sparse for MAD→BCN on the chosen date. Switch the
+test query to LON→NYC manually — the test does not auto-switch.
+
 ## Project Structure
 
 ```
@@ -98,60 +151,11 @@ trip_planner/
 - **mypy** - Static type checking
 
 ### Frontend
-- **React 18** - UI framework
+- **React 19** - UI framework
 - **TypeScript** - Type-safe JavaScript
 - **Vite** - Lightning-fast build tool
 - **Chakra UI v3** - Component library
 - **Framer Motion** - Animations
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.13+
-- Node.js 20+
-- [uv](https://github.com/astral-sh/uv) - Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- [Ollama](https://ollama.ai/) with gpt-oss20b model
-
-### Backend Setup
-
-```bash
-cd backend
-
-# Install dependencies
-uv sync --dev
-
-# Configure environment
-cp .env.example .env
-
-# Run server
-uv run uvicorn app.api.main:app --reload --host 127.0.0.1 --port 8000
-
-# Run tests
-uv run pytest
-
-# Lint and type check
-uv run ruff check .
-uv run mypy src/
-```
-
-Backend runs on http://localhost:8000
-
-### Frontend Setup
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Run dev server
-npm run dev
-```
-
-Frontend runs on http://localhost:5173
-
-API calls to `/api/*` are automatically proxied to the backend.
 
 ## Development Workflow
 

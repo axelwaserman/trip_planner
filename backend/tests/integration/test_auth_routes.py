@@ -57,10 +57,17 @@ def test_token_endpoint_rejects_unknown_user(client: TestClient) -> None:
 
 
 def test_health_check_is_public(client: TestClient) -> None:
-    """GET /health returns 200 without any auth token."""
+    """GET /health returns 200 without any auth token.
+
+    Plan 07-05 (D-06) extended the response shape with ``flight_provider``;
+    we assert the public-access invariant via field-membership checks rather
+    than exact-equality so future additions don't break this test again.
+    """
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["flight_provider"] in ("real", "mock")
 
 
 # ---------------------------------------------------------------------------

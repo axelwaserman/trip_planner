@@ -427,16 +427,21 @@ async def delete_conversation(
 
 
 @router.get("/health")
-async def health_check() -> dict[str, str]:
+async def health_check(request: Request) -> dict[str, str]:
     """Health check endpoint.
 
-    Returns basic health status. Can be extended to check dependencies
-    (database, LLM availability, etc.) in the future.
+    Phase 7 / Plan 07-05 (D-06): surfaces the active flight provider
+    (``"real"`` when ``AmadeusFlightClient`` is wired, ``"mock"`` when the
+    auto-fallback path picked ``MockFlightAPIClient``). The lifespan stashes
+    the choice on ``app.state.flight_provider`` before yield; the
+    ``getattr(..., "mock")`` default is a defensive fallback for invocations
+    that bypass lifespan (no real CI path does).
 
     Returns:
-        Dictionary with status field
+        Dictionary with ``status`` and ``flight_provider`` fields.
     """
-    return {"status": "healthy"}
+    flight_provider = getattr(request.app.state, "flight_provider", "mock")
+    return {"status": "healthy", "flight_provider": flight_provider}
 
 
 # (Plan 04.5-06b — _LOCAL_PROVIDER_NAMES is now declared above the
