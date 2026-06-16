@@ -33,10 +33,10 @@ class ChatDeps:
     - ``flight_client``: the abstract :class:`app.tools.flight_client.FlightAPIClient`
       instance (``MockFlightAPIClient`` in dev / tests; a real adapter in
       production). Closes the ``_flight_client`` back-door (D-06).
-    - ``session_id``: server-generated UUID identifying the chat session;
+    - ``conversation_id``: server-generated UUID identifying the chat conversation;
       stamped on every emitted ``StreamEvent`` for SSE wire correlation.
     - ``user_id``: authenticated username (the JWT ``sub`` claim) — used as
-      the per-user partition key for ``ConversationStore.list_for_user``
+      the per-user partition key for ``ConversationRepository.list_for_user``
       and any auth-gated tool downstream of ``ctx.deps``.
 
     Frozen so a tool cannot accidentally mutate ``ctx.deps`` mid-turn. The
@@ -45,5 +45,5 @@ class ChatDeps:
     """
 
     flight_client: FlightAPIClient
-    session_id: str
+    conversation_id: str
     user_id: str

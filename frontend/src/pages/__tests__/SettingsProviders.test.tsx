@@ -25,15 +25,38 @@ import { system } from '../../theme'
 import { SettingsProviders } from '../SettingsProviders'
 
 function mockProvidersFetch(ollamaModels: string[] = []) {
+  // Plan 06-05a discriminated ProviderInfoResponse shape: local entries
+  // (ollama, lmstudio) carry `type: "local"` + a required `base_url`; cloud
+  // entries (openai, anthropic) carry `type: "cloud"` + `api_key_configured`.
   return vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
     json: () =>
       Promise.resolve({
-        ollama: { available: true, models: ollamaModels, base_url: 'http://localhost:11434' },
-        lmstudio: { available: false, models: [], base_url: null },
-        openai: { available: false, models: [], base_url: null },
-        anthropic: { available: false, models: [], base_url: null },
+        ollama: {
+          type: 'local',
+          available: true,
+          models: ollamaModels,
+          base_url: 'http://localhost:11434',
+        },
+        lmstudio: {
+          type: 'local',
+          available: false,
+          models: [],
+          base_url: 'http://localhost:1234/v1',
+        },
+        openai: {
+          type: 'cloud',
+          available: false,
+          models: [],
+          api_key_configured: false,
+        },
+        anthropic: {
+          type: 'cloud',
+          available: false,
+          models: [],
+          api_key_configured: false,
+        },
       }),
   })
 }

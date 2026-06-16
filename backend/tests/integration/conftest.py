@@ -3,7 +3,7 @@
 The Phase 4.5 ``OllamaProvider.validate_config`` probe hits
 ``GET {base_url}/api/tags`` whenever a session is created with the default
 provider. Locally that succeeds against a running Ollama daemon; in CI no
-daemon is reachable and every ``POST /api/chat/session`` returns 502.
+daemon is reachable and every ``POST /api/chat/conversation`` returns 502.
 
 The autouse fixture below patches ``httpx.AsyncClient.get`` for every
 integration test by default to return a happy-path tags response containing

@@ -14,6 +14,8 @@ lib/
 lib64/
 !frontend/src/lib/
 !frontend/src/lib/**
+!frontend/e2e/lib/
+!frontend/e2e/lib/**
 parts/
 sdist/
 var/
@@ -63,3 +65,14 @@ dist-ssr/
 
 # Editor directories
 .turbo
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/.playwright/
+frontend/blob-report/
+frontend/playwright/.cache/
+
+# Phase 6 — seed file with dev creds (real seed.toml stays gitignored;
+# backend/seed.toml.example is committed as a placeholder template).
+backend/seed.toml

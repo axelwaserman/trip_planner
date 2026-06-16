@@ -1,7 +1,7 @@
 """Integration test — sessions are partitioned per authenticated user (D-22, D-27).
 
 Two distinct users log in, each owns a session in ``ChatService._metadata``,
-and each ``GET /api/chat/sessions`` call MUST return only its caller's
+and each ``GET /api/chat/conversations`` call MUST return only its caller's
 sessions. Closes RESEARCH.md Open Question 5 (RESOLVED).
 
 Phase 5 / Plan 05-04: ``_histories`` and ``_bound_providers`` retired in
@@ -11,24 +11,22 @@ partition behaviour is identical; only the seeding shape changes.
 
 from collections.abc import Generator
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
-def two_users(client: TestClient) -> Generator[None]:
-    """Seed alice + bob into the running EnvUserRepository for each test."""
-    from pwdlib import PasswordHash
-    from pwdlib.hashers.argon2 import Argon2Hasher
-
+def two_users(_inmemory_user_repo: object) -> Generator[None]:
+    """Seed alice + bob into the conftest in-memory test user repo for each test."""
     from app.auth.models import UserInDB
-    from app.auth.repository import EnvUserRepository  # noqa: TC001
+    from app.auth.repository import _password_hasher
+    from tests.fixtures.users import InMemoryUserRepository  # noqa: TC001
 
-    hasher = PasswordHash([Argon2Hasher()])
-    user_repo: EnvUserRepository = client.app.state.user_repo
-    user_repo.add_user(UserInDB(username="alice", hashed_password=hasher.hash("alicepass"), disabled=False))
-    user_repo.add_user(UserInDB(username="bob", hashed_password=hasher.hash("bobpass"), disabled=False))
+    user_repo: InMemoryUserRepository = _inmemory_user_repo  # type: ignore[assignment]
+    user_repo.add_user(UserInDB(username="alice", hashed_password=_password_hasher.hash("alicepass"), disabled=False))
+    user_repo.add_user(UserInDB(username="bob", hashed_password=_password_hasher.hash("bobpass"), disabled=False))
     yield
     user_repo.remove_user("alice")
     user_repo.remove_user("bob")
@@ -66,41 +64,46 @@ def test_two_users_get_independent_session_lists(
     bob_headers = _login(client, "bob", "bobpass")
 
     # Act 1 — alice's sessions list is initially empty
-    r1 = client.get("/api/chat/sessions", headers=alice_headers)
+    r1 = client.get("/api/chat/conversations", headers=alice_headers)
     assert r1.status_code == 200
-    assert r1.json() == {"sessions": []}
+    assert r1.json() == {"conversations": []}
 
     # Act 2 — bob's sessions list is initially empty
-    r1b = client.get("/api/chat/sessions", headers=bob_headers)
+    r1b = client.get("/api/chat/conversations", headers=bob_headers)
     assert r1b.status_code == 200
-    assert r1b.json() == {"sessions": []}
+    assert r1b.json() == {"conversations": []}
 
     # Seed one session per user directly via metadata.
     # We bypass the create_session route because that requires a live provider
     # probe; the partition behaviour is the unit-of-test here.
-    chat_service._metadata["alice-1"] = {
+    # Phase 6 / Plan 06-04: session ids must be UUID-strings — the new
+    # MessageStore.first_user_message_preview takes a UUID so opaque ids
+    # like "alice-1" no longer parse.
+    alice_conversation_id = str(uuid4())
+    bob_conversation_id = str(uuid4())
+    chat_service._metadata[alice_conversation_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "alice",
         "created_at": datetime.now(UTC).isoformat(),
     }
-    chat_service._metadata["bob-1"] = {
+    chat_service._metadata[bob_conversation_id] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "bob",
         "created_at": datetime.now(UTC).isoformat(),
     }
 
-    # Act 3 — alice lists sessions, sees ONLY alice-1
-    r2 = client.get("/api/chat/sessions", headers=alice_headers)
+    # Act 3 — alice lists sessions, sees ONLY her own
+    r2 = client.get("/api/chat/conversations", headers=alice_headers)
     assert r2.status_code == 200
-    alice_sessions = r2.json()["sessions"]
+    alice_sessions = r2.json()["conversations"]
     assert len(alice_sessions) == 1
-    assert alice_sessions[0]["session_id"] == "alice-1"
+    assert alice_sessions[0]["conversation_id"] == alice_conversation_id
 
-    # Act 4 — bob lists sessions, sees ONLY bob-1
-    r3 = client.get("/api/chat/sessions", headers=bob_headers)
+    # Act 4 — bob lists sessions, sees ONLY his own
+    r3 = client.get("/api/chat/conversations", headers=bob_headers)
     assert r3.status_code == 200
-    bob_sessions = r3.json()["sessions"]
+    bob_sessions = r3.json()["conversations"]
     assert len(bob_sessions) == 1
-    assert bob_sessions[0]["session_id"] == "bob-1"
+    assert bob_sessions[0]["conversation_id"] == bob_conversation_id

@@ -2,6 +2,74 @@
 
 AI-powered trip planning assistant with conversational interface and real-time travel data integration.
 
+## Quickstart
+
+Two boot paths are supported. Use the compose-driven path on a fresh checkout;
+the legacy direct path is preserved for fast inner-loop iteration.
+
+### Compose-driven (recommended; first run on a fresh checkout)
+
+Requires Docker Desktop (or any Docker engine) running.
+
+```bash
+# 1. Copy env templates and edit secrets
+cp .env.example .env
+# edit .env: replace JWT_SECRET (the placeholder is a literal hint, not a secret)
+#   python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+cp backend/seed.toml.example backend/seed.toml
+# edit backend/seed.toml: replace the `<change-me>` passwords for admin + demo
+
+# 2. Bring the database up + apply migrations + seed users
+just compose-up   # docker compose up -d --wait
+just migrate      # alembic upgrade head
+just db-seed      # idempotent INSERT ... ON CONFLICT into the user table
+
+# 3. Backend (Terminal 1) and frontend (Terminal 2)
+just backend
+just frontend
+```
+
+Open http://localhost:5173.
+
+#### Pitfall 4 — host port 5432 already in use
+
+If something else (Homebrew Postgres, another compose stack) is bound to
+`localhost:5432`, `just compose-up` will fail with `port is already allocated`.
+Pick one fix:
+
+- Stop the conflicting service: `brew services stop postgresql@*`
+- Override the host port: set `POSTGRES_HOST_PORT=5433` in `.env` AND change
+  the `5432` in `DATABASE_URL` to match.
+
+#### Compose round-trip test
+
+Proves data survives `docker compose down && up` (ROADMAP success criterion #1):
+
+```bash
+bash scripts/test-compose-roundtrip.sh
+```
+
+The script seeds a user, takes the stack down, brings it back up, and asserts
+the user count is unchanged. It does NOT clean up afterward — the named
+`pgdata` volume is the assertion target. For destructive cleanup use
+`just compose-down-clean`.
+
+### Direct (legacy fast-iteration path)
+
+Assumes Postgres is reachable on `localhost:5432` (compose, Homebrew, or a
+remote DB via `DATABASE_URL`).
+
+```bash
+just install
+just backend     # Terminal 1
+just frontend    # Terminal 2
+```
+
+This path is preserved for tight iteration loops where you don't want a
+container restart between code changes. The DATABASE_URL must point at a
+live Postgres or backend startup will fail.
+
 ## Project Structure
 
 ```

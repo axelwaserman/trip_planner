@@ -59,7 +59,7 @@ async def test_qwen3_emits_thinking_events_against_live_ollama() -> None:
 
     deps = ChatDeps(
         flight_client=MockFlightAPIClient(seed=42),
-        session_id="live-ollama-test",
+        conversation_id="live-ollama-test",
         user_id="ci",
     )
     agent = provider.build_agent(tools=[], deps_type=ChatDeps)

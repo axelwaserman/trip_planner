@@ -1,33 +1,48 @@
-"""Chat service driving a PydanticAI ``Agent`` per session.
+"""Chat service driving a PydanticAI ``Agent`` per conversation.
+
+Phase 6 / Plan 06-04 (Wave 4): the Phase 5 monolithic ``ConversationStore``
+collaborator splits into :class:`MessageStore` (events) and
+:class:`ConversationRepository` (meta-CRUD) per CONTEXT.md D-05/D-06. The
+``getattr(self._conversation_store, "_store", ...)`` peek (CR-04 from Phase 5
+verification) retires here — the new
+:meth:`MessageStore.first_user_message_preview` is owned by the ABC and both
+impls (in-memory + Postgres) implement it directly.
 
 Phase 5 / Plan 05-04 (Wave 3): the LangChain ``bind_tools`` / ``astream`` /
-``additional_kwargs["reasoning_content"]`` substrate retired here in favour of
+``additional_kwargs["reasoning_content"]`` substrate retired in favour of
 PydanticAI's ``Agent.iter()`` per-node streaming surface. The previous
-``self._histories: dict[str, InMemoryChatMessageHistory]`` is replaced by a
-:class:`ConversationStore` seam (D-08); the previous
-``self._bound_providers: dict[str, BoundProvider]`` is replaced by
-``self._agents: dict[str, Agent[ChatDeps, str]]`` (D-10). The Phase 4.x
-monkey-patched tool-attribute back-door is gone — the flight client is
-threaded through PydanticAI's :class:`RunContext` via :class:`ChatDeps`.
+``self._histories: dict[str, InMemoryChatMessageHistory]`` was already replaced
+by the Phase 5 :class:`ConversationStore`; in this plan it splits further.
+
+Phase 6 / Plan 06-05a (Wave 5) renames the wire surface ``session`` →
+``conversation`` per CONTEXT.md D-03. The local-variable name
+``conversation_id`` is now the canonical token; the underlying
+:class:`MessageStore` and :class:`ConversationRepository` accept
+``conversation_id: UUID`` and we ``UUID(conversation_id)`` at the call site.
 
 Preserved invariants:
 
-- ``_metadata[session_id]["last_tool_invocation"]`` write inside the
+- ``_metadata[conversation_id]["last_tool_invocation"]`` write inside the
   ``CallToolsNode`` branch — the Phase 4.7 retry endpoint depends on it
   (CONTEXT.md D-09).
 - ``ErrorEvent.raw_detail = _scrub(str(exc))`` with ``_scrub`` from
   :mod:`app.llm.log_scrubbing` (Phase 4.7 contract).
-- ``ChatService.cleanup_expired_sessions`` flips to ``async def`` because it
-  now ``await``\\s :meth:`ConversationStore.delete` (RESEARCH Assumption A1).
+- ``ChatService.cleanup_expired_conversations`` is ``async def`` (was already
+  async since Phase 5 / Assumption A1; now awaits :class:`MessageStore`).
+- New: catches :class:`ConversationConcurrentAppendError` from the Postgres
+  message store and surfaces a clean :class:`ErrorEvent` (T-06-04-04) instead
+  of letting the SQL error propagate to the SSE wire.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -48,9 +63,9 @@ from pydantic_ai.messages import (
 
 from app.chat.deps import ChatDeps
 from app.chat.models import (
+    ChatConversationHistoryResponse,
+    ChatConversationInfo,
     ChatHistoryMessage,
-    ChatSessionHistoryResponse,
-    ChatSessionInfo,
     ContentEvent,
     ErrorCode,
     ErrorEvent,
@@ -59,30 +74,40 @@ from app.chat.models import (
     ToolCallEvent,
     ToolResultEvent,
 )
+from app.chat.store import ConversationConcurrentAppendError
 from app.exceptions import APIError
 from app.llm.log_scrubbing import _scrub
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from app.chat.store import ConversationStore
+    from app.chat.repository import ConversationRepository
+    from app.chat.store import MessageStore
     from app.llm.errors import ProbeError
     from app.llm.factory import LLMProviderFactory, SessionLLMConfig
     from app.tools.flight_client import FlightAPIClient
 
 
+logger = logging.getLogger(__name__)
+
+
 class ChatService:
-    """Per-app chat service driving one PydanticAI ``Agent`` per session.
+    """Per-app chat service driving one PydanticAI ``Agent`` per conversation.
 
     Owns:
 
     - ``self._factory`` — per-app :class:`LLMProviderFactory`.
-    - ``self._conversation_store`` — :class:`ConversationStore` ABC (D-08);
-      Phase 5 wires :class:`InMemoryConversationStore`, Phase 6 swaps for SQL.
-    - ``self._agents`` — per-session ``Agent[ChatDeps, str]`` (D-10).
-    - ``self._metadata`` — per-session metadata
+    - ``self._message_store`` — :class:`MessageStore` ABC (D-05); event
+      append/load/delete + ``first_user_message_preview`` source for the
+      sidebar UX.
+    - ``self._conversation_repo`` — :class:`ConversationRepository` ABC (D-06);
+      conversation meta-CRUD (create, get, list_for_user, bump_last_activity,
+      delete). Phase 6 wires :class:`PostgresConversationRepository` in
+      lifespan; tests inject :class:`InMemoryConversationRepository`.
+    - ``self._agents`` — per-conversation ``Agent[ChatDeps, str]`` (D-10).
+    - ``self._metadata`` — per-conversation in-process metadata
       (``provider``/``model``/``user_id``/``created_at``/``last_tool_invocation``).
-    - ``self._last_activity`` — per-session monotonic timestamp for cleanup.
+    - ``self._last_activity`` — per-conversation monotonic timestamp for cleanup.
 
     The Phase 4.x monkey-patched tool-attribute back-door is gone (D-06);
     the flight client is held on this service and threaded through
@@ -93,21 +118,25 @@ class ChatService:
         self,
         flight_client: FlightAPIClient,
         factory: LLMProviderFactory,
-        conversation_store: ConversationStore,
+        message_store: MessageStore,
+        conversation_repo: ConversationRepository,
     ) -> None:
-        """Initialize the chat service with collaborators (D-08, D-10).
+        """Initialize the chat service with its split collaborators (D-05, D-06, D-10).
 
         Args:
             flight_client: Flight API client; threaded into the agent via
                 :class:`ChatDeps` once per chat turn.
-            factory: Per-app :class:`LLMProviderFactory`. Sessions construct
+            factory: Per-app :class:`LLMProviderFactory`. Conversations construct
                 their own ``Agent`` via :meth:`create_session`.
-            conversation_store: ABC-typed history store; Phase 5 in-memory,
-                Phase 6 Postgres.
+            message_store: ABC-typed message-event store; Phase 6 in-memory
+                for tests, Postgres in production.
+            conversation_repo: ABC-typed conversation meta-CRUD repository;
+                Phase 6 in-memory for tests, Postgres in production.
         """
         self._flight_client = flight_client
         self._factory = factory
-        self._conversation_store = conversation_store
+        self._message_store = message_store
+        self._conversation_repo = conversation_repo
         self._agents: dict[str, Agent[ChatDeps, str]] = {}
         # ``_metadata`` keys: ``provider``, ``model``, ``user_id``, ``created_at``,
         # and (set after a tool call) ``last_tool_invocation``.
@@ -115,15 +144,20 @@ class ChatService:
         self._last_activity: dict[str, float] = {}
 
     async def create_session(self, config: SessionLLMConfig, user_id: str) -> tuple[str, ProbeError | None]:
-        """Create a new chat session: build provider, probe, build Agent, store.
+        """Create a new chat conversation: build provider, probe, build Agent, store.
+
+        Note: the public-facing route renamed to ``create_conversation`` in
+        Plan 06-05a; this internal method keeps its ``create_session`` name
+        because ``SessionLLMConfig`` is the runtime-LLM-binding shape (the
+        D-03 reserved-word boundary preserves the LLM-factory contract).
 
         Args:
-            config: Per-session LLM configuration (provider/model/base_url/api_key).
-            user_id: Authenticated username — used as the session-partition key
+            config: Per-conversation LLM configuration (provider/model/base_url/api_key).
+            user_id: Authenticated username — used as the per-user partition key
                 (D-22, D-27). Required.
 
         Returns:
-            ``(session_id, None)`` on success; ``("", probe_error)`` when the
+            ``(conversation_id, None)`` on success; ``("", probe_error)`` when the
             provider's ``validate_config`` returns a structured ``ProbeError``.
         """
         provider = self._factory.build(config)
@@ -141,79 +175,65 @@ class ChatService:
         from app.tools.flight_search import search_flights  # noqa: PLC0415
 
         agent = provider.build_agent(tools=[search_flights], deps_type=ChatDeps)
-        session_id = str(uuid.uuid4())
-        self._agents[session_id] = agent
-        self._metadata[session_id] = {
+        conversation_id = str(uuid.uuid4())
+        self._agents[conversation_id] = agent
+        self._metadata[conversation_id] = {
             "provider": config.provider,
             "model": config.model,
             "user_id": user_id,
             "created_at": datetime.now(UTC).isoformat(),
         }
-        self._last_activity[session_id] = time.time()
-        return session_id, None
+        self._last_activity[conversation_id] = time.time()
+        return conversation_id, None
 
-    def list_sessions_for_user(self, user_id: str) -> list[ChatSessionInfo]:
-        """Return ``ChatSessionInfo`` records for sessions owned by ``user_id``.
+    async def list_conversations_for_user(self, user_id: str) -> list[ChatConversationInfo]:
+        """Return ``ChatConversationInfo`` records for conversations owned by ``user_id``.
 
-        Phase 5: ``first_message_preview`` is composed from
-        ``self._conversation_store.load(...)`` rather than from the LangChain
-        history. Per CONTEXT.md D-09 the store does NOT track session
-        metadata; this method joins ``_metadata`` (provider/model/created_at)
-        with the store's per-session message list.
+        Phase 6 / Plan 06-04: composes the conversation list from the in-process
+        ``_metadata`` dict (keyed by ``conversation_id`` UUID-string) plus the new
+        :meth:`MessageStore.first_user_message_preview`. The ``user_id`` here
+        is still the wire-level username (the Phase 5 ``current_user.username``
+        contract).
 
-        ``list_for_user`` on the in-memory store returns an empty list (the
-        store does not own the user→sessions index in Phase 5); this method
-        composes the user-scoped view from ``_metadata`` filtered by
-        ``user_id`` — same behaviour as Phase 4.7, just routed through the
-        store seam for Phase 6 swappability.
+        Args:
+            user_id: Authenticated username (Phase 5 partition key).
+
+        Returns:
+            Conversations owned by ``user_id``, sorted by last-activity desc.
         """
-        results: list[ChatSessionInfo] = []
-        for session_id, metadata in self._metadata.items():
+        results: list[ChatConversationInfo] = []
+        for conversation_id, metadata in self._metadata.items():
             if metadata.get("user_id") != user_id:
                 continue
+            preview = await self._message_store.first_user_message_preview(UUID(conversation_id))
             results.append(
-                ChatSessionInfo(
-                    session_id=session_id,
+                ChatConversationInfo(
+                    conversation_id=conversation_id,
                     provider=metadata["provider"],
                     model=metadata["model"],
                     created_at=metadata["created_at"],
-                    first_message_preview=self._first_message_preview(session_id),
+                    first_message_preview=preview,
                 )
             )
-        # Sort by last activity so the session with the most recent message
+        # Sort by last activity so the conversation with the most recent message
         # appears first.
-        results.sort(key=lambda info: self._last_activity.get(info.session_id, 0.0), reverse=True)
+        results.sort(key=lambda info: self._last_activity.get(info.conversation_id, 0.0), reverse=True)
         return results
 
-    def _first_message_preview(self, session_id: str) -> str | None:
+    async def _first_message_preview(self, conversation_id: str) -> str | None:
         """Return the first user message content (truncated to 80 chars), or None.
 
-        Walks the in-memory store's stored ``ModelMessage`` list synchronously
-        — the in-memory impl never blocks. Phase 6's PG impl will require this
-        to become ``async``; ``list_sessions_for_user`` will flip with it.
+        Phase 6: delegates to :meth:`MessageStore.first_user_message_preview`
+        (the canonical CR-04 fix from Phase 5 verification). The previous
+        ``getattr(self._conversation_store, "_store", None)`` peek is gone —
+        both in-memory and Postgres impls own this query directly.
         """
-        # Defensive: read from the underlying ``_store`` dict to keep this method
-        # synchronous. The in-memory impl exposes ``_store`` as a dict; an
-        # ``AttributeError`` here means a non-in-memory impl was injected and
-        # the caller (or Phase 6) should rewrite this to ``async``.
-        store_dict = getattr(self._conversation_store, "_store", None)
-        if store_dict is None:
-            return None
-        messages = store_dict.get(session_id, [])
-        for msg in messages:
-            if isinstance(msg, ModelRequest):
-                for part in msg.parts:
-                    if isinstance(part, UserPromptPart):
-                        content = part.content
-                        if isinstance(content, str):
-                            return content[:80]
-                        return str(content)[:80]
-        return None
+        return await self._message_store.first_user_message_preview(UUID(conversation_id))
 
-    def get_history_for_user(self, session_id: str, user_id: str) -> ChatSessionHistoryResponse | None:
-        """Return the session's user/assistant history, if owned by ``user_id``.
+    async def get_history_for_user(self, conversation_id: str, user_id: str) -> ChatConversationHistoryResponse | None:
+        """Return the conversation's user/assistant history, if owned by ``user_id``.
 
-        Returns ``None`` when the session doesn't exist OR when ``user_id``
+        Returns ``None`` when the conversation doesn't exist OR when ``user_id``
         is not the owner (mirrors the Phase 4.7 oracle-mitigation 404 shape).
 
         Maps PydanticAI :class:`ModelRequest`/:class:`ModelResponse` parts
@@ -222,12 +242,11 @@ class ChatService:
         ``role="assistant"``. Tool-call/return parts and reasoning chunks
         are stream-only artefacts and are not surfaced here.
         """
-        metadata = self._metadata.get(session_id)
+        metadata = self._metadata.get(conversation_id)
         if metadata is None or metadata.get("user_id") != user_id:
             return None
 
-        store_dict = getattr(self._conversation_store, "_store", None)
-        history_msgs = store_dict.get(session_id, []) if store_dict is not None else []
+        history_msgs = await self._message_store.load(UUID(conversation_id))
 
         messages: list[ChatHistoryMessage] = []
         for msg in history_msgs:
@@ -240,51 +259,51 @@ class ChatService:
                 for resp_part in msg.parts:
                     if isinstance(resp_part, TextPart) and resp_part.content:
                         messages.append(ChatHistoryMessage(role="assistant", content=resp_part.content))
-        return ChatSessionHistoryResponse(
-            session_id=session_id,
+        return ChatConversationHistoryResponse(
+            conversation_id=conversation_id,
             provider=metadata["provider"],
             model=metadata["model"],
             messages=messages,
         )
 
-    async def cleanup_expired_sessions(self, max_age_seconds: int = 3600) -> int:
-        """Remove expired sessions across all per-session dicts and the store.
+    async def cleanup_expired_conversations(self, max_age_seconds: int = 3600) -> int:
+        """Remove expired conversations across all per-conversation dicts and the message store.
 
         Args:
             max_age_seconds: Maximum age since last activity (default: 1 hour).
 
         Returns:
-            Number of sessions cleaned up.
+            Number of conversations cleaned up.
 
-        Async because :meth:`ConversationStore.delete` is async (RESEARCH
-        Assumption A1).
+        Async because :meth:`MessageStore.delete` is async; per-conversation
+        truncation only — the conversation row itself stays put.
         """
         now = time.time()
-        expired = [sid for sid, last_active in self._last_activity.items() if now - last_active > max_age_seconds]
+        expired = [cid for cid, last_active in self._last_activity.items() if now - last_active > max_age_seconds]
 
-        for session_id in expired:
-            await self._conversation_store.delete(session_id)
-            self._metadata.pop(session_id, None)
-            self._agents.pop(session_id, None)
-            self._last_activity.pop(session_id, None)
+        for conversation_id in expired:
+            await self._message_store.delete(UUID(conversation_id))
+            self._metadata.pop(conversation_id, None)
+            self._agents.pop(conversation_id, None)
+            self._last_activity.pop(conversation_id, None)
 
         return len(expired)
 
-    async def delete_session(self, session_id: str) -> None:
-        """Remove a single session. Used by ``DELETE /api/chat/session/{id}``.
+    async def delete_conversation(self, conversation_id: str) -> None:
+        """Remove a single conversation. Used by ``DELETE /api/chat/conversation/{id}``.
 
         The route layer enforces ownership before calling this; this method
-        simply tears down the per-session state. ``ConversationStore.delete``
-        is a no-op for unknown ``session_id``s, mirroring the
+        simply tears down the per-conversation state. ``MessageStore.delete``
+        is a no-op for unknown ``conversation_id``s, mirroring the
         ``_metadata.pop(..., None)`` shape.
         """
-        await self._conversation_store.delete(session_id)
-        self._metadata.pop(session_id, None)
-        self._agents.pop(session_id, None)
-        self._last_activity.pop(session_id, None)
+        await self._message_store.delete(UUID(conversation_id))
+        self._metadata.pop(conversation_id, None)
+        self._agents.pop(conversation_id, None)
+        self._last_activity.pop(conversation_id, None)
 
     async def chat_stream(
-        self, message: str, session_id: str, *, persist_user_message: bool = True
+        self, message: str, conversation_id: str, *, persist_user_message: bool = True
     ) -> AsyncGenerator[StreamEvent]:
         """Stream a chat response chunk by chunk, driving PydanticAI ``agent.iter()``.
 
@@ -296,33 +315,38 @@ class ChatService:
         - :class:`PartStartEvent` + :class:`TextPart` → :class:`ContentEvent`.
         - :class:`PartDeltaEvent` + :class:`TextPartDelta` → :class:`ContentEvent`.
         - :class:`FunctionToolCallEvent` → :class:`ToolCallEvent` (also writes
-          ``_metadata[session_id]["last_tool_invocation"]`` for the retry endpoint).
+          ``_metadata[conversation_id]["last_tool_invocation"]`` for the retry endpoint).
         - :class:`FunctionToolResultEvent` carrying :class:`ToolReturnPart` →
           :class:`ToolResultEvent`.
 
         On any exception inside the iter-loop, emit a single
         :class:`ErrorEvent` with ``raw_detail = _scrub(str(exc))`` and return
-        early (the Phase 4.7 contract).
+        early (the Phase 4.7 contract). Phase 6 / Plan 06-04 additionally
+        catches :class:`ConversationConcurrentAppendError` from the Postgres
+        message store (T-06-04-04) and surfaces a clean retryable
+        ``stream_error`` ErrorEvent rather than letting the SQL error
+        propagate (PATTERNS.md §Logging-with-scrubber).
 
         After the run completes cleanly, append
-        ``agent_run.result.new_messages()`` to the conversation store so the
-        next turn sees the full history. ``persist_user_message=False`` skips
-        the persist step (used by the retry endpoint).
+        ``agent_run.result.new_messages()`` to the message store, then bump
+        the conversation's ``last_activity_at`` so the user-scoped sidebar
+        reorders correctly. ``persist_user_message=False`` skips the persist
+        step (used by the retry endpoint).
 
         Args:
             message: User message.
-            session_id: Session ID for conversation continuity.
+            conversation_id: Conversation ID for continuity.
             persist_user_message: When False, the run's new messages are NOT
-                appended to the store (synthetic retry prompts shouldn't
+                appended to the message store (synthetic retry prompts shouldn't
                 accumulate in stored history).
         """
-        history = await self._conversation_store.load(session_id)
+        history = await self._message_store.load(UUID(conversation_id))
         deps = ChatDeps(
             flight_client=self._flight_client,
-            session_id=session_id,
-            user_id=self._metadata[session_id]["user_id"],
+            conversation_id=conversation_id,
+            user_id=self._metadata[conversation_id]["user_id"],
         )
-        agent = self._agents[session_id]
+        agent = self._agents[conversation_id]
         # Track per-tool-call timing so ToolResultEvent.elapsed_ms reflects
         # the wall-clock between the FunctionToolCallEvent and its result.
         tool_call_start: dict[str, float] = {}
@@ -333,18 +357,36 @@ class ChatService:
                     if Agent.is_model_request_node(node):
                         async with node.stream(agent_run.ctx) as model_stream:
                             async for event in model_stream:
-                                stream_event = self._map_model_request_event(event, session_id)
+                                stream_event = self._map_model_request_event(event, conversation_id)
                                 if stream_event is not None:
                                     yield stream_event
                     elif Agent.is_call_tools_node(node):
                         async with node.stream(agent_run.ctx) as tool_stream:
                             async for ev in tool_stream:
-                                async for stream_event in self._handle_tool_event(ev, session_id, tool_call_start):
+                                async for stream_event in self._handle_tool_event(ev, conversation_id, tool_call_start):
                                     yield stream_event
 
             if persist_user_message and agent_run.result is not None:
-                await self._conversation_store.append(session_id, agent_run.result.new_messages())
-            self._last_activity[session_id] = time.time()
+                conversation_uuid = UUID(conversation_id)
+                await self._message_store.append(conversation_uuid, agent_run.result.new_messages())
+                # Bump conversation activity AFTER a successful append so the
+                # user-scoped sidebar reorders. No-op when the conversation
+                # row doesn't exist yet.
+                await self._conversation_repo.bump_last_activity(conversation_uuid)
+            self._last_activity[conversation_id] = time.time()
+        except ConversationConcurrentAppendError as exc:
+            # T-06-04-04: log full exception server-side via the scrubber-
+            # filtered logger, surface a static retryable ErrorEvent on the
+            # SSE wire (PATTERNS.md §Logging-with-scrubber).
+            logger.exception("ConversationConcurrentAppendError on conversation %s", conversation_id)
+            yield ErrorEvent(
+                error_code=ErrorCode.stream_error,
+                message="Sorry, the conversation got out of sync — please try again.",
+                retryable=True,
+                tool_name=None,
+                raw_detail=_scrub(str(exc)),
+                conversation_id=conversation_id,
+            )
         except APIError as exc:
             # Tool body or downstream APIError — preserve Phase 4.7 retryable shape.
             yield ErrorEvent(
@@ -353,7 +395,7 @@ class ChatService:
                 retryable=exc.retryable,
                 tool_name=None,
                 raw_detail=_scrub(str(exc)),
-                session_id=session_id,
+                conversation_id=conversation_id,
             )
         except Exception as exc:
             yield ErrorEvent(
@@ -362,11 +404,11 @@ class ChatService:
                 retryable=False,
                 tool_name=None,
                 raw_detail=_scrub(str(exc)),
-                session_id=session_id,
+                conversation_id=conversation_id,
             )
 
     @staticmethod
-    def _map_model_request_event(event: Any, session_id: str) -> StreamEvent | None:
+    def _map_model_request_event(event: Any, conversation_id: str) -> StreamEvent | None:
         """Map a PydanticAI ``ModelRequestNode.stream`` event to a StreamEvent.
 
         Returns ``None`` for empty/uninteresting events (so the caller does
@@ -376,21 +418,21 @@ class ChatService:
         if isinstance(event, PartStartEvent):
             part = event.part
             if isinstance(part, ThinkingPart) and part.content:
-                return ThinkingEvent(chunk=part.content, session_id=session_id)
+                return ThinkingEvent(chunk=part.content, conversation_id=conversation_id)
             if isinstance(part, TextPart) and part.content:
-                return ContentEvent(chunk=part.content, session_id=session_id)
+                return ContentEvent(chunk=part.content, conversation_id=conversation_id)
         elif isinstance(event, PartDeltaEvent):
             delta = event.delta
             if isinstance(delta, ThinkingPartDelta) and delta.content_delta:
-                return ThinkingEvent(chunk=delta.content_delta, session_id=session_id)
+                return ThinkingEvent(chunk=delta.content_delta, conversation_id=conversation_id)
             if isinstance(delta, TextPartDelta) and delta.content_delta:
-                return ContentEvent(chunk=delta.content_delta, session_id=session_id)
+                return ContentEvent(chunk=delta.content_delta, conversation_id=conversation_id)
         return None
 
     async def _handle_tool_event(
         self,
         event: Any,
-        session_id: str,
+        conversation_id: str,
         tool_call_start: dict[str, float],
     ) -> AsyncGenerator[StreamEvent]:
         """Map a PydanticAI ``CallToolsNode.stream`` event to StreamEvents.
@@ -398,7 +440,7 @@ class ChatService:
         ``FunctionToolCallEvent`` carries a :class:`ToolCallPart`; its
         ``args`` may be a dict or a JSON string (RESEARCH Pitfall 3) — we
         normalise to dict before yielding the ``ToolCallEvent``. The same
-        event triggers the ``_metadata[session_id]["last_tool_invocation"]``
+        event triggers the ``_metadata[conversation_id]["last_tool_invocation"]``
         write that the Phase 4.7 retry endpoint depends on (D-09).
 
         ``FunctionToolResultEvent`` carrying a :class:`ToolReturnPart` is
@@ -413,7 +455,7 @@ class ChatService:
             tool_call_start[part.tool_call_id] = time.monotonic()
 
             # Preserved invariant (D-09): the retry endpoint reads this back.
-            self._metadata[session_id]["last_tool_invocation"] = {
+            self._metadata[conversation_id]["last_tool_invocation"] = {
                 "tool_name": part.tool_name,
                 "tool_args": tool_args,
                 "tool_call_id": part.tool_call_id,
@@ -422,7 +464,7 @@ class ChatService:
             yield ToolCallEvent(
                 tool_name=part.tool_name,
                 tool_args=tool_args,
-                session_id=session_id,
+                conversation_id=conversation_id,
             )
         elif isinstance(event, FunctionToolResultEvent):
             # ``event.part`` is the new (1.x) attribute; ``event.result`` is the
@@ -436,5 +478,5 @@ class ChatService:
                     tool_name=ret.tool_name,
                     tool_result=str(ret.content),
                     elapsed_ms=elapsed_ms,
-                    session_id=session_id,
+                    conversation_id=conversation_id,
                 )

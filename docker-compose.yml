@@ -1,0 +1,23 @@
+# Phase 6 — Postgres-only compose. Backend + frontend run on host (just backend / just frontend).
+# Pitfall 4: host port 5432 may collide with Homebrew Postgres — set `POSTGRES_HOST_PORT=5433`
+# in `.env` to override, or `brew services stop postgresql@*` to free 5432.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: trip_planner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trip_planner}
+      POSTGRES_DB: trip_planner
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trip_planner"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

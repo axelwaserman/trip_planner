@@ -28,7 +28,10 @@ function AppShell({ children }: { children: ReactNode }) {
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
   const isMobile = useBreakpointValue({ base: true, lg: false })
   const [searchParams] = useSearchParams()
-  const activeSessionId = searchParams.get('session') ?? undefined
+  // The URL search-param key remains `session=` (rather than `conversation=`)
+  // to preserve bookmarked / shared chat links across the Phase 6 rename;
+  // the wire-level rename covers request bodies and SSE field names.
+  const activeConversationId = searchParams.get('session') ?? undefined
 
   useEffect(() => {
     let cancelled = false
@@ -61,7 +64,7 @@ function AppShell({ children }: { children: ReactNode }) {
         {/* Desktop persistent sidebar */}
         {!isMobile && (
           <Box>
-            <Sidebar username={username} activeSessionId={activeSessionId} />
+            <Sidebar username={username} activeConversationId={activeConversationId} />
           </Box>
         )}
         <Box minW="0">{children}</Box>
@@ -97,7 +100,7 @@ function AppShell({ children }: { children: ReactNode }) {
         >
           <Sidebar
             username={username}
-            activeSessionId={activeSessionId}
+            activeConversationId={activeConversationId}
             onNavigate={() => setIsMenuOpen(false)}
           />
           <Box

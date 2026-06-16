@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 logger = logging.getLogger(__name__)
 
 _DEFAULT_JWT_SECRET = "changeme"
-_DEFAULT_AUTH_USERS = "admin:admin"
 
 
 class Settings(BaseSettings):
@@ -21,11 +20,13 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = True
 
-    # Auth / JWT
+    # Auth / JWT.
+    # Phase 6 / Plan 06-04 (D-07) deleted the env-backed user-list field
+    # and its module constant; ``PostgresUserRepository`` is the sole impl
+    # and dev/test bootstrap is via ``just db-seed`` (Plan 06-06).
     jwt_secret: str = _DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
-    auth_users: str = "admin:admin"
 
     # CORS — comma-separated origins for CORSMiddleware. Override via CORS_ALLOWED_ORIGINS env var.
     cors_allowed_origins: list[str] = ["http://localhost:5173"]
@@ -60,6 +61,25 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-3-5-sonnet-20241022"
 
+    # Database (Phase 6 — D-01, D-11). database_url drives create_async_engine
+    # in app/db/session.py; pool knobs are tunables on Settings per CLAUDE.md
+    # ("Tunable thresholds live on Settings, not as module-level constants").
+    # seed_allow_non_local guards scripts/seed.py against non-localhost targets
+    # (Plan 06-06 will enforce; the field lands here so its env override is wired now).
+    database_url: str = "postgresql+psycopg://trip_planner:trip_planner@localhost:5432/trip_planner"
+    db_pool_size: int = 5
+    db_pool_overflow: int = 10
+    seed_allow_non_local: bool = False
+
+    # MessageStore guardrail (Plan 06-03 / 06-RESEARCH.md Pitfall 5).
+    # Phase 6 has no image/file-input LLM in scope; serialized ModelMessage
+    # payloads stay text-shaped and well under 1 MB. The cap defends against
+    # accidental BinaryContent/FilePart bloat slipping past the LLM boundary
+    # and turning a single row into a multi-MB JSONB blob (RESEARCH Pattern 3
+    # caveat). PostgresMessageStore.append rejects any ``to_jsonable_python``
+    # output exceeding this byte length before issuing the INSERT.
+    message_max_payload_bytes: int = 1_000_000
+
     # Provider probe (RESEARCH.md Pitfall 3, Assumption A2). 1.5 s caps the worst
     # case for a misconfigured Ollama daemon; localhost hits are typically 50–200 ms.
     provider_probe_timeout_seconds: float = 1.5
@@ -85,11 +105,6 @@ class Settings(BaseSettings):
                 "Set the JWT_SECRET environment variable to a strong random secret "
                 "before running in production.",
                 _DEFAULT_JWT_SECRET,
-            )
-        if self.auth_users == _DEFAULT_AUTH_USERS:
-            logger.warning(
-                "AUTH_USERS is set to the default 'admin:admin'. "
-                "Set the AUTH_USERS environment variable before running in production.",
             )
         if self.cors_allowed_origins == ["http://localhost:5173"]:
             logger.warning(

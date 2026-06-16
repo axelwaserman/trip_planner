@@ -8,6 +8,14 @@ The project uses `just` as a command runner. Run from the repo root.
 
 ```bash
 just install          # Install all backend + frontend dependencies
+just compose-up       # Start the Postgres db service (docker compose up -d --wait)
+just compose-down     # Stop compose; pgdata volume preserved
+just compose-down-clean # Stop compose AND drop pgdata (destructive)
+just compose-logs     # Tail the db container logs
+just db-shell         # psql shell against the running compose db
+just migrate          # alembic upgrade head (host uv env)
+just migrate-create MSG # alembic revision --autogenerate -m MSG
+just db-seed          # Idempotent seed: backend/seed.toml -> user table
 just backend          # Start backend dev server (localhost:8000)
 just frontend         # Start frontend dev server (localhost:5173)
 just test             # Backend tests (unit + integration + e2e via path discovery)
@@ -18,6 +26,11 @@ just check            # lint + format-check + typecheck (run before committing)
 just fix              # Auto-fix lint + format issues
 just build            # Production frontend build
 ```
+
+Fresh-checkout boot order (Phase 6):
+`just compose-up && just migrate && just db-seed && just backend` (then `just frontend` in another terminal).
+See `README.md` "Quickstart" for the full compose-driven walkthrough including
+the `.env` / `backend/seed.toml` copy steps and the Pitfall 4 host-port escape hatch.
 
 Run a single backend test:
 ```bash

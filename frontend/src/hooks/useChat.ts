@@ -3,10 +3,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { ChatStreamEvent, ErrorEvent, Message, MessageType } from '../types/chat'
 import { apiFetch } from '../lib/auth'
 import {
-  getSnapshot as getSessionSnapshot,
-  setSession,
+  getSnapshot as getConversationSnapshot,
+  setConversation,
   subscribe as subscribeToStore,
-} from '../lib/chatSessionStore'
+} from '../lib/chatConversationStore'
 import {
   mapProbeError,
   type BackendProbeError,
@@ -28,7 +28,7 @@ interface UseChatReturn {
   // true — once content/thinking/tool events start streaming the placeholder
   // is redundant with the assistant bubble that's actively filling in.
   isAwaitingFirstChunk: boolean
-  sessionId: string | null
+  conversationId: string | null
   currentProvider: string
   currentModel: string
   providerError: ProviderErrorView | null
@@ -36,18 +36,18 @@ interface UseChatReturn {
   handleProviderChange: (provider: string, model: string) => void
   retryProvider: () => void
   // Re-streams the last tool invocation via POST /api/chat/retry.
-  // No-op if sessionId is null or the session is currently streaming.
+  // No-op if conversationId is null or the conversation is currently streaming.
   retryLastTool: () => Promise<void>
 }
 
-interface SessionData {
-  session_id: string
+interface ConversationData {
+  conversation_id: string
   provider: string
   model: string
 }
 
-type CreateSessionResult =
-  | { ok: true; data: SessionData }
+type CreateConversationResult =
+  | { ok: true; data: ConversationData }
   | { ok: false; probeError: ProviderErrorView }
   | { ok: false; probeError: null }
 
@@ -103,7 +103,7 @@ function resolveSelection(settings: ProviderSettings): ResolvedSelection {
     }
   }
   // Unknown provider — fall through to a permissive shape; the backend
-  // SessionCreateRequest validators will reject it with a structured error.
+  // ConversationCreateRequest validators will reject it with a structured error.
   return { provider, model, baseUrl: null, apiKey: null }
 }
 
@@ -121,7 +121,7 @@ function loadProviderSettings(): ProviderSettings | null {
     const existing = localStorage.getItem('provider_settings')
     const legacy = localStorage.getItem('llm_provider_config')
     if (!existing && !legacy) {
-      // Cold first run — preserve the original null signal so initSession
+      // Cold first run — preserve the original null signal so initConversation
       // sends null base_url + null api_key (backend env-var fallback path).
       return null
     }
@@ -143,21 +143,26 @@ function isProbeErrorBody(value: unknown): value is { detail: BackendProbeError 
   )
 }
 
-async function createSession(
+async function createConversation(
   provider: string,
   model: string,
   baseUrl: string | null,
   apiKey: string | null
-): Promise<CreateSessionResult> {
-  const response = await apiFetch('/api/chat/session', {
+): Promise<CreateConversationResult> {
+  // Backend ConversationCreateRequest (Plan 06-05a SRP split) wants a nested
+  // {target, credentials} body. The flat legacy shape is rejected as 422 once
+  // the route boundary type catches up.
+  const response = await apiFetch('/api/chat/conversation', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // Backend SessionCreateRequest (D-24) uses snake_case wire keys.
-    body: JSON.stringify({ provider, model, base_url: baseUrl, api_key: apiKey }),
+    body: JSON.stringify({
+      target: { provider, model },
+      credentials: { base_url: baseUrl, api_key: apiKey },
+    }),
   })
 
   if (response.ok) {
-    const data = (await response.json()) as SessionData
+    const data = (await response.json()) as ConversationData
     return { ok: true, data }
   }
 
@@ -180,7 +185,7 @@ async function createSession(
 interface BuildStreamHandlersOpts {
   currentProvider: string
   currentModel: string
-  initSession: (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => void
+  initConversation: (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => void
 }
 
 /**
@@ -189,11 +194,11 @@ interface BuildStreamHandlersOpts {
  * factory once and destructure `{ handleStreamEvent }`. The mutable stream-
  * state variables (`isStreamingAssistant`, `isStreamingThinking`,
  * `firstChunkSeen`) live inside the closure and are isolated per call so
- * concurrent streams on different sessions don't interfere.
+ * concurrent streams on different conversations don't interfere.
  */
 function buildStreamHandlers(
-  submitSessionId: string,
-  { currentProvider, currentModel, initSession }: BuildStreamHandlersOpts
+  submitConversationId: string,
+  { currentProvider, currentModel, initConversation }: BuildStreamHandlersOpts
 ) {
   let isStreamingAssistant = false
   let isStreamingThinking = false
@@ -202,11 +207,11 @@ function buildStreamHandlers(
   const markFirstChunk = () => {
     if (firstChunkSeen) return
     firstChunkSeen = true
-    setSession(submitSessionId, (prev) => ({ ...prev, isAwaitingFirstChunk: false }))
+    setConversation(submitConversationId, (prev) => ({ ...prev, isAwaitingFirstChunk: false }))
   }
 
   const appendThinkingChunk = (chunk: string) => {
-    setSession(submitSessionId, (prev) => {
+    setConversation(submitConversationId, (prev) => {
       if (!isStreamingThinking) {
         return {
           ...prev,
@@ -228,7 +233,7 @@ function buildStreamHandlers(
   }
 
   const appendContentChunk = (chunk: string) => {
-    setSession(submitSessionId, (prev) => {
+    setConversation(submitConversationId, (prev) => {
       if (!isStreamingAssistant) {
         return {
           ...prev,
@@ -250,7 +255,7 @@ function buildStreamHandlers(
   }
 
   const appendToolCall = (toolName: string, toolArgs: Record<string, unknown>) => {
-    setSession(submitSessionId, (prev) => ({
+    setConversation(submitConversationId, (prev) => ({
       ...prev,
       messages: [
         ...prev.messages,
@@ -271,7 +276,7 @@ function buildStreamHandlers(
   }
 
   const updateToolResult = (toolResult: string, elapsedMs: number) => {
-    setSession(submitSessionId, (prev) => {
+    setConversation(submitConversationId, (prev) => {
       let lastToolIndex = -1
       for (let i = prev.messages.length - 1; i >= 0; i--) {
         if (prev.messages[i].role === 'tool_execution') {
@@ -306,7 +311,7 @@ function buildStreamHandlers(
   // find the last tool_execution row and immutably attaches the ErrorEvent to it.
   // Called only for retryable=true errors per D-10.
   const updateToolError = (errorEvent: ErrorEvent) => {
-    setSession(submitSessionId, (prev) => {
+    setConversation(submitConversationId, (prev) => {
       let lastToolIndex = -1
       for (let i = prev.messages.length - 1; i >= 0; i--) {
         if (prev.messages[i].role === 'tool_execution') {
@@ -378,17 +383,17 @@ function buildStreamHandlers(
           updateToolError(event)
           // Mark hasError so the Sidebar can show a "!" indicator if the user
           // navigated away before seeing the inline error state.
-          setSession(submitSessionId, (prev) => ({ ...prev, hasError: true }))
+          setConversation(submitConversationId, (prev) => ({ ...prev, hasError: true }))
         } else {
           // retryable=false (D-10): surface as a toast so the chat stays usable.
           toaster.create({ title: event.message, type: 'error', duration: 5000 })
-          setSession(submitSessionId, (prev) => ({ ...prev, hasError: true }))
+          setConversation(submitConversationId, (prev) => ({ ...prev, hasError: true }))
 
           if (event.error_code === 'session_error') {
             // D-12: session_error is always non-retryable. After toasting, silently
-            // re-create the session so the next user message has a valid session_id.
-            // Re-read provider_settings so any recent api_key / base_url edits are
-            // picked up — same pattern as handleProviderChange.
+            // re-create the conversation so the next user message has a valid
+            // conversation_id. Re-read provider_settings so any recent api_key /
+            // base_url edits are picked up — same pattern as handleProviderChange.
             const settings = loadProviderSettings() ?? DEFAULT_PROVIDER_SETTINGS
             const merged: ProviderSettings = {
               ...settings,
@@ -398,7 +403,7 @@ function buildStreamHandlers(
               },
             }
             const selection = resolveSelection(merged)
-            void initSession(
+            void initConversation(
               selection.provider,
               selection.model,
               selection.baseUrl,
@@ -421,63 +426,70 @@ function buildStreamHandlers(
 }
 
 export function useChat(): UseChatReturn {
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [conversationId, setConversationId] = useState<string | null>(null)
   const [currentProvider, setCurrentProvider] = useState('ollama')
   const [currentModel, setCurrentModel] = useState('qwen3:4b')
   const [providerError, setProviderError] = useState<ProviderErrorView | null>(null)
-  // Session-init failure surfaces here when the create call returned a
-  // non-probe failure (no session_id to key the store entry on). Cleared
-  // every time we successfully initialize a session.
+  // Conversation-init failure surfaces here when the create call returned a
+  // non-probe failure (no conversation_id to key the store entry on). Cleared
+  // every time we successfully initialize a conversation.
   const [initFailureMessage, setInitFailureMessage] = useState<string | null>(null)
 
-  // Per-session state lives in chatSessionStore so a switch from conv A → B
-  // mid-stream doesn't drop A's accumulator and the Sidebar can surface
-  // "this row is generating" indicators from the same source. The hook only
-  // reads the slice for the currently-active session_id.
-  const sessionSnapshot = useSyncExternalStore(
+  // Per-conversation state lives in chatConversationStore so a switch from
+  // conv A → B mid-stream doesn't drop A's accumulator and the Sidebar can
+  // surface "this row is generating" indicators from the same source. The
+  // hook only reads the slice for the currently-active conversation_id.
+  const conversationSnapshot = useSyncExternalStore(
     subscribeToStore,
-    useCallback(() => getSessionSnapshot(sessionId), [sessionId])
+    useCallback(() => getConversationSnapshot(conversationId), [conversationId])
   )
-  // When session init failed before a session_id existed, expose the inline
-  // error message via the same `messages` array consumers already render.
-  const messages: Message[] = sessionId
-    ? sessionSnapshot.messages
+  // When conversation init failed before a conversation_id existed, expose the
+  // inline error message via the same `messages` array consumers already render.
+  const messages: Message[] = conversationId
+    ? conversationSnapshot.messages
     : initFailureMessage
       ? [{ role: 'assistant', content: initFailureMessage }]
       : []
-  const isLoading = sessionSnapshot.isStreaming
-  const isAwaitingFirstChunk = sessionSnapshot.isAwaitingFirstChunk
+  const isLoading = conversationSnapshot.isStreaming
+  const isAwaitingFirstChunk = conversationSnapshot.isAwaitingFirstChunk
 
   // The Sidebar bumps `?n=<timestamp>` whenever the user clicks "New chat".
   // This is the only signal useChat watches to know it should clear messages
-  // and create a fresh session — purely URL-driven so the hook stays oblivious
-  // to where the click came from. Mount-time init runs with `n === null`.
+  // and create a fresh conversation — purely URL-driven so the hook stays
+  // oblivious to where the click came from. Mount-time init runs with `n === null`.
   //
   // `?session=<id>` is the resume signal: the Sidebar's recent-chats list
   // navigates to /app?session=<id> and useChat fetches the history for that
-  // session, replays it into messages, and adopts the provider/model the
-  // session was bound to (rather than POSTing /api/chat/session). Both
-  // params are mutually exclusive in practice — Sidebar emits one or the
+  // conversation, replays it into messages, and adopts the provider/model the
+  // conversation was bound to (rather than POSTing /api/chat/conversation).
+  // Both params are mutually exclusive in practice — Sidebar emits one or the
   // other — but the resume path takes precedence if both are present so
   // an accidental ?n=...&session=... wouldn't silently start a new chat.
+  //
+  // The URL search-param key remains `session=` (rather than `conversation=`)
+  // because changing it would invalidate every bookmarked / shared chat link
+  // the user has accumulated; the wire-level rename in this plan covers the
+  // request bodies and SSE field names that drive the rebuild, not the URL
+  // query-param key the frontend chose for its routing convention.
   const [searchParams] = useSearchParams()
   const newChatToken = searchParams.get('n')
-  const resumeSessionId = searchParams.get('session')
+  const resumeConversationId = searchParams.get('session')
   const navigate = useNavigate()
 
-  // Tracks the session id useChat has already initialized for. Used to skip
-  // the resume-from-URL effect when initSession just replaced the URL with
-  // ?session=<new_id> on its own — without this guard the effect would
-  // re-fire, wipe messages, and re-fetch history for a session it just
-  // created. Distinct from `sessionId` state because we want to remember
-  // it across the effect's reset-then-initialize cycle.
-  const ownedSessionIdRef = useRef<string | null>(null)
-  // Mirror of sessionId state kept in a ref so the sendMessage finally block
-  // can read the CURRENT active session without capturing stale closure values.
-  const activeSessionIdRef = useRef<string | null>(sessionId)
-  activeSessionIdRef.current = sessionId
+  // Tracks the conversation id useChat has already initialized for. Used to
+  // skip the resume-from-URL effect when initConversation just replaced the
+  // URL with ?session=<new_id> on its own — without this guard the effect
+  // would re-fire, wipe messages, and re-fetch history for a conversation it
+  // just created. Distinct from `conversationId` state because we want to
+  // remember it across the effect's reset-then-initialize cycle.
+  const ownedConversationIdRef = useRef<string | null>(null)
+  // Mirror of conversationId state kept in a ref so the sendMessage finally
+  // block can read the CURRENT active conversation without capturing stale
+  // closure values.
+  const activeConversationIdRef = useRef<string | null>(conversationId)
+  activeConversationIdRef.current = conversationId
 
-  const initSession = useCallback(
+  const initConversation = useCallback(
     async (provider: string, model: string, baseUrl: string | null, apiKey: string | null) => {
       setProviderError(null)
       setInitFailureMessage(null)
@@ -485,30 +497,31 @@ export function useChat(): UseChatReturn {
       setCurrentModel(model)
 
       try {
-        const result = await createSession(provider, model, baseUrl, apiKey)
+        const result = await createConversation(provider, model, baseUrl, apiKey)
 
         if (result.ok) {
-          ownedSessionIdRef.current = result.data.session_id
-          // Seed the store with an empty state for the new session so
+          ownedConversationIdRef.current = result.data.conversation_id
+          // Seed the store with an empty state for the new conversation so
           // useSyncExternalStore returns a stable empty snapshot rather
-          // than briefly showing whatever the previous session held.
-          setSession(result.data.session_id, () => ({
+          // than briefly showing whatever the previous conversation held.
+          setConversation(result.data.conversation_id, () => ({
             messages: [],
             isAwaitingFirstChunk: false,
             isStreaming: false,
             hasUnread: false,
             hasError: false,
           }))
-          setSessionId(result.data.session_id)
+          setConversationId(result.data.conversation_id)
           setCurrentProvider(result.data.provider)
           setCurrentModel(result.data.model)
-          // Replace the URL so the Sidebar's activeSessionId highlights the
-          // new row and the page is bookmarkable / shareable. `replace: true`
-          // avoids polluting back-button history with `/app?n=<token>` →
-          // `/app?session=<id>` pairs. The effect won't re-run as a resume
-          // because ownedSessionIdRef already holds the new id by the time
-          // the URL change fires the next pass.
-          navigate(`/app?session=${result.data.session_id}`, { replace: true })
+          // Replace the URL so the Sidebar's activeConversationId highlights
+          // the new row and the page is bookmarkable / shareable. `replace:
+          // true` avoids polluting back-button history with `/app?n=<token>`
+          // → `/app?session=<id>` pairs. The effect won't re-run as a resume
+          // because ownedConversationIdRef already holds the new id by the time
+          // the URL change fires the next pass. The URL key stays `session=` —
+          // see the comment on resumeConversationId for why.
+          navigate(`/app?session=${result.data.conversation_id}`, { replace: true })
           return
         }
 
@@ -517,8 +530,8 @@ export function useChat(): UseChatReturn {
           return
         }
 
-        // Failed init: surface the error inline (no session_id to key the
-        // store on). Cleared on the next successful initSession.
+        // Failed init: surface the error inline (no conversation_id to key the
+        // store on). Cleared on the next successful initConversation.
         setInitFailureMessage('❌ Failed to initialize chat session. Please refresh the page.')
       } catch {
         // apiFetch's 401 handler already redirected; nothing to do here.
@@ -527,35 +540,35 @@ export function useChat(): UseChatReturn {
     [navigate]
   )
 
-  const resumeSession = useCallback(async (id: string): Promise<boolean> => {
+  const resumeConversation = useCallback(async (id: string): Promise<boolean> => {
     setProviderError(null)
     try {
-      const response = await apiFetch(`/api/chat/sessions/${encodeURIComponent(id)}`)
+      const response = await apiFetch(`/api/chat/conversations/${encodeURIComponent(id)}`)
       if (!response.ok) {
         // 404 (not yours / missing), 401 (apiFetch already redirected), etc.
         return false
       }
       const body = (await response.json()) as {
-        session_id: string
+        conversation_id: string
         provider: string
         model: string
         messages: Array<{ role: 'user' | 'assistant'; content: string }>
       }
-      ownedSessionIdRef.current = body.session_id
-      setSessionId(body.session_id)
+      ownedConversationIdRef.current = body.conversation_id
+      setConversationId(body.conversation_id)
       setCurrentProvider(body.provider)
       setCurrentModel(body.model)
       setInitFailureMessage(null)
       // Seed the store with the persisted history. Don't overwrite an
-      // already-streaming session — picking conv A from the Sidebar while
+      // already-streaming conversation — picking conv A from the Sidebar while
       // its previous response is still streaming should keep the live
       // accumulator visible, not replace it with the partial server-side
       // history. The "isStreaming" flag is the canonical guard.
       // If the store already has messages (e.g. thinking tokens + tool cards
-      // accumulated during a previous stream this session), preserve them —
-      // server history only carries user/assistant text and would discard the
+      // accumulated during a previous stream this conversation), preserve them
+      // — server history only carries user/assistant text and would discard the
       // richer client-side rows on re-navigation.
-      setSession(body.session_id, (prev) => {
+      setConversation(body.conversation_id, (prev) => {
         if (prev.isStreaming) return prev
         if (prev.messages.length > 0) return { ...prev, hasUnread: false, hasError: false }
         return {
@@ -582,73 +595,74 @@ export function useChat(): UseChatReturn {
     // the backend factory falls back to its env-var precedence (D-08).
     //
     // Re-runs whenever `?n=<token>` or `?session=<id>` changes:
-    //   - ?session=<id> → fetch history, replay messages, adopt the session's
-    //     bound provider/model (no new POST /api/chat/session). Falls through
-    //     to the new-chat path on 404 so a stale Sidebar link can't soft-lock
-    //     the chat.
-    //   - ?n=<token>    → clear messages and POST /api/chat/session with the
-    //     user's currently-selected provider/model (Sidebar's "New chat").
+    //   - ?session=<id> → fetch history, replay messages, adopt the
+    //     conversation's bound provider/model (no new POST
+    //     /api/chat/conversation). Falls through to the new-chat path on
+    //     404 so a stale Sidebar link can't soft-lock the chat.
+    //   - ?n=<token>    → clear messages and POST /api/chat/conversation with
+    //     the user's currently-selected provider/model (Sidebar's "New chat").
     //
-    // Bail when the URL already names a session this hook just created or
-    // resumed — initSession replaces the URL with /app?session=<new_id> so
-    // the new chat row highlights, and we'd otherwise re-fetch its empty
+    // Bail when the URL already names a conversation this hook just created or
+    // resumed — initConversation replaces the URL with /app?session=<new_id>
+    // so the new chat row highlights, and we'd otherwise re-fetch its empty
     // history and wipe the local state moments after creating it.
-    if (resumeSessionId && resumeSessionId === ownedSessionIdRef.current) {
+    if (resumeConversationId && resumeConversationId === ownedConversationIdRef.current) {
       return
     }
 
-    // Drop the local sessionId so the snapshot reads as empty until the
-    // resume / create finishes. The store entry for the OLD session is
+    // Drop the local conversationId so the snapshot reads as empty until the
+    // resume / create finishes. The store entry for the OLD conversation is
     // intentionally NOT cleared — it might still be streaming in the
     // background and we want the user to see its progress when they
-    // navigate back. The store keeps each session's snapshot for the
+    // navigate back. The store keeps each conversation's snapshot for the
     // lifetime of the page (or until the user reloads).
-    setSessionId(null)
+    setConversationId(null)
     setInitFailureMessage(null)
 
     let cancelled = false
     void (async () => {
-      if (resumeSessionId) {
-        const ok = await resumeSession(resumeSessionId)
+      if (resumeConversationId) {
+        const ok = await resumeConversation(resumeConversationId)
         if (cancelled) return
         if (ok) return
-        // 404 / cross-user → fall through to a fresh session below.
+        // 404 / cross-user → fall through to a fresh conversation below.
       }
 
       if (cancelled) return
       const settings = loadProviderSettings()
       if (settings === null) {
-        void initSession('ollama', 'qwen3:4b', null, null)
+        void initConversation('ollama', 'qwen3:4b', null, null)
         return
       }
       const selection = resolveSelection(settings)
-      void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
+      void initConversation(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
     })()
 
     return () => {
       cancelled = true
     }
-  }, [initSession, resumeSession, newChatToken, resumeSessionId])
+  }, [initConversation, resumeConversation, newChatToken, resumeConversationId])
 
   const handleProviderChange = useCallback(
     (provider: string, model: string) => {
       setProviderError(null)
-      // Guard: if provider and model haven't changed AND the session is empty,
-      // there's nothing to do — skip the redundant initSession call that would
-      // create a second new session for the same config on an empty session.
+      // Guard: if provider and model haven't changed AND the conversation is
+      // empty, there's nothing to do — skip the redundant initConversation
+      // call that would create a second new conversation for the same config
+      // on an empty conversation.
       if (
         provider === currentProvider &&
         model === currentModel &&
-        sessionId !== null &&
-        getSessionSnapshot(sessionId).messages.length === 0
+        conversationId !== null &&
+        getConversationSnapshot(conversationId).messages.length === 0
       ) {
         return
       }
-      // initSession will seed a fresh empty store entry for the new session
-      // id; the previous session's entry stays put so a background stream
-      // there can keep updating the Sidebar indicator.
+      // initConversation will seed a fresh empty store entry for the new
+      // conversation id; the previous conversation's entry stays put so a
+      // background stream there can keep updating the Sidebar indicator.
       // Re-read provider_settings so a fresh paste of api_key / base_url on the
-      // settings page is picked up at session-create time (D-21 + D-08).
+      // settings page is picked up at conversation-create time (D-21 + D-08).
       const settings = loadProviderSettings() ?? DEFAULT_PROVIDER_SETTINGS
       const merged: ProviderSettings = {
         ...settings,
@@ -658,9 +672,9 @@ export function useChat(): UseChatReturn {
         },
       }
       const selection = resolveSelection(merged)
-      void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
+      void initConversation(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
     },
-    [initSession, currentProvider, currentModel, sessionId]
+    [initConversation, currentProvider, currentModel, conversationId]
   )
 
   const retryProvider = useCallback(() => {
@@ -674,24 +688,25 @@ export function useChat(): UseChatReturn {
       },
     }
     const selection = resolveSelection(merged)
-    void initSession(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
-  }, [currentProvider, currentModel, initSession])
+    void initConversation(selection.provider, selection.model, selection.baseUrl, selection.apiKey)
+  }, [currentProvider, currentModel, initConversation])
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (!text.trim() || !sessionId) return
-      // Per-session re-entrancy: if this session is already streaming,
-      // refuse a second submission. Other sessions can stream concurrently.
-      if (getSessionSnapshot(sessionId).isStreaming) return
+      if (!text.trim() || !conversationId) return
+      // Per-conversation re-entrancy: if this conversation is already
+      // streaming, refuse a second submission. Other conversations can stream
+      // concurrently.
+      if (getConversationSnapshot(conversationId).isStreaming) return
 
-      // Capture the submit-time session id. Every store write inside the
+      // Capture the submit-time conversation id. Every store write inside the
       // SSE loop targets THIS id, even if the user navigates away and the
-      // hook's `sessionId` state moves on. That's how a switch from conv A
-      // → B mid-stream keeps A's accumulator filling in the background and
+      // hook's `conversationId` state moves on. That's how a switch from conv
+      // A → B mid-stream keeps A's accumulator filling in the background and
       // why a Sidebar indicator on A's row stays accurate.
-      const submitSessionId = sessionId
+      const submitConversationId = conversationId
 
-      setSession(submitSessionId, (prev) => ({
+      setConversation(submitConversationId, (prev) => ({
         messages: [...prev.messages, { role: 'user', content: text }],
         isAwaitingFirstChunk: true,
         isStreaming: true,
@@ -700,17 +715,17 @@ export function useChat(): UseChatReturn {
       }))
 
       // Delegate all SSE event handling to the shared factory.
-      const { handleStreamEvent } = buildStreamHandlers(submitSessionId, {
+      const { handleStreamEvent } = buildStreamHandlers(submitConversationId, {
         currentProvider,
         currentModel,
-        initSession,
+        initConversation,
       })
 
       try {
         const response = await apiFetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, session_id: submitSessionId }),
+          body: JSON.stringify({ message: text, conversation_id: submitConversationId }),
         })
 
         if (!response.ok) {
@@ -723,7 +738,7 @@ export function useChat(): UseChatReturn {
 
         await readSSEStream(response.body, handleStreamEvent)
       } catch {
-        setSession(submitSessionId, (prev) => ({
+        setConversation(submitConversationId, (prev) => ({
           ...prev,
           messages: [
             ...prev.messages,
@@ -731,8 +746,8 @@ export function useChat(): UseChatReturn {
           ],
         }))
       } finally {
-        const wasAwayDuringStream = activeSessionIdRef.current !== submitSessionId
-        setSession(submitSessionId, (prev) => ({
+        const wasAwayDuringStream = activeConversationIdRef.current !== submitConversationId
+        setConversation(submitConversationId, (prev) => ({
           ...prev,
           isStreaming: false,
           isAwaitingFirstChunk: false,
@@ -743,7 +758,7 @@ export function useChat(): UseChatReturn {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sessionId, currentProvider, currentModel, initSession]
+    [conversationId, currentProvider, currentModel, initConversation]
   )
 
   // retryLastTool replays the last tool invocation via POST /api/chat/retry.
@@ -751,12 +766,12 @@ export function useChat(): UseChatReturn {
   // so the tool card transitions through executing → completed/error exactly
   // as it would in a fresh message turn (D-09).
   const retryLastTool = useCallback(async () => {
-    if (!sessionId) return
-    if (getSessionSnapshot(sessionId).isStreaming) return
+    if (!conversationId) return
+    if (getConversationSnapshot(conversationId).isStreaming) return
 
-    const submitSessionId = sessionId
+    const submitConversationId = conversationId
 
-    setSession(submitSessionId, (prev) => {
+    setConversation(submitConversationId, (prev) => {
       // Clear the error state on the last tool_execution message so the card
       // returns to the executing (blue spinner) state before re-streaming.
       let lastToolIndex = -1
@@ -784,17 +799,17 @@ export function useChat(): UseChatReturn {
     })
 
     // Delegate all SSE event handling to the shared factory.
-    const { handleStreamEvent } = buildStreamHandlers(submitSessionId, {
+    const { handleStreamEvent } = buildStreamHandlers(submitConversationId, {
       currentProvider,
       currentModel,
-      initSession,
+      initConversation,
     })
 
     try {
       const response = await apiFetch('/api/chat/retry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: submitSessionId }),
+        body: JSON.stringify({ conversation_id: submitConversationId }),
       })
 
       if (!response.ok || !response.body) {
@@ -806,7 +821,7 @@ export function useChat(): UseChatReturn {
     } catch {
       toaster.create({ title: 'Could not retry', type: 'error', duration: 5000 })
     } finally {
-      setSession(submitSessionId, (prev) => ({
+      setConversation(submitConversationId, (prev) => ({
         ...prev,
         isStreaming: false,
         isAwaitingFirstChunk: false,
@@ -814,13 +829,13 @@ export function useChat(): UseChatReturn {
         // may have set it to reflect a failed retry. Mirror sendMessage pattern.
       }))
     }
-  }, [sessionId, currentProvider, currentModel, initSession])
+  }, [conversationId, currentProvider, currentModel, initConversation])
 
   return {
     messages,
     isLoading,
     isAwaitingFirstChunk,
-    sessionId,
+    conversationId,
     currentProvider,
     currentModel,
     providerError,

@@ -17,20 +17,44 @@ interface QuickSwitchOption {
   label: string
 }
 
-interface ProviderInfo {
+// Discriminated union published by Plan 06-05a (REQ-p5-provider-info-split):
+// local entries carry a required `base_url`; cloud entries carry only
+// `api_key_configured: boolean` (api_key never crosses the wire — D-09).
+// Switch on `entry.type` to narrow safely. ChatInterface only consumes the
+// ollama models list; the rest of the discriminated payload is forwarded
+// unmodified to the buildQuickSwitchOptions reader below.
+interface LocalProviderInfo {
+  type: 'local'
   available: boolean
   models: string[]
-  base_url: string | null
+  base_url: string
 }
-type ProvidersResponse = Record<string, ProviderInfo>
+
+interface CloudProviderInfo {
+  type: 'cloud'
+  available: boolean
+  models: string[]
+  api_key_configured: boolean
+}
+
+type ProviderInfoResponse = LocalProviderInfo | CloudProviderInfo
+type ProvidersResponse = Record<string, ProviderInfoResponse>
+
+function isProviderInfoResponse(value: unknown): value is ProviderInfoResponse {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  if (!Array.isArray(v.models)) return false
+  if (typeof v.available !== 'boolean') return false
+  if (v.type === 'local') return typeof v.base_url === 'string'
+  if (v.type === 'cloud') return typeof v.api_key_configured === 'boolean'
+  return false
+}
 
 function isProvidersResponse(value: unknown): value is ProvidersResponse {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   const ollama = v.ollama
-  if (typeof ollama !== 'object' || ollama === null) return false
-  const models = (ollama as { models?: unknown }).models
-  return Array.isArray(models)
+  return isProviderInfoResponse(ollama)
 }
 
 /**

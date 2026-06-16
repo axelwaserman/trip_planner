@@ -7,16 +7,13 @@ event subclasses (``ContentEvent``, ``ThinkingEvent``, ``ToolCallEvent``,
 inheritance with :class:`pydantic.BaseModel`, making ``isinstance(event,
 StreamEvent)`` checks first-class instead of relying on union narrowing.
 
-The SSE wire format is byte-equivalent to Phase 4.7 (verified by Wave 0's
-``test_stream_event_wire_compat.py`` golden file and RESEARCH OQ-01). Each
-subclass keeps its ``Literal[...]`` discriminator and field declaration order;
-``session_id`` stays declared on each subclass (rather than hoisted into the
-ABC) because Pydantic v2 emits inherited base fields BEFORE subclass fields,
-and the Phase 4.7 wire layout puts ``session_id`` LAST. RESEARCH OQ-01's
-"hoist session_id into the base" guidance was empirically verified to break
-field order — VALIDATION.md row "SSE wire format byte-equivalent to Phase 4.7"
-takes precedence per the plan's action paragraph ("adjust whichever ordering
-keeps Wave 0's test_stream_event_wire_compat.py green").
+Phase 6 / Plan 06-05a renames the wire correlation field on every event
+subclass to ``conversation_id`` (D-03 codebase-wide rename). The Phase 4.7
+wire-format invariant — the renamed key stays declared on each subclass
+(rather than hoisted into the ABC) — is preserved so Pydantic v2 keeps
+emitting the field LAST per subclass. RESEARCH OQ-01's "hoist into the base"
+guidance was empirically verified to break the wire format in Phase 4.7 and
+that empirical lock carries through unchanged here.
 
 ``StreamEvent`` itself is a pure marker ABC (:class:`abc.ABC`, NOT
 :class:`BaseModel`); it overrides
@@ -24,10 +21,10 @@ keeps Wave 0's test_stream_event_wire_compat.py green").
 builds a discriminated union of the five subclasses on the fly. This preserves
 the Phase 4.7 ``TypeAdapter`` round-trip behaviour without a separate type alias.
 
-Also hosts the chat session and message DTOs previously in ``app.models``:
-``SessionCreateRequest``, ``SessionCreateError``, ``ChatRequest``,
-``RetryRequest``, ``ChatSessionInfo``, ``ChatSessionsListResponse``,
-``ChatHistoryMessage``, ``ChatSessionHistoryResponse``.
+Also hosts the chat conversation and message DTOs previously in ``app.models``:
+``ConversationCreateRequest``, ``SessionCreateError``, ``ChatRequest``,
+``RetryRequest``, ``ChatConversationInfo``, ``ChatConversationsListResponse``,
+``ChatHistoryMessage``, ``ChatConversationHistoryResponse``.
 
 Analog: :mod:`app.llm.errors` (``ProbeErrorCode`` + ``ProbeError`` pattern).
 """
@@ -57,7 +54,9 @@ class ErrorCode(StrEnum):
 
     Per CLAUDE.md, the wire-level snake_case values are part of the contract:
     they are consumed by the frontend and must NOT be renamed. New error codes
-    are appended; existing codes are immutable.
+    are appended; existing codes are immutable. The ``session_error`` value
+    survives the Phase 6 / Plan 06-05a rename for this reason — it is a
+    wire-level snake_case taxonomy code, not the user-facing concept.
     """
 
     session_error = "session_error"
@@ -76,16 +75,16 @@ class StreamEvent(ABC):  # noqa: B024 - intentional marker ABC; see docstring "W
     ``isinstance(event, StreamEvent)`` checks work first-class.
 
     Why a pure ABC (not ``class StreamEvent(BaseModel, ABC)``):
-        - The Phase 4.7 wire layout puts ``session_id`` LAST on every
-          subclass. Pydantic v2 emits base fields BEFORE subclass fields, so
-          declaring ``session_id`` on a ``BaseModel`` base class would shift
-          the field to the second position and break wire byte-equivalence
-          (verified empirically + plan's action paragraph: "adjust whichever
-          ordering keeps Wave 0's test_stream_event_wire_compat.py green").
+        - The Phase 4.7 wire layout puts ``conversation_id`` LAST on every
+          subclass (per Plan 06-05a's wire correlation field rename). Pydantic v2
+          emits base fields BEFORE subclass fields, so declaring
+          ``conversation_id`` on a ``BaseModel`` base class would shift the
+          field to the second position and break wire byte-equivalence
+          (verified empirically in Phase 4.7).
         - Keeping ``StreamEvent`` as a pure ABC + multi-inheriting subclasses
           on ``BaseModel`` preserves field order naturally — each subclass
           declares its own fields in the canonical
-          ``type, …, session_id`` shape.
+          ``type, …, conversation_id`` shape.
         - :meth:`__get_pydantic_core_schema__` overrides at the ABC level so
           ``TypeAdapter(StreamEvent)`` resolves to a discriminated union of
           all current subclasses, preserving the Phase 4.7 round-trip
@@ -121,7 +120,7 @@ class ContentEvent(BaseModel, StreamEvent):
 
     type: Literal["content"] = "content"
     chunk: str = ""
-    session_id: str
+    conversation_id: str
 
 
 class ThinkingEvent(BaseModel, StreamEvent):
@@ -129,7 +128,7 @@ class ThinkingEvent(BaseModel, StreamEvent):
 
     type: Literal["thinking"] = "thinking"
     chunk: str = ""
-    session_id: str
+    conversation_id: str
 
 
 class ToolCallEvent(BaseModel, StreamEvent):
@@ -138,7 +137,7 @@ class ToolCallEvent(BaseModel, StreamEvent):
     type: Literal["tool_call"] = "tool_call"
     tool_name: str
     tool_args: dict[str, Any]
-    session_id: str
+    conversation_id: str
 
 
 class ToolResultEvent(BaseModel, StreamEvent):
@@ -148,7 +147,7 @@ class ToolResultEvent(BaseModel, StreamEvent):
     tool_name: str
     tool_result: str
     elapsed_ms: int
-    session_id: str
+    conversation_id: str
 
 
 class ErrorEvent(BaseModel, StreamEvent):
@@ -168,41 +167,47 @@ class ErrorEvent(BaseModel, StreamEvent):
     retryable: bool
     tool_name: str | None = None
     raw_detail: str | None = None
-    session_id: str
+    conversation_id: str
 
 
 # ============================================================================
-# Chat Session and Message DTOs (moved from app.models in Phase 4.9-01)
+# Chat Conversation and Message DTOs (moved from app.models in Phase 4.9-01;
+# renamed/split in Phase 6 / Plan 06-05a per D-03 + REQ-p5-session-create-request-split)
 # ============================================================================
 
 
-class SessionCreateRequest(BaseModel):
-    """Request model for creating a new chat session.
+class ConversationTarget(BaseModel):
+    """What to talk to (Pydantic SRP split — REQ-p5-session-create-request-split).
 
-    Per CONTEXT.md D-24, the canonical session-create payload carries four
-    optional fields: provider, model, base_url (local providers only), api_key
-    (cloud providers only). Per D-09, ``api_key`` lives only in session memory —
-    never logged or persisted.
-
-    Validators enforce the threat-model mitigations from PLAN.md:
-    - SSRF guard on ``base_url`` (allowlist localhost / 127.0.0.1 /
-      host.docker.internal; http/https schemes only).
-    - Length cap on ``api_key`` (≤ 256 chars after whitespace stripping;
-      empty-after-strip normalises to ``None``).
+    The "target" half of the request body for ``POST /api/chat/conversation``:
+    which provider/model the conversation is bound to. Credentials live on
+    :class:`ProviderCredentials` so the SSRF + length validators are owned by
+    a single class.
     """
 
     provider: str | None = Field(default=None, description="LLM provider (ollama, openai, anthropic)")
     model: str | None = Field(default=None, description="Model name for the provider")
-    base_url: str | None = Field(
-        default=None,
-        description="Local providers only; ignored for cloud",
-    )
-    api_key: str | None = Field(
-        default=None,
-        description=(
-            "Cloud providers only; ignored for local. Stored in session memory only — never logged or persisted."
-        ),
-    )
+
+
+class ProviderCredentials(BaseModel):
+    """How to reach a provider — relocated ``SessionCreateRequest`` validators (REQ-p5-session-create-request-split).
+
+    The "credentials" half of the request body for ``POST /api/chat/conversation``.
+    Both validators below were lifted byte-equivalent from the deleted
+    ``SessionCreateRequest`` so the existing security tests transfer with no
+    behaviour change:
+
+    - SSRF guard on ``base_url`` (allowlist localhost / 127.0.0.1 /
+      host.docker.internal; http/https schemes only).
+    - Length cap on ``api_key`` (≤ 256 chars after whitespace stripping;
+      empty-after-strip normalises to ``None``).
+
+    Per D-09, ``api_key`` lives only in conversation memory — never logged
+    or persisted.
+    """
+
+    base_url: str | None = None
+    api_key: str | None = None
 
     @field_validator("api_key")
     @classmethod
@@ -231,8 +236,24 @@ class SessionCreateRequest(BaseModel):
         return v
 
 
+class ConversationCreateRequest(BaseModel):
+    """Request body for ``POST /api/chat/conversation`` (Phase 6 — REQ-p5-session-create-request-split).
+
+    Splits the legacy flat ``SessionCreateRequest`` into a nested ``target`` +
+    ``credentials`` shape so each Pydantic model owns one concern. FastAPI
+    rejects the legacy flat shape with HTTP 422 — clients must migrate to the
+    nested form (06-05b ships the frontend follow-on in the same atomic PR).
+    """
+
+    target: ConversationTarget = Field(default_factory=ConversationTarget)
+    credentials: ProviderCredentials | None = None
+
+
 # Import SessionCreateError from providers.models to avoid duplicating the
-# ProbeErrorCode-referencing model here.
+# ProbeErrorCode-referencing model here. ``SessionCreateError`` is exempt from
+# the D-03 rename — the wire-level error envelope shape is part of the
+# ``ProbeErrorCode`` taxonomy contract (CLAUDE.md "wire-level snake_case
+# values are immutable").
 from app.providers.models import SessionCreateError as SessionCreateError  # noqa: E402
 
 
@@ -240,48 +261,48 @@ class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
 
     message: str = Field(..., min_length=1, description="User message to send to the agent")
-    session_id: str = Field(..., description="Session ID for conversation continuity")
+    conversation_id: str = Field(..., description="Conversation ID for continuity")
 
 
 class RetryRequest(BaseModel):
     """Request model for the retry endpoint.
 
-    Mirrors the ``ChatRequest`` pattern but carries only a ``session_id``.
+    Mirrors the ``ChatRequest`` pattern but carries only a ``conversation_id``.
     The last tool invocation to replay is stored server-side in
-    ``_metadata[session_id]["last_tool_invocation"]``; the client never
-    needs to re-send tool args — it just identifies the session.
+    ``_metadata[conversation_id]["last_tool_invocation"]``; the client never
+    needs to re-send tool args — it just identifies the conversation.
     """
 
-    session_id: str = Field(
+    conversation_id: str = Field(
         ...,
-        description="Session id whose last tool invocation should be replayed.",
+        description="Conversation id whose last tool invocation should be replayed.",
     )
 
 
-class ChatSessionInfo(BaseModel):
-    """One session entry returned by GET /api/chat/sessions (D-22, D-27)."""
+class ChatConversationInfo(BaseModel):
+    """One conversation entry returned by GET /api/chat/conversations (D-22, D-27)."""
 
-    session_id: str = Field(..., description="Server-generated UUID for this session.")
+    conversation_id: str = Field(..., description="Server-generated UUID for this conversation.")
     provider: str = Field(..., description="Wire-level provider name (e.g., 'ollama').")
     model: str = Field(..., description="Per-provider model identifier.")
     created_at: str = Field(..., description="ISO 8601 UTC timestamp.")
     first_message_preview: str | None = Field(
         default=None,
-        description="First HumanMessage content, truncated to 80 chars; None if session has no messages yet.",
+        description="First HumanMessage content, truncated to 80 chars; None if conversation has no messages yet.",
     )
 
 
-class ChatSessionsListResponse(BaseModel):
-    """Response shape for GET /api/chat/sessions (D-22, D-27)."""
+class ChatConversationsListResponse(BaseModel):
+    """Response shape for GET /api/chat/conversations (D-22, D-27)."""
 
-    sessions: list[ChatSessionInfo] = Field(..., description="Sessions owned by the authenticated user.")
+    conversations: list[ChatConversationInfo] = Field(..., description="Conversations owned by the authenticated user.")
 
 
 class ChatHistoryMessage(BaseModel):
-    """One message in a session's chat history.
+    """One message in a conversation's chat history.
 
-    Used by GET /api/chat/sessions/{id} so the frontend can re-render a
-    previously-active session when the user clicks it in the Sidebar. Only
+    Used by GET /api/chat/conversations/{id} so the frontend can re-render a
+    previously-active conversation when the user clicks it in the Sidebar. Only
     user/assistant turns are surfaced — tool execution traces and reasoning
     chunks are stream-only artefacts that don't round-trip cleanly.
     """
@@ -290,18 +311,18 @@ class ChatHistoryMessage(BaseModel):
     content: str = Field(..., description="Message text (Markdown allowed for assistant).")
 
 
-class ChatSessionHistoryResponse(BaseModel):
-    """Response shape for GET /api/chat/sessions/{session_id}.
+class ChatConversationHistoryResponse(BaseModel):
+    """Response shape for GET /api/chat/conversations/{conversation_id}.
 
-    Returned only when the authenticated user owns the requested session.
-    Non-owners and missing sessions both surface as 404 to avoid leaking
-    session existence (mirrors the per-user-partition pattern from
-    GET /api/chat/sessions and DELETE /api/chat/session/{id}).
+    Returned only when the authenticated user owns the requested conversation.
+    Non-owners and missing conversations both surface as 404 to avoid leaking
+    conversation existence (mirrors the per-user-partition pattern from
+    GET /api/chat/conversations and DELETE /api/chat/conversation/{id}).
     """
 
-    session_id: str = Field(..., description="Echoed session UUID.")
-    provider: str = Field(..., description="Provider the session is bound to.")
-    model: str = Field(..., description="Model the session is bound to.")
+    conversation_id: str = Field(..., description="Echoed conversation UUID.")
+    provider: str = Field(..., description="Provider the conversation is bound to.")
+    model: str = Field(..., description="Model the conversation is bound to.")
     messages: list[ChatHistoryMessage] = Field(
         default_factory=list,
         description="User/assistant turns in chronological order.",

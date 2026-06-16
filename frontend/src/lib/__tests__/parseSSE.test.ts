@@ -67,23 +67,23 @@ describe('parseSSELine', () => {
   // --- Branch: valid StreamEvent shapes ---
 
   it('parses a content event', () => {
-    const event = parseSSELine('data: {"type":"content","chunk":"Hello","session_id":"abc"}')
-    expect(event).toEqual({ type: 'content', chunk: 'Hello', session_id: 'abc' })
+    const event = parseSSELine('data: {"type":"content","chunk":"Hello","conversation_id":"abc"}')
+    expect(event).toEqual({ type: 'content', chunk: 'Hello', conversation_id: 'abc' })
   })
 
   it('parses a thinking event', () => {
-    const event = parseSSELine('data: {"type":"thinking","chunk":"...", "session_id":"s1"}')
-    expect(event).toEqual({ type: 'thinking', chunk: '...', session_id: 's1' })
+    const event = parseSSELine('data: {"type":"thinking","chunk":"...", "conversation_id":"c1"}')
+    expect(event).toEqual({ type: 'thinking', chunk: '...', conversation_id: 'c1' })
   })
 
   it('parses a done event', () => {
-    const event = parseSSELine('data: {"type":"done","session_id":"s2"}')
-    expect(event).toEqual({ type: 'done', session_id: 's2' })
+    const event = parseSSELine('data: {"type":"done","conversation_id":"c2"}')
+    expect(event).toEqual({ type: 'done', conversation_id: 'c2' })
   })
 
   it('parses an error event with error_code tool_error (retryable: true)', () => {
     const event = parseSSELine(
-      'data: {"type":"error","error_code":"tool_error","message":"Tool failed","retryable":true,"tool_name":"search_flights","session_id":"s1"}'
+      'data: {"type":"error","error_code":"tool_error","message":"Tool failed","retryable":true,"tool_name":"search_flights","conversation_id":"c1"}'
     )
     expect(event).toEqual({
       type: 'error',
@@ -91,26 +91,28 @@ describe('parseSSELine', () => {
       message: 'Tool failed',
       retryable: true,
       tool_name: 'search_flights',
-      session_id: 's1',
+      conversation_id: 'c1',
     })
   })
 
   it('parses an error event with error_code session_error (retryable: false)', () => {
+    // `session_error` is the wire-level code retained verbatim per CLAUDE.md
+    // (wire-level snake_case is part of the contract).
     const event = parseSSELine(
-      'data: {"type":"error","error_code":"session_error","message":"Session not found","retryable":false,"session_id":"s2"}'
+      'data: {"type":"error","error_code":"session_error","message":"Conversation not found","retryable":false,"conversation_id":"c2"}'
     )
     expect(event).toEqual({
       type: 'error',
       error_code: 'session_error',
-      message: 'Session not found',
+      message: 'Conversation not found',
       retryable: false,
-      session_id: 's2',
+      conversation_id: 'c2',
     })
   })
 
   it('parses an error event with optional raw_detail field', () => {
     const event = parseSSELine(
-      'data: {"type":"error","error_code":"stream_error","message":"Something went wrong","retryable":false,"raw_detail":"Exception details","session_id":"s3"}'
+      'data: {"type":"error","error_code":"stream_error","message":"Something went wrong","retryable":false,"raw_detail":"Exception details","conversation_id":"c3"}'
     )
     expect(event).toEqual({
       type: 'error',
@@ -118,12 +120,12 @@ describe('parseSSELine', () => {
       message: 'Something went wrong',
       retryable: false,
       raw_detail: 'Exception details',
-      session_id: 's3',
+      conversation_id: 'c3',
     })
   })
 
   it('narrows event.type via switch (ContentEvent discriminator)', () => {
-    const evt = parseSSELine('data: {"type":"content","chunk":"hi","session_id":"s1"}')
+    const evt = parseSSELine('data: {"type":"content","chunk":"hi","conversation_id":"c1"}')
     if (evt && evt.type === 'content') {
       expect(evt.chunk).toBe('hi')
     } else {
@@ -133,26 +135,26 @@ describe('parseSSELine', () => {
 
   it('parses a tool_call event', () => {
     const event = parseSSELine(
-      'data: {"type":"tool_call","tool_name":"search","tool_args":{"q":"Paris"},"session_id":"s3"}'
+      'data: {"type":"tool_call","tool_name":"search","tool_args":{"q":"Paris"},"conversation_id":"c3"}'
     )
     expect(event).toEqual({
       type: 'tool_call',
       tool_name: 'search',
       tool_args: { q: 'Paris' },
-      session_id: 's3',
+      conversation_id: 'c3',
     })
   })
 
   it('parses a tool_result event', () => {
     const event = parseSSELine(
-      'data: {"type":"tool_result","tool_name":"search","tool_result":"found it","elapsed_ms":42,"session_id":"s4"}'
+      'data: {"type":"tool_result","tool_name":"search","tool_result":"found it","elapsed_ms":42,"conversation_id":"c4"}'
     )
     expect(event).toEqual({
       type: 'tool_result',
       tool_name: 'search',
       tool_result: 'found it',
       elapsed_ms: 42,
-      session_id: 's4',
+      conversation_id: 'c4',
     })
   })
 

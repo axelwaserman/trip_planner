@@ -7,7 +7,7 @@ three per-turn fields used to inject dependencies through PydanticAI's
     @dataclass(frozen=True)
     class ChatDeps:
         flight_client: FlightAPIClient
-        session_id: str
+        conversation_id: str
         user_id: str
 
 This file collects cleanly via ``pytest.importorskip`` until Wave 1 creates
@@ -31,9 +31,9 @@ def test_chatdeps_is_frozen_dataclass() -> None:
 
 
 def test_chatdeps_has_required_fields() -> None:
-    """ChatDeps exposes flight_client, session_id, user_id (D-05 ordering)."""
+    """ChatDeps exposes flight_client, conversation_id, user_id (D-05 ordering)."""
     field_names = {f.name for f in dataclasses.fields(ChatDeps)}
-    assert field_names == {"flight_client", "session_id", "user_id"}
+    assert field_names == {"flight_client", "conversation_id", "user_id"}
 
 
 def test_chatdeps_field_types() -> None:
@@ -42,10 +42,10 @@ def test_chatdeps_field_types() -> None:
     Resolved annotations (via ``get_type_hints``) are used for resilience to
     string vs runtime-class form. The ``flight_client`` type is asserted by
     name match against ``FlightAPIClient`` (the ABC from
-    ``app.tools.flight_client``); ``session_id`` and ``user_id`` are ``str``.
+    ``app.tools.flight_client``); ``conversation_id`` and ``user_id`` are ``str``.
     """
     hints = get_type_hints(ChatDeps)
-    assert hints["session_id"] is str
+    assert hints["conversation_id"] is str
     assert hints["user_id"] is str
     # FlightAPIClient is an ABC; check by name to remain decoupled from
     # the import path.

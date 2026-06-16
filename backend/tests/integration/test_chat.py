@@ -19,8 +19,8 @@ def client() -> TestClient:
         yield c
 
 
-def test_chat_endpoint_requires_session_id(client: TestClient, auth_headers: dict[str, str]) -> None:
-    """Test chat endpoint requires session_id."""
+def test_chat_endpoint_requires_conversation_id(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """Test chat endpoint requires conversation_id."""
     response = client.post(
         "/api/chat",
         json={"message": "Hello"},
@@ -39,7 +39,7 @@ def test_chat_endpoint_rejects_invalid_session(client: TestClient, auth_headers:
     """
     response = client.post(
         "/api/chat",
-        json={"message": "Hello", "session_id": "invalid-session"},
+        json={"message": "Hello", "conversation_id": "invalid-session"},
         headers=auth_headers,
     )
     assert response.status_code == 404
@@ -49,22 +49,22 @@ def test_chat_endpoint_streams_response(client: TestClient, auth_headers: dict[s
     """Test chat endpoint returns streaming response."""
 
     # Create a session first
-    session_response = client.post("/api/chat/session", headers=auth_headers)
+    session_response = client.post("/api/chat/conversation", headers=auth_headers)
     assert session_response.status_code == 201  # Created
-    session_id = session_response.json()["session_id"]
+    conversation_id = session_response.json()["conversation_id"]
 
-    async def mock_stream(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
+    async def mock_stream(message: str, conversation_id: str) -> AsyncGenerator[StreamEvent]:
         """Mock async generator for streaming."""
         yield ContentEvent(
             chunk="Hello there!",
-            session_id=session_id,
+            conversation_id=conversation_id,
         )
 
     # Patch the ChatService.chat_stream method (patch the real definition location)
     with patch("app.chat.service.ChatService.chat_stream", side_effect=mock_stream):
         response = client.post(
             "/api/chat",
-            json={"message": "Hello", "session_id": session_id},
+            json={"message": "Hello", "conversation_id": conversation_id},
             headers=auth_headers,
         )
 
@@ -84,24 +84,24 @@ def test_chat_endpoint_does_not_leak_exception_text_to_client(client: TestClient
     log filter, but the SSE wire goes directly to the client, so the
     response body must contain none of the original exception text.
     """
-    session_response = client.post("/api/chat/session", headers=auth_headers)
+    session_response = client.post("/api/chat/conversation", headers=auth_headers)
     assert session_response.status_code == 201
-    session_id = session_response.json()["session_id"]
+    conversation_id = session_response.json()["conversation_id"]
 
     sensitive_url = "https://api.openai.com/v1/internal-secret"
     sensitive_key = "sk-proj-leaked-from-exception-must-not-appear"
 
-    async def boom(message: str, session_id: str) -> AsyncGenerator[StreamEvent]:
+    async def boom(message: str, conversation_id: str) -> AsyncGenerator[StreamEvent]:
         # An async generator must be a generator function — yield once
         # before raising so the iterator can be advanced into the body.
         if False:
-            yield ContentEvent(chunk="never", session_id=session_id)
+            yield ContentEvent(chunk="never", conversation_id=conversation_id)
         raise RuntimeError(f"upstream call to {sensitive_url} failed with key {sensitive_key}")
 
     with patch("app.chat.service.ChatService.chat_stream", side_effect=boom):
         response = client.post(
             "/api/chat",
-            json={"message": "Hello", "session_id": session_id},
+            json={"message": "Hello", "conversation_id": conversation_id},
             headers=auth_headers,
         )
 
@@ -125,18 +125,18 @@ def test_chat_endpoint_does_not_leak_exception_text_to_client(client: TestClient
     parsed = json.loads(data_lines[-1])
     assert parsed["type"] == "error"
     assert parsed["error_code"] == "stream_error"
-    assert parsed["session_id"] == session_id
+    assert parsed["conversation_id"] == conversation_id
 
 
 def test_chat_endpoint_empty_message(client: TestClient, auth_headers: dict[str, str]) -> None:
     """Test chat endpoint rejects empty messages."""
     # Create session first
-    session_response = client.post("/api/chat/session", headers=auth_headers)
-    session_id = session_response.json()["session_id"]
+    session_response = client.post("/api/chat/conversation", headers=auth_headers)
+    conversation_id = session_response.json()["conversation_id"]
 
     response = client.post(
         "/api/chat",
-        json={"message": "", "session_id": session_id},
+        json={"message": "", "conversation_id": conversation_id},
         headers=auth_headers,
     )
 
@@ -150,15 +150,15 @@ def test_retry_endpoint_replays_last_tool_invocation(client: TestClient, auth_he
     then POST /api/chat/retry and assert 200 + SSE body containing the replay stream's events.
     """
     # Arrange — create a session
-    session_response = client.post("/api/chat/session", headers=auth_headers)
+    session_response = client.post("/api/chat/conversation", headers=auth_headers)
     assert session_response.status_code == 201
-    session_id = session_response.json()["session_id"]
+    conversation_id = session_response.json()["conversation_id"]
 
     # Inject last_tool_invocation directly into the session's metadata.
     # The real ChatService stores it when processing a ToolCall chunk;
     # we bypass the full LLM streaming stack in this integration test.
     chat_service = client.app.state.chat_service
-    chat_service._metadata[session_id]["last_tool_invocation"] = {
+    chat_service._metadata[conversation_id]["last_tool_invocation"] = {
         "tool_name": "search_flights",
         "tool_args": {"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
         "tool_call_id": "call_test",
@@ -166,14 +166,14 @@ def test_retry_endpoint_replays_last_tool_invocation(client: TestClient, auth_he
 
     # Act — retry stream that yields content
     async def mock_retry_stream(
-        message: str, session_id: str, *, persist_user_message: bool = True
+        message: str, conversation_id: str, *, persist_user_message: bool = True
     ) -> AsyncGenerator[StreamEvent]:
-        yield ContentEvent(chunk="Retry result here.", session_id=session_id)
+        yield ContentEvent(chunk="Retry result here.", conversation_id=conversation_id)
 
     with patch("app.chat.service.ChatService.chat_stream", side_effect=mock_retry_stream):
         response = client.post(
             "/api/chat/retry",
-            json={"session_id": session_id},
+            json={"conversation_id": conversation_id},
             headers=auth_headers,
         )
 
@@ -183,18 +183,18 @@ def test_retry_endpoint_replays_last_tool_invocation(client: TestClient, auth_he
 
 
 def test_retry_endpoint_returns_404_for_unknown_session(client: TestClient, auth_headers: dict[str, str]) -> None:
-    """POST /api/chat/retry with an unknown session_id returns 404.
+    """POST /api/chat/retry with an unknown conversation_id returns 404.
 
     CR-02 same-shape: missing-or-not-owner both produce 404 so a caller
     cannot probe for session existence.
     """
     # Arrange — use a random session id that was never created
-    unknown_session_id = "00000000-0000-0000-0000-000000000000"
+    unknown_conversation_id = "00000000-0000-0000-0000-000000000000"
 
     # Act
     response = client.post(
         "/api/chat/retry",
-        json={"session_id": unknown_session_id},
+        json={"conversation_id": unknown_conversation_id},
         headers=auth_headers,
     )
 
@@ -202,29 +202,31 @@ def test_retry_endpoint_returns_404_for_unknown_session(client: TestClient, auth
     assert response.status_code == 404
 
 
-def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_retry_endpoint_returns_404_for_cross_user_session(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    _inmemory_user_repo: object,
+) -> None:
     """User B calling POST /api/chat/retry with user A's session gets 404 (NOT 403).
 
     CR-02 / T-04.7-04: same-shape 404 prevents a non-owner from probing
     for session existence via status code differences.
     """
-    from pwdlib import PasswordHash
-    from pwdlib.hashers.argon2 import Argon2Hasher
-
     from app.auth.models import UserInDB
-    from app.auth.repository import EnvUserRepository  # noqa: TC001
+    from app.auth.repository import _password_hasher
+    from tests.fixtures.users import InMemoryUserRepository  # noqa: TC001
 
     # Arrange — user A (admin) creates a session
-    session_response = client.post("/api/chat/session", headers=auth_headers)
+    session_response = client.post("/api/chat/conversation", headers=auth_headers)
     assert session_response.status_code == 201
-    session_id = session_response.json()["session_id"]
+    conversation_id = session_response.json()["conversation_id"]
 
-    # Register a second user (user B) in the EnvUserRepository for this test.
-
-    hasher = PasswordHash([Argon2Hasher()])
+    # Register a second user (user B) via the conftest in-memory user repo
+    # (Plan 06-04 — EnvUserRepository deleted; the conftest's
+    # ``_inmemory_user_repo`` fixture installs the in-memory shim).
     user_b_name = "user_b_test_cross_user"
-    user_repo: EnvUserRepository = client.app.state.user_repo
-    user_repo.add_user(UserInDB(username=user_b_name, hashed_password=hasher.hash("testpw"), disabled=False))
+    user_repo: InMemoryUserRepository = _inmemory_user_repo  # type: ignore[assignment]
+    user_repo.add_user(UserInDB(username=user_b_name, hashed_password=_password_hasher.hash("testpw"), disabled=False))
     try:
         user_b_token = create_access_token({"sub": user_b_name})
         user_b_headers = {"Authorization": f"Bearer {user_b_token}"}
@@ -232,7 +234,7 @@ def test_retry_endpoint_returns_404_for_cross_user_session(client: TestClient, a
         # Act — user B tries to retry user A's session
         response = client.post(
             "/api/chat/retry",
-            json={"session_id": session_id},
+            json={"conversation_id": conversation_id},
             headers=user_b_headers,
         )
 
@@ -252,14 +254,14 @@ def test_retry_endpoint_returns_422_when_no_last_tool_invocation(
     The retry endpoint must surface this as 422 Unprocessable Entity.
     """
     # Arrange — create a fresh session (no chat turn, so no last_tool_invocation)
-    session_response = client.post("/api/chat/session", headers=auth_headers)
+    session_response = client.post("/api/chat/conversation", headers=auth_headers)
     assert session_response.status_code == 201
-    session_id = session_response.json()["session_id"]
+    conversation_id = session_response.json()["conversation_id"]
 
     # Act
     response = client.post(
         "/api/chat/retry",
-        json={"session_id": session_id},
+        json={"conversation_id": conversation_id},
         headers=auth_headers,
     )
 
