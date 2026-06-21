@@ -42,7 +42,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider as _PaiOllamaProvider
 from pyreqwest.client import ClientBuilder
-from pyreqwest.exceptions import ConnectError, RequestTimeoutError, StatusError
+from pyreqwest.exceptions import ConnectError, JSONDecodeError, ReadError, RequestTimeoutError, StatusError
 
 from app.llm.base import LLMProvider
 from app.llm.errors import ProbeError, ProbeErrorCode
@@ -96,7 +96,7 @@ class OllamaProvider(LLMProvider):
         """
         try:
             available = await self.list_models()
-        except (ConnectError, RequestTimeoutError, StatusError):
+        except (ConnectError, ReadError, JSONDecodeError, RequestTimeoutError, StatusError):
             return ProbeError(
                 error=ProbeErrorCode.PROVIDER_UNREACHABLE,
                 message=f"Can't reach Ollama at {self._base_url}.",

@@ -382,7 +382,8 @@ async def create_session(
     # H7: use get_conversation_metadata instead of direct _metadata access.
     # create_session just populated this entry so it is guaranteed non-None.
     metadata = chat_service.get_conversation_metadata(session_id)
-    assert metadata is not None  # invariant: create_session always populates _metadata
+    if metadata is None:
+        raise ValueError(f"Session {session_id!r} metadata missing after create_session")
     return {
         "session_id": session_id,
         "provider": metadata["provider"],
