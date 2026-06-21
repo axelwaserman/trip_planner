@@ -37,6 +37,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     PartDeltaEvent,
     PartStartEvent,
+    RetryPromptPart,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -152,14 +153,40 @@ class ChatService:
         self._last_activity[session_id] = time.time()
         return session_id, None
 
+    def is_conversation_owner(self, session_id: str, user_id: str) -> bool:
+        """Return True when ``user_id`` owns ``session_id``.
+
+        Used by route ownership checks (H7) to avoid direct ``_metadata``
+        access from the route layer. Returns False for missing sessions so the
+        route can issue the same 404 shape for missing-vs-not-owner, preventing
+        session-existence probing.
+
+        Args:
+            session_id: Session UUID to check.
+            user_id: Authenticated username (the JWT ``sub`` claim).
+        """
+        return self._metadata.get(session_id, {}).get("user_id") == user_id
+
+    def get_conversation_metadata(self, session_id: str) -> dict[str, Any] | None:
+        """Return raw metadata dict for ``session_id``, or None if absent.
+
+        Used by the ``create_session`` route to read provider/model back after a
+        successful :meth:`create_session` call without crossing the
+        ``_metadata`` encapsulation boundary (H7). Not to be used for ownership
+        decisions — use :meth:`is_conversation_owner` for that.
+
+        Args:
+            session_id: Session UUID to look up.
+        """
+        return self._metadata.get(session_id)
+
     def list_sessions_for_user(self, user_id: str) -> list[ChatSessionInfo]:
         """Return ``ChatSessionInfo`` records for sessions owned by ``user_id``.
 
-        Phase 5: ``first_message_preview`` is composed from
-        ``self._conversation_store.load(...)`` rather than from the LangChain
-        history. Per CONTEXT.md D-09 the store does NOT track session
-        metadata; this method joins ``_metadata`` (provider/model/created_at)
-        with the store's per-session message list.
+        Phase 5: ``first_message_preview`` is composed from the in-memory
+        store's ``_store`` dict (synchronous access). Per CONTEXT.md D-09 the
+        store does NOT track session metadata; this method joins ``_metadata``
+        (provider/model/created_at) with the store's per-session message list.
 
         ``list_for_user`` on the in-memory store returns an empty list (the
         store does not own the user→sessions index in Phase 5); this method
@@ -177,7 +204,7 @@ class ChatService:
                     provider=metadata["provider"],
                     model=metadata["model"],
                     created_at=metadata["created_at"],
-                    first_message_preview=self._first_message_preview(session_id),
+                    first_message_preview=self._get_first_message_preview(session_id),
                 )
             )
         # Sort by last activity so the session with the most recent message
@@ -185,7 +212,7 @@ class ChatService:
         results.sort(key=lambda info: self._last_activity.get(info.session_id, 0.0), reverse=True)
         return results
 
-    def _first_message_preview(self, session_id: str) -> str | None:
+    def _get_first_message_preview(self, session_id: str) -> str | None:
         """Return the first user message content (truncated to 80 chars), or None.
 
         Walks the in-memory store's stored ``ModelMessage`` list synchronously
@@ -316,18 +343,41 @@ class ChatService:
                 appended to the store (synthetic retry prompts shouldn't
                 accumulate in stored history).
         """
+        # C1: guard against TOCTOU race where the session was deleted between the
+        # route's ownership check and this generator's first line. Both _metadata
+        # and _agents must be present; yield a session_error ErrorEvent and return
+        # rather than letting the KeyError propagate as a 500.
+        try:
+            user_id_val = self._metadata[session_id]["user_id"]
+            agent = self._agents[session_id]
+        except KeyError:
+            yield ErrorEvent(
+                error_code=ErrorCode.session_error,
+                message="Conversation not found or expired.",
+                retryable=False,
+                tool_name=None,
+                raw_detail=None,
+                session_id=session_id,
+            )
+            return
+
         history = await self._conversation_store.load(session_id)
         deps = ChatDeps(
             flight_client=self._flight_client,
             session_id=session_id,
-            user_id=self._metadata[session_id]["user_id"],
+            user_id=user_id_val,
         )
-        agent = self._agents[session_id]
         # Track per-tool-call timing so ToolResultEvent.elapsed_ms reflects
         # the wall-clock between the FunctionToolCallEvent and its result.
         tool_call_start: dict[str, float] = {}
 
         try:
+            # H3: capture new_messages INSIDE the async-with block so the result
+            # is available after the context manager exits. Accessing
+            # agent_run.result OUTSIDE the block is unsafe — the result object
+            # may have been cleaned up by the time the context manager teardown
+            # runs (PydanticAI RESEARCH Pitfall 5).
+            _new_messages: list[Any] = []
             async with agent.iter(message, message_history=history, deps=deps) as agent_run:
                 async for node in agent_run:
                     if Agent.is_model_request_node(node):
@@ -341,9 +391,12 @@ class ChatService:
                             async for ev in tool_stream:
                                 async for stream_event in self._handle_tool_event(ev, session_id, tool_call_start):
                                     yield stream_event
+                # Capture new_messages before the async-with context closes (H3).
+                if agent_run.result is not None:
+                    _new_messages = agent_run.result.new_messages()
 
-            if persist_user_message and agent_run.result is not None:
-                await self._conversation_store.append(session_id, agent_run.result.new_messages())
+            if persist_user_message and _new_messages:
+                await self._conversation_store.append(session_id, _new_messages)
             self._last_activity[session_id] = time.time()
         except APIError as exc:
             # Tool body or downstream APIError — preserve Phase 4.7 retryable shape.
@@ -436,5 +489,19 @@ class ChatService:
                     tool_name=ret.tool_name,
                     tool_result=str(ret.content),
                     elapsed_ms=elapsed_ms,
+                    session_id=session_id,
+                )
+            elif isinstance(ret, RetryPromptPart):
+                # C4: RetryPromptPart means the tool returned an error that asks
+                # the model to retry. Pop the timing entry to avoid a memory leak
+                # (best-effort: tool_call_id may differ from the original call-id
+                # in some edge cases, so we use .pop(..., None) defensively).
+                tool_call_start.pop(ret.tool_call_id, None)
+                yield ErrorEvent(
+                    error_code=ErrorCode.tool_error,
+                    message="Tool requested a retry.",
+                    retryable=True,
+                    tool_name=ret.tool_name,
+                    raw_detail=None,
                     session_id=session_id,
                 )
