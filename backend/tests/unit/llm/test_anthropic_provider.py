@@ -6,13 +6,11 @@ tests exercise the same key-presence-only contract from
 :mod:`backend.tests.unit.test_provider_probe.test_probe_cloud_missing_key` (the
 4.2 analog) plus an Anthropic-specific regression for **Pitfall 2** (RESEARCH.md):
 
-    ``ChatAnthropic.anthropic_api_key`` is a required Pydantic ``SecretStr``;
-    constructing ``ChatAnthropic(api_key=None)`` raises a Pydantic
-    ``ValidationError`` BEFORE any user code can intercept it. Therefore
-    :meth:`AnthropicProvider.bind_tools` carries an ``assert self._api_key is
-    not None`` precondition guard, converting that misuse into a clean
-    :class:`AssertionError` rather than a leaky validation stack trace. The
-    last test pins this behaviour.
+    ``AnthropicProvider(api_key=None)`` builds successfully (validation is
+    deferred to :meth:`validate_config`); but :meth:`build_agent` raises
+    :class:`ValueError` with an explicit guard before the SDK can raise its
+    own ``pydantic_ai.UserError`` (C5). The last test pins this behaviour
+    and verifies the guard survives Python -O optimized mode.
 
 Default ``validate_config`` is presence-only (D-13); no outbound API call is
 made. The literal API-key strings here (``"sk-ant-bogus"``, ``"sk-ant-test"``)
@@ -93,15 +91,18 @@ async def test_list_models_returns_curated_anthropic_list() -> None:
     ]
 
 
-def test_build_agent_raises_assertion_error_when_validate_config_was_skipped() -> None:
+def test_build_agent_raises_value_error_when_validate_config_was_skipped() -> None:
     """Pitfall 4 regression: ``build_agent`` MUST refuse to construct
     ``AnthropicProvider`` when ``api_key`` is ``None``, raising
-    :class:`AssertionError` before the SDK can raise its own
+    :class:`ValueError` before the SDK can raise its own
     ``pydantic_ai.UserError`` (whose message could include field-path detail
     in logs). This pins the precondition guard in
     :meth:`AnthropicProvider.build_agent` — protecting against a direct caller
     who skips :meth:`validate_config` (the normal flow goes through the factory
     + ``ChatService.create_session`` ordering).
+
+    C5: the guard was previously an ``assert`` statement (stripped by Python -O),
+    now replaced with an explicit ``ValueError`` that survives optimized mode.
 
     Phase 5 / Plan 05-03 rewrites the Pitfall 2 (Phase 4.5 ``bind_tools``)
     regression onto Pitfall 4 (Phase 5 ``build_agent``); the underlying
@@ -111,5 +112,5 @@ def test_build_agent_raises_assertion_error_when_validate_config_was_skipped() -
     provider = AnthropicProvider(model="claude-3-5-sonnet-20241022", api_key=None)
 
     # Act + Assert
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="build_agent\\(\\) called with api_key=None"):
         provider.build_agent(tools=[], deps_type=object)

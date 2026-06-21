@@ -32,11 +32,12 @@ Key properties (per ``04.5-CONTEXT.md`` decisions):
    construction: the factory + ``ChatService.create_session`` ordering
    guarantees the sequence ``factory.build → validate_config → build_agent``.
 2. As a defense-in-depth precondition guard, :meth:`build_agent` itself
-   ``assert``s ``self._api_key is not None`` BEFORE constructing
-   ``AnthropicProvider``. That assert converts a misuse (a direct caller who
-   skips :meth:`validate_config`) into a clean :class:`AssertionError` instead
-   of a PydanticAI ``UserError`` whose message could leak field-path detail
-   into logs.
+   raises :class:`ValueError` when ``self._api_key is None`` BEFORE
+   constructing ``AnthropicProvider``. This explicit guard survives Python -O
+   mode (C5 — ``assert`` would be stripped) and converts a misuse (a direct
+   caller who skips :meth:`validate_config`) into a clean
+   :class:`ValueError` instead of a PydanticAI ``UserError`` whose message
+   could leak field-path detail into logs.
 """
 
 from collections.abc import Sequence
@@ -115,11 +116,12 @@ class AnthropicProvider(LLMProvider):
         """Construct a PydanticAI ``Agent`` against ``api.anthropic.com``.
 
         **Precondition (Pitfall 4):** ``self._api_key`` MUST be non-``None``.
-        :meth:`validate_config` enforces this for the normal flow; the bare
-        ``assert`` below is a defense-in-depth guard for direct callers that
-        skip the probe — converting a misuse into a clean
-        :class:`AssertionError` instead of a ``pydantic_ai.UserError`` from
-        inside the SDK (which can include field-path detail in its message).
+        :meth:`validate_config` enforces this for the normal flow; the
+        explicit ``if self._api_key is None: raise ValueError`` below is a
+        defense-in-depth guard for direct callers that skip the probe —
+        converting a misuse into a clean :class:`ValueError` instead of a
+        ``pydantic_ai.UserError`` from inside the SDK (which can include
+        field-path detail in its message). Survives Python -O mode (C5).
 
         Args:
             tools: PydanticAI tool callables (each takes
@@ -129,9 +131,14 @@ class AnthropicProvider(LLMProvider):
         Returns:
             A PydanticAI ``Agent`` ready for ``agent.iter(...)``.
         """
-        # Pitfall 4: AnthropicProvider(api_key=None) raises pydantic_ai.UserError;
-        # validate_config gates this in the normal flow. The assert is defense-in-depth.
-        assert self._api_key is not None
+        # C5: explicit guard replaces assert (which Python -O strips). validate_config
+        # gates this in the normal flow; the guard here protects direct callers
+        # that skip the probe from receiving an opaque pydantic_ai.UserError.
+        if self._api_key is None:
+            raise ValueError(
+                f"{self.get_provider_name()!r} build_agent() called with api_key=None; "
+                "validate_config() must return None before build_agent() is called."
+            )
         model = AnthropicModel(
             self._model,
             provider=_PaiAnthropicProvider(api_key=self._api_key),

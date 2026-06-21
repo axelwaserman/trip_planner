@@ -29,10 +29,11 @@ Design notes:
 - **PydanticAI takes plain ``str``.** The Phase 4.5 ``SecretStr`` wrapping
   retires — PydanticAI's ``OpenAIProvider`` accepts a plain ``str`` for
   ``api_key`` (RESEARCH § "Auth shape: Plain str").
-- **Defense-in-depth assert.** :meth:`build_agent` asserts
-  ``self._api_key is not None`` before constructing the PydanticAI provider.
-  In the normal flow :meth:`validate_config` already gates this; the assert
-  protects direct callers that skip the probe.
+- **Defense-in-depth explicit guard.** :meth:`build_agent` raises
+  :class:`ValueError` when ``self._api_key is None`` before constructing the
+  PydanticAI provider. In the normal flow :meth:`validate_config` already gates
+  this; the explicit guard protects direct callers that skip the probe and
+  survives Python -O optimized mode (C5 — assert would be stripped).
 """
 
 from collections.abc import Sequence
@@ -127,9 +128,10 @@ class OpenAIProvider(LLMProvider):
         - everything else → ``OpenAIChatModel`` (chat completions API).
 
         Precondition: :meth:`validate_config` has already returned ``None``.
-        The ``assert self._api_key is not None`` is defense-in-depth — for
-        direct callers that skip the probe, the assert produces a clean
-        ``AssertionError`` rather than a ``UserError`` from inside the SDK.
+        The explicit ``if self._api_key is None: raise ValueError`` is
+        defense-in-depth — for direct callers that skip the probe, the
+        explicit guard produces a clean ``ValueError`` rather than a
+        ``UserError`` from inside the SDK, and survives Python -O mode.
 
         Args:
             tools: PydanticAI tool callables (each takes
@@ -139,7 +141,14 @@ class OpenAIProvider(LLMProvider):
         Returns:
             A PydanticAI ``Agent`` ready for ``agent.iter(...)``.
         """
-        assert self._api_key is not None  # validate_config gated this in normal flow
+        # C5: replace assert with explicit ValueError guard. Python -O strips
+        # asserts, which would allow a None key to reach the SDK constructor
+        # and produce an opaque SDK error instead of a clear application error.
+        if self._api_key is None:
+            raise ValueError(
+                f"{self.get_provider_name()!r} build_agent() called with api_key=None; "
+                "validate_config() must return None before build_agent() is called."
+            )
         provider = _PaiOpenAIProvider(api_key=self._api_key)
         model: OpenAIResponsesModel | OpenAIChatModel
         if any(self._model.startswith(prefix) for prefix in self._o_series_prefixes):
