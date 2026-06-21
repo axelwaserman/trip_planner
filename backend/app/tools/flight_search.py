@@ -384,6 +384,10 @@ async def search_flights(
         # Validate numeric parameters
         if passengers < 1:
             return "Error: Number of passengers must be at least 1."
+        # H6: cap passengers at 9 (airline industry maximum per booking; prevents
+        # the LLM from requesting absurd values that would fail downstream).
+        if passengers > 9:
+            return "Error: Number of passengers cannot exceed 9."
         if limit < 1 or limit > 20:
             return "Error: Limit must be between 1 and 20."
         if max_stops is not None and (max_stops < 0 or max_stops > 2):

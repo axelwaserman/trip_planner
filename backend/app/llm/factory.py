@@ -96,15 +96,28 @@ class LLMProviderFactory:
                     probe_timeout_seconds=self._settings.provider_probe_timeout_seconds,
                 )
             case "openai":
+                # H5: openai_api_key is SecretStr | None — call get_secret_value()
+                # to unwrap to str before passing to the provider.
+                settings_key = (
+                    self._settings.openai_api_key.get_secret_value()
+                    if self._settings.openai_api_key is not None
+                    else None
+                )
                 return OpenAIProvider(
                     model=config.model,
-                    api_key=config.api_key or self._settings.openai_api_key,
+                    api_key=config.api_key or settings_key,
                     o_series_prefixes=self._settings.openai_o_series_model_prefixes,
                 )
             case "anthropic":
+                # H5: anthropic_api_key is SecretStr | None — unwrap to str.
+                settings_key = (
+                    self._settings.anthropic_api_key.get_secret_value()
+                    if self._settings.anthropic_api_key is not None
+                    else None
+                )
                 return AnthropicProvider(
                     model=config.model,
-                    api_key=config.api_key or self._settings.anthropic_api_key,
+                    api_key=config.api_key or settings_key,
                 )
             case "lmstudio":
                 return LMStudioProvider(

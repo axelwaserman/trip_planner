@@ -239,7 +239,8 @@ from app.providers.models import SessionCreateError as SessionCreateError  # noq
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
 
-    message: str = Field(..., min_length=1, description="User message to send to the agent")
+    # C7: cap at 32 KiB to prevent runaway prompt injection from oversized messages.
+    message: str = Field(..., min_length=1, max_length=32_768, description="User message to send to the agent")
     session_id: str = Field(..., description="Session ID for conversation continuity")
 
 
