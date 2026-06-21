@@ -7,14 +7,14 @@ branches. The wire shape differs from Ollama:
 - Ollama:    {"models": [{"name": ..., "model": ...}]}  → /api/tags
 - LM Studio: {"object": "list", "data": [{"id": ..., "object": "model"}]} → /v1/models
 
-httpx is mocked at the boundary via ``unittest.mock.patch`` (RESEARCH.md
-§"Open Question 2 RESOLVED" — no respx, no pytest_httpx). All tests run
-without a live LM Studio daemon.
+H1/H4 (Plan 05-07): httpx replaced with pyreqwest (ADR-008). Tests now mock
+``pyreqwest.client.ClientBuilder`` at the provider module level rather than
+``httpx.AsyncClient.get``. All tests run without a live LM Studio daemon.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+from pyreqwest.exceptions import CauseErrorDetails, ConnectError, RequestTimeoutError, StatusError, StatusErrorDetails
 
 from app.llm.errors import ProbeErrorCode
 from app.llm.providers.lmstudio import LMStudioProvider
@@ -29,33 +29,53 @@ def _make_provider(model: str = "qwen2.5-coder-7b") -> LMStudioProvider:
     )
 
 
-def _mock_lmstudio_models_response(model_ids: list[str]) -> MagicMock:
-    """Build a MagicMock httpx.Response for the LM Studio models endpoint.
+def _make_pyreqwest_client_mock(json_payload: dict | None = None) -> MagicMock:
+    """Build a mock pyreqwest ClientBuilder chain returning ``json_payload``.
 
-    Matches the OpenAI-compatible shape verified live in RESEARCH.md
-    §"LM Studio Discovery": ``{"object": "list", "data": [{"id": "<id>",
-    "object": "model"}]}``.
+    The chain: ClientBuilder().timeout(...).error_for_status(True).build()
+    returns an async context manager whose __aenter__ gives a ``client``.
+    ``client.get(url).build().send()`` is awaited to get a ``response``.
+    ``response.json()`` is awaited to get the payload dict.
     """
-    response = MagicMock(spec=httpx.Response)
-    response.status_code = 200
-    response.json.return_value = {
-        "object": "list",
-        "data": [{"id": mid, "object": "model"} for mid in model_ids],
-    }
-    response.raise_for_status = MagicMock(return_value=None)
-    return response
+    response = AsyncMock()
+    response.json = AsyncMock(return_value=json_payload or {})
+
+    send_mock = AsyncMock(return_value=response)
+    consumed_request = MagicMock()
+    consumed_request.send = send_mock
+
+    request_builder = MagicMock()
+    request_builder.build.return_value = consumed_request
+
+    client = MagicMock()
+    client.get.return_value = request_builder
+
+    ctx_manager = AsyncMock()
+    ctx_manager.__aenter__ = AsyncMock(return_value=client)
+    ctx_manager.__aexit__ = AsyncMock(return_value=None)
+
+    builder = MagicMock()
+    builder.timeout.return_value = builder
+    builder.error_for_status.return_value = builder
+    builder.build.return_value = ctx_manager
+
+    return builder
 
 
 async def test_validate_config_returns_unreachable_on_connect_error() -> None:
-    """ConnectError from ``httpx.AsyncClient.get`` → ``PROVIDER_UNREACHABLE``."""
+    """ConnectError from pyreqwest → ``PROVIDER_UNREACHABLE``."""
     # Arrange
     provider = _make_provider()
+    builder = MagicMock()
+    builder.timeout.return_value = builder
+    builder.error_for_status.return_value = builder
+    ctx_manager = AsyncMock()
+    ctx_manager.__aenter__ = AsyncMock(side_effect=ConnectError("refused", CauseErrorDetails()))
+    ctx_manager.__aexit__ = AsyncMock(return_value=None)
+    builder.build.return_value = ctx_manager
 
     # Act
-    with patch(
-        "httpx.AsyncClient.get",
-        new=AsyncMock(side_effect=httpx.ConnectError("refused")),
-    ):
+    with patch("app.llm.providers.lmstudio.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -67,15 +87,19 @@ async def test_validate_config_returns_unreachable_on_connect_error() -> None:
 
 
 async def test_validate_config_returns_unreachable_on_timeout() -> None:
-    """``httpx.TimeoutException`` → ``PROVIDER_UNREACHABLE``."""
+    """RequestTimeoutError from pyreqwest → ``PROVIDER_UNREACHABLE``."""
     # Arrange
     provider = _make_provider()
+    builder = MagicMock()
+    builder.timeout.return_value = builder
+    builder.error_for_status.return_value = builder
+    ctx_manager = AsyncMock()
+    ctx_manager.__aenter__ = AsyncMock(side_effect=RequestTimeoutError("timed out", CauseErrorDetails()))
+    ctx_manager.__aexit__ = AsyncMock(return_value=None)
+    builder.build.return_value = ctx_manager
 
     # Act
-    with patch(
-        "httpx.AsyncClient.get",
-        new=AsyncMock(side_effect=httpx.TimeoutException("timed out")),
-    ):
+    with patch("app.llm.providers.lmstudio.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -84,19 +108,20 @@ async def test_validate_config_returns_unreachable_on_timeout() -> None:
     assert "LM Studio" in result.message
 
 
-async def test_validate_config_returns_unreachable_on_http_status_error() -> None:
-    """``httpx.HTTPStatusError`` (e.g. 5xx from daemon) → ``PROVIDER_UNREACHABLE``."""
+async def test_validate_config_returns_unreachable_on_status_error() -> None:
+    """StatusError (e.g. 5xx from daemon) → ``PROVIDER_UNREACHABLE``."""
     # Arrange
     provider = _make_provider()
-    request = MagicMock(spec=httpx.Request)
-    response = MagicMock(spec=httpx.Response)
-    response.status_code = 503
+    builder = MagicMock()
+    builder.timeout.return_value = builder
+    builder.error_for_status.return_value = builder
+    ctx_manager = AsyncMock()
+    ctx_manager.__aenter__ = AsyncMock(side_effect=StatusError("503 server error", StatusErrorDetails()))
+    ctx_manager.__aexit__ = AsyncMock(return_value=None)
+    builder.build.return_value = ctx_manager
 
     # Act
-    with patch(
-        "httpx.AsyncClient.get",
-        new=AsyncMock(side_effect=httpx.HTTPStatusError("server error", request=request, response=response)),
-    ):
+    with patch("app.llm.providers.lmstudio.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -108,10 +133,14 @@ async def test_validate_config_returns_model_not_installed_when_id_missing() -> 
     """``/v1/models`` 200 but does not list the requested id → ``MODEL_NOT_INSTALLED``."""
     # Arrange
     provider = _make_provider(model="qwen2.5-coder-7b")
-    response = _mock_lmstudio_models_response(["other-7b"])
+    payload = {
+        "object": "list",
+        "data": [{"id": "other-7b", "object": "model"}],
+    }
+    builder = _make_pyreqwest_client_mock(json_payload=payload)
 
     # Act
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+    with patch("app.llm.providers.lmstudio.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -125,10 +154,17 @@ async def test_validate_config_returns_none_when_model_present() -> None:
     """``/v1/models`` lists the requested id → ``validate_config`` returns ``None``."""
     # Arrange
     provider = _make_provider(model="qwen2.5-coder-7b")
-    response = _mock_lmstudio_models_response(["qwen2.5-coder-7b", "gpt-oss-20b"])
+    payload = {
+        "object": "list",
+        "data": [
+            {"id": "qwen2.5-coder-7b", "object": "model"},
+            {"id": "gpt-oss-20b", "object": "model"},
+        ],
+    }
+    builder = _make_pyreqwest_client_mock(json_payload=payload)
 
     # Act
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+    with patch("app.llm.providers.lmstudio.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -144,10 +180,18 @@ async def test_list_models_returns_sorted_unique_ids_from_v1_models() -> None:
     """
     # Arrange — duplicate "b-model" intentionally to exercise dedupe.
     provider = _make_provider()
-    response = _mock_lmstudio_models_response(["b-model", "a-model", "b-model"])
+    payload = {
+        "object": "list",
+        "data": [
+            {"id": "b-model", "object": "model"},
+            {"id": "a-model", "object": "model"},
+            {"id": "b-model", "object": "model"},
+        ],
+    }
+    builder = _make_pyreqwest_client_mock(json_payload=payload)
 
     # Act
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+    with patch("app.llm.providers.lmstudio.ClientBuilder", return_value=builder):
         models = await provider.list_models()
 
     # Assert
@@ -164,13 +208,11 @@ async def test_list_models_returns_empty_list_on_malformed_shape() -> None:
     """
     # Arrange
     provider = _make_provider()
-    malformed = MagicMock(spec=httpx.Response)
-    malformed.status_code = 200
-    malformed.json.return_value = {"unexpected": "shape"}
-    malformed.raise_for_status = MagicMock(return_value=None)
+    payload = {"unexpected": "shape"}
+    builder = _make_pyreqwest_client_mock(json_payload=payload)
 
     # Act
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=malformed)):
+    with patch("app.llm.providers.lmstudio.ClientBuilder", return_value=builder):
         models = await provider.list_models()
 
     # Assert

@@ -12,11 +12,15 @@ chat-stream integration tests in Wave 3, NOT here.
 
 The 4.2 ``test_provider_probe.py`` tests remain unchanged — Plan 09 deletes
 them once the route layer rewires onto the factory.
+
+H1/H4 (Plan 05-07): httpx replaced with pyreqwest (ADR-008). Tests now mock
+``pyreqwest.client.ClientBuilder`` at the provider module level rather than
+``httpx.AsyncClient.get``.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+from pyreqwest.exceptions import CauseErrorDetails, ConnectError, RequestTimeoutError
 
 from app.llm.errors import ProbeErrorCode
 from app.llm.providers.ollama import OllamaProvider
@@ -31,16 +35,53 @@ def _make_provider(model: str = "qwen3:4b") -> OllamaProvider:
     )
 
 
+def _make_pyreqwest_client_mock(json_payload: dict | None = None) -> MagicMock:
+    """Build a mock pyreqwest ClientBuilder chain returning ``json_payload``.
+
+    The chain: ClientBuilder().timeout(...).error_for_status(True).build()
+    returns an async context manager whose __aenter__ gives a ``client``.
+    ``client.get(url).build().send()`` is awaited to get a ``response``.
+    ``response.json()`` is awaited to get the payload dict.
+    """
+    response = AsyncMock()
+    response.json = AsyncMock(return_value=json_payload or {})
+
+    send_mock = AsyncMock(return_value=response)
+    consumed_request = MagicMock()
+    consumed_request.send = send_mock
+
+    request_builder = MagicMock()
+    request_builder.build.return_value = consumed_request
+
+    client = MagicMock()
+    client.get.return_value = request_builder
+
+    ctx_manager = AsyncMock()
+    ctx_manager.__aenter__ = AsyncMock(return_value=client)
+    ctx_manager.__aexit__ = AsyncMock(return_value=None)
+
+    builder = MagicMock()
+    builder.timeout.return_value = builder
+    builder.error_for_status.return_value = builder
+    builder.build.return_value = ctx_manager
+
+    return builder
+
+
 async def test_validate_config_returns_unreachable_on_connect_error() -> None:
-    """ConnectError from ``httpx.AsyncClient.get`` → ``PROVIDER_UNREACHABLE``."""
+    """ConnectError from pyreqwest → ``PROVIDER_UNREACHABLE``."""
     # Arrange
     provider = _make_provider()
+    builder = MagicMock()
+    builder.timeout.return_value = builder
+    builder.error_for_status.return_value = builder
+    ctx_manager = AsyncMock()
+    ctx_manager.__aenter__ = AsyncMock(side_effect=ConnectError("refused", CauseErrorDetails()))
+    ctx_manager.__aexit__ = AsyncMock(return_value=None)
+    builder.build.return_value = ctx_manager
 
     # Act
-    with patch(
-        "httpx.AsyncClient.get",
-        new=AsyncMock(side_effect=httpx.ConnectError("refused")),
-    ):
+    with patch("app.llm.providers.ollama.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -51,15 +92,19 @@ async def test_validate_config_returns_unreachable_on_connect_error() -> None:
 
 
 async def test_validate_config_returns_unreachable_on_timeout() -> None:
-    """``httpx.TimeoutException`` → ``PROVIDER_UNREACHABLE``."""
+    """RequestTimeoutError from pyreqwest → ``PROVIDER_UNREACHABLE``."""
     # Arrange
     provider = _make_provider()
+    builder = MagicMock()
+    builder.timeout.return_value = builder
+    builder.error_for_status.return_value = builder
+    ctx_manager = AsyncMock()
+    ctx_manager.__aenter__ = AsyncMock(side_effect=RequestTimeoutError("timed out", CauseErrorDetails()))
+    ctx_manager.__aexit__ = AsyncMock(return_value=None)
+    builder.build.return_value = ctx_manager
 
     # Act
-    with patch(
-        "httpx.AsyncClient.get",
-        new=AsyncMock(side_effect=httpx.TimeoutException("timed out")),
-    ):
+    with patch("app.llm.providers.ollama.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -67,17 +112,19 @@ async def test_validate_config_returns_unreachable_on_timeout() -> None:
     assert result.error == ProbeErrorCode.PROVIDER_UNREACHABLE
 
 
-async def test_validate_config_returns_model_not_installed_when_tag_missing(
-    mock_ollama_tags_response: object,
-) -> None:
+async def test_validate_config_returns_model_not_installed_when_tag_missing() -> None:
     """``/api/tags`` 200 but does not list the requested model → ``MODEL_NOT_INSTALLED``."""
     # Arrange
     provider = _make_provider(model="qwen3:4b")
-    build_response = mock_ollama_tags_response  # factory fixture
-    response = build_response(["other:7b"])  # type: ignore[operator]
+    payload = {
+        "models": [
+            {"name": "other:7b", "model": "other:7b"},
+        ]
+    }
+    builder = _make_pyreqwest_client_mock(json_payload=payload)
 
     # Act
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+    with patch("app.llm.providers.ollama.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -87,17 +134,19 @@ async def test_validate_config_returns_model_not_installed_when_tag_missing(
     assert "ollama pull qwen3:4b" in result.hint
 
 
-async def test_validate_config_returns_none_when_model_present(
-    mock_ollama_tags_response: object,
-) -> None:
+async def test_validate_config_returns_none_when_model_present() -> None:
     """``/api/tags`` lists the requested model → ``validate_config`` returns ``None``."""
     # Arrange
     provider = _make_provider(model="qwen3:4b")
-    build_response = mock_ollama_tags_response
-    response = build_response(["qwen3:4b"])  # type: ignore[operator]
+    payload = {
+        "models": [
+            {"name": "qwen3:4b", "model": "qwen3:4b"},
+        ]
+    }
+    builder = _make_pyreqwest_client_mock(json_payload=payload)
 
     # Act
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+    with patch("app.llm.providers.ollama.ClientBuilder", return_value=builder):
         result = await provider.validate_config()
 
     # Assert
@@ -124,19 +173,17 @@ async def test_list_models_returns_sorted_unique_ids_from_api_tags() -> None:
     """
     # Arrange — construct a mock response with name/model divergence on entry 3.
     provider = _make_provider()
-    response = MagicMock(spec=httpx.Response)
-    response.status_code = 200
-    response.json.return_value = {
+    payload = {
         "models": [
             {"name": "b", "model": "b"},
             {"name": "a", "model": "a"},
             {"name": "c", "model": "x"},  # divergent: name=c, model=x
         ]
     }
-    response.raise_for_status = MagicMock()
+    builder = _make_pyreqwest_client_mock(json_payload=payload)
 
     # Act
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=response)):
+    with patch("app.llm.providers.ollama.ClientBuilder", return_value=builder):
         models = await provider.list_models()
 
     # Assert — sorted union of name + model fields.
