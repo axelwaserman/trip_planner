@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# C6: frozenset of registered tool names; used to validate tool_name from
+# _metadata["last_tool_invocation"] before interpolating it into a prompt.
+# LLM-controlled values MUST NOT be interpolated without allowlist validation
+# (T-05-07-01). New tools added in future phases must be appended here.
+_REGISTERED_TOOL_NAMES: frozenset[str] = frozenset({"search_flights"})
+
 
 # Dependency injection for ChatService
 async def get_chat_service() -> ChatService:
@@ -83,10 +89,9 @@ async def chat(
         HTTPException: 404 if session doesn't exist or is owned by another
             user; 500 surfaces internally as an SSE error event.
     """
-    # Ownership check (CR-02). Same 404 shape on missing-vs-not-owner so
+    # Ownership check (CR-02, H7). Same 404 shape on missing-vs-not-owner so
     # a non-owner cannot probe for session existence by status code.
-    metadata = chat_service._metadata.get(request.session_id)
-    if metadata is None or metadata.get("user_id") != current_user.username:
+    if not chat_service.is_conversation_owner(request.session_id, current_user.username):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Session {request.session_id} not found",
@@ -174,11 +179,10 @@ async def retry_tool_call(
         HTTPException: 422 if no tool invocation has been recorded yet for the session
             (requires at least one prior chat turn that triggered a tool call).
     """
-    # CR-02 ownership check — same shape as POST /api/chat: 404 on missing-or-not-owner.
+    # CR-02 ownership check (H7) — same shape as POST /api/chat: 404 on missing-or-not-owner.
     # A non-owner receives the same 404 as a missing session to avoid leaking session
     # existence via status code differences (horizontal privilege escalation, T-04.7-04).
-    metadata = chat_service._metadata.get(request.session_id)
-    if metadata is None or metadata.get("user_id") != current_user.username:
+    if not chat_service.is_conversation_owner(request.session_id, current_user.username):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Session {request.session_id} not found",
@@ -187,11 +191,24 @@ async def retry_tool_call(
     # 422 when no tool invocation has been recorded for the session (D-07).
     # Surfaces as Unprocessable Entity so the frontend can distinguish "no prior
     # tool call" (user error) from "missing session" (404 ownership failure).
-    last_inv = metadata.get("last_tool_invocation")
+    # Use the public get_conversation_metadata method to avoid direct _metadata access.
+    session_meta = chat_service.get_conversation_metadata(request.session_id)
+    last_inv = session_meta.get("last_tool_invocation") if session_meta is not None else None
     if last_inv is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="No retryable tool invocation found for this session.",
+        )
+
+    # C6: tool_name originates from the LLM (FunctionToolCallEvent.part.tool_name)
+    # and was stored in _metadata. Validate it against the registered tool set
+    # before interpolating into a user-visible prompt to prevent injection via a
+    # compromised or adversarial LLM response (T-05-07-01).
+    tool_name = last_inv["tool_name"]
+    if tool_name not in _REGISTERED_TOOL_NAMES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unknown tool name in last invocation: {tool_name!r}",
         )
 
     # D-09: re-stream the full LLM turn. The agent already has the prior
@@ -199,7 +216,7 @@ async def retry_tool_call(
     # short directive triggers the same tool-calling loop that produced the
     # original invocation. The session's bound provider and tool set are
     # unchanged — only the prompt changes.
-    replay_message = f"Please retry the previous {last_inv['tool_name']} call."
+    replay_message = f"Please retry the previous {tool_name} call."
 
     async def event_generator() -> AsyncGenerator[str]:
         """Generate server-sent events from the retry stream."""
@@ -362,7 +379,10 @@ async def create_session(
         )
         raise HTTPException(status_code=probe_status, detail=probe_error.model_dump())
 
-    metadata = chat_service._metadata[session_id]
+    # H7: use get_conversation_metadata instead of direct _metadata access.
+    # create_session just populated this entry so it is guaranteed non-None.
+    metadata = chat_service.get_conversation_metadata(session_id)
+    assert metadata is not None  # invariant: create_session always populates _metadata
     return {
         "session_id": session_id,
         "provider": metadata["provider"],
@@ -393,10 +413,10 @@ async def delete_session(
         HTTPException: If session doesn't exist or is owned by another user
             (both surface as 404).
     """
-    metadata = chat_service._metadata.get(session_id)
-    if metadata is None or metadata.get("user_id") != current_user.username:
-        # Same 404 shape on missing-vs-not-owner so a non-owner cannot
-        # probe for session existence by status code.
+    # H7: use is_conversation_owner to avoid direct _metadata access.
+    # Same 404 shape on missing-vs-not-owner so a non-owner cannot
+    # probe for session existence by status code.
+    if not chat_service.is_conversation_owner(session_id, current_user.username):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Session {session_id} not found",

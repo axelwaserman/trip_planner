@@ -20,6 +20,9 @@ Analog: ``backend/tests/unit/test_chat_stream.py:18-36`` (greeting test).
 """
 
 import pytest
+from pydantic_ai.messages import FunctionToolResultEvent, RetryPromptPart
+
+from app.chat.models import ErrorCode, ErrorEvent
 
 # Wave 1 rewrites tests/fixtures/llm.py to provide the PydanticAI-shaped
 # fixture. Until then, importing the fixture itself is fine; what fails RED
@@ -74,3 +77,41 @@ async def test_tool_result() -> None:
     events = [e async for e in service.chat_stream("Find flights LAX-JFK", session_id)]
     types = [e.type for e in events]
     assert "tool_result" in types
+
+
+async def test_retry_prompt_part_yields_error_event() -> None:
+    """C4: ``FunctionToolResultEvent`` wrapping ``RetryPromptPart`` → ``ErrorEvent``.
+
+    ``_handle_tool_event`` must yield an ``ErrorEvent`` (error_code=tool_error,
+    retryable=True) when the tool result carries a ``RetryPromptPart`` rather
+    than a ``ToolReturnPart``. Before C4 this branch was unhandled; the
+    ``RetryPromptPart`` fell through the isinstance checks silently.
+
+    This test calls ``_handle_tool_event`` directly because the FunctionModel
+    fixture has no way to produce a ``RetryPromptPart`` response from a tool
+    (PydanticAI only creates those internally when a tool raises
+    ``ModelRetry``). Direct invocation of the private helper is intentional —
+    it is the minimal unit that covers the branch.
+    """
+    # Arrange — construct the raw PydanticAI event the helper receives
+    retry_part = RetryPromptPart(
+        content="search_flights returned an error; please retry",
+        tool_name="search_flights",
+        tool_call_id="tc-test-001",
+    )
+    event = FunctionToolResultEvent(part=retry_part)
+
+    service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
+    session_id, _ = await service.create_session(default_session_config(), user_id="u")
+    tool_call_start: dict[str, float] = {"tc-test-001": 0.0}
+
+    # Act — consume the async generator from _handle_tool_event
+    emitted = [ev async for ev in service._handle_tool_event(event, session_id, tool_call_start)]
+
+    # Assert — exactly one ErrorEvent; timing entry cleaned up (no memory leak)
+    assert len(emitted) == 1
+    assert isinstance(emitted[0], ErrorEvent)
+    assert emitted[0].error_code == ErrorCode.tool_error
+    assert emitted[0].retryable is True
+    assert emitted[0].tool_name == "search_flights"
+    assert "tc-test-001" not in tool_call_start  # timing entry cleaned up

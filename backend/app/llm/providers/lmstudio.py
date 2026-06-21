@@ -31,18 +31,25 @@ Design notes:
   :attr:`Settings.provider_probe_timeout_seconds` when the session payload's
   ``base_url`` is ``None``. Mirrors the OllamaProvider precedent.
 
+- **ADR-008 — pyreqwest per CLAUDE.md.** ``validate_config`` and
+  ``list_models`` use ``pyreqwest`` for ``/models`` probes (H1, Phase 07 fix).
+  The response JSON is consumed inside the ``async with`` block (H4) to ensure
+  the context manager is still active when the body is parsed.
+
 Cross-reference: :meth:`build_agent` is structurally symmetric with
 :meth:`app.llm.providers.openai.OpenAIProvider.build_agent` for the
 non-o-series branch — only the ``base_url`` differs.
 """
 
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import Any
 
-import httpx
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider as _PaiOpenAIProvider
+from pyreqwest.client import ClientBuilder
+from pyreqwest.exceptions import ConnectError, RequestTimeoutError, StatusError
 
 from app.llm.base import LLMProvider
 from app.llm.errors import ProbeError, ProbeErrorCode
@@ -71,7 +78,7 @@ class LMStudioProvider(LLMProvider):
                 (e.g. ``"http://localhost:1234/v1"``). The factory injects
                 either the request payload's value or
                 :attr:`Settings.lmstudio_base_url`.
-            probe_timeout_seconds: Per-request httpx timeout for
+            probe_timeout_seconds: Per-request pyreqwest timeout (seconds) for
                 :meth:`list_models` and :meth:`validate_config`. Sourced
                 from :attr:`Settings.provider_probe_timeout_seconds` —
                 same knob as the Ollama provider.
@@ -98,7 +105,7 @@ class LMStudioProvider(LLMProvider):
         """
         try:
             available = await self.list_models()
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
+        except (ConnectError, RequestTimeoutError, StatusError):
             return ProbeError(
                 error=ProbeErrorCode.PROVIDER_UNREACHABLE,
                 message=f"Can't reach LM Studio at {self._base_url}.",
@@ -124,12 +131,16 @@ class LMStudioProvider(LLMProvider):
         per RESEARCH.md §"LM Studio Discovery". Returns ``[]`` on shape drift
         (Assumption A4) — non-list ``data`` field, missing ``id`` keys, or
         non-dict entries are filtered out rather than raising.
+
+        H1: uses pyreqwest per ADR-008 (CLAUDE.md mandate). H4: the response
+        body is consumed inside the ``async with`` block so the context manager
+        is still active when the body is parsed.
         """
         url = f"{self._base_url.rstrip('/')}/models"
-        async with httpx.AsyncClient(timeout=self._probe_timeout) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-        payload = response.json()
+        # H1/H4: pyreqwest per ADR-008; response consumed inside async-with block.
+        async with ClientBuilder().timeout(timedelta(seconds=self._probe_timeout)).error_for_status(True).build() as client:
+            resp = await client.get(url).build().send()
+            payload = await resp.json()
         # LM Studio models endpoint shape: {"object": "list", "data": [{"id": "...", "object": "model", ...}]}
         # Defensive parse — Assumption A4 — empty list on shape drift.
         data = payload.get("data", [])

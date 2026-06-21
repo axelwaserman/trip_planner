@@ -28,20 +28,21 @@ Behaviour notes:
   "tunable thresholds live on Settings" rule by leaving the Settings
   ownership upstream of the provider class.
 
-- **httpx exception to ADR-008:** ``validate_config`` and ``list_models``
-  continue to use ``httpx`` for ``/api/tags`` probes. RESEARCH § "Standard
-  Stack" documents this as the explicit exception to ADR-008
-  (``pyreqwest``); the swap to ``pyreqwest`` lands in Phase 7 with the real
-  Amadeus client.
+- **ADR-008 — pyreqwest per CLAUDE.md.** ``validate_config`` and
+  ``list_models`` use ``pyreqwest`` for ``/api/tags`` probes (H1, Phase 07
+  fix). The response JSON is consumed inside the ``async with`` block (H4) to
+  ensure the context manager is still active when the body is parsed.
 """
 
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import Any
 
-import httpx
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider as _PaiOllamaProvider
+from pyreqwest.client import ClientBuilder
+from pyreqwest.exceptions import ConnectError, RequestTimeoutError, StatusError
 
 from app.llm.base import LLMProvider
 from app.llm.errors import ProbeError, ProbeErrorCode
@@ -70,7 +71,7 @@ class OllamaProvider(LLMProvider):
         Args:
             model: Ollama model identifier (e.g. ``"qwen3:4b"``).
             base_url: Ollama daemon URL (e.g. ``"http://localhost:11434"``).
-            probe_timeout_seconds: Per-request httpx timeout for
+            probe_timeout_seconds: Per-request pyreqwest timeout (seconds) for
                 :meth:`list_models` and :meth:`validate_config`.
         """
         self._model = model
@@ -95,7 +96,7 @@ class OllamaProvider(LLMProvider):
         """
         try:
             available = await self.list_models()
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
+        except (ConnectError, RequestTimeoutError, StatusError):
             return ProbeError(
                 error=ProbeErrorCode.PROVIDER_UNREACHABLE,
                 message=f"Can't reach Ollama at {self._base_url}.",
@@ -116,12 +117,16 @@ class OllamaProvider(LLMProvider):
         Ollama wire-shape has historically varied between versions — see
         Pitfall 4 in RESEARCH.md. Empty/None values in either field are
         dropped by the comprehension's truthiness guard.
+
+        H1: uses pyreqwest per ADR-008 (CLAUDE.md mandate). H4: the response
+        body (``.json()``) is consumed inside the ``async with`` block so the
+        context manager is still active when the body is parsed.
         """
         url = f"{self._base_url.rstrip('/')}/api/tags"
-        async with httpx.AsyncClient(timeout=self._probe_timeout) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-        payload = response.json()
+        # H1/H4: pyreqwest per ADR-008; response consumed inside async-with block.
+        async with ClientBuilder().timeout(timedelta(seconds=self._probe_timeout)).error_for_status(True).build() as client:
+            resp = await client.get(url).build().send()
+            payload = await resp.json()
         # Ollama /api/tags shape: { "models": [ { "name": "...", "model": "...", ... }, ... ] }
         # Match on `name` AND `model` to be robust to minor shape drift (Pitfall 4).
         models_list = payload.get("models", [])

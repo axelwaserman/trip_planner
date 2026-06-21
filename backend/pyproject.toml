@@ -15,6 +15,7 @@ dependencies = [
     "pwdlib[argon2]>=0.3.0",
     "python-multipart>=0.0.21",
     "pydantic-ai>=0.8.1",
+    "pyreqwest>=0.12.0",
 ]
 
 [dependency-groups]

@@ -12,6 +12,7 @@ import time
 import pytest
 from pydantic_ai import Agent
 
+from app.chat.models import ErrorCode, ErrorEvent
 from tests.fixtures.llm import (
     MockLLMStream,
     default_session_config,
@@ -140,6 +141,57 @@ class TestConversationStorePersistence:
 
         msgs = await service._conversation_store.load(session_id)
         assert msgs == []
+
+
+class TestChatStreamTOCTOU:
+    """C1: TOCTOU guard — session deleted between ownership check and generator start."""
+
+    async def test_chat_stream_yields_session_error_for_unknown_session_id(self) -> None:
+        """``chat_stream()`` with a never-created ``session_id`` must yield a
+        ``session_error`` ErrorEvent and return rather than raising KeyError.
+
+        Regression for C1 (Plan 05-07): the previous implementation did a bare
+        ``self._metadata[session_id]["user_id"]`` which would raise ``KeyError``
+        and produce an unhandled 500 for the route layer. The guard now yields
+        a structured ``ErrorEvent`` instead.
+        """
+        # Arrange — service has no sessions; the id was never created
+        service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
+        phantom_id = "00000000-0000-0000-0000-000000000000"
+
+        # Act — collect all events; the generator must not raise
+        events = [e async for e in service.chat_stream("hello", phantom_id)]
+
+        # Assert — exactly one ErrorEvent with session_error code
+        assert len(events) == 1
+        assert isinstance(events[0], ErrorEvent)
+        assert events[0].error_code == ErrorCode.session_error
+        assert events[0].retryable is False
+        assert events[0].session_id == phantom_id
+
+    async def test_chat_stream_yields_session_error_when_agent_missing_after_metadata(
+        self,
+    ) -> None:
+        """TOCTOU edge: ``_metadata`` present but ``_agents`` missing (partial teardown).
+
+        This is the "session_id in _metadata but deleted from _agents" race that
+        could occur if another task deleted the agent between the ownership check and
+        the stream start. The guard catches the ``KeyError`` from ``_agents`` too.
+        """
+        # Arrange — create session normally, then simulate partial teardown by
+        # removing only the agent (not the metadata).
+        service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
+        session_id, _ = await service.create_session(default_session_config(), user_id="u")
+        # Simulate partial teardown: agent gone but metadata still present
+        del service._agents[session_id]
+
+        # Act
+        events = [e async for e in service.chat_stream("hello", session_id)]
+
+        # Assert
+        assert len(events) == 1
+        assert isinstance(events[0], ErrorEvent)
+        assert events[0].error_code == ErrorCode.session_error
 
 
 @pytest.mark.parametrize("max_age_seconds", [0, 3600])
