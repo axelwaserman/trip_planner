@@ -117,7 +117,7 @@ class MockLLMStream:
         default_args: dict[str, Any] = {
             "origin": "LAX",
             "destination": "JFK",
-            "departure_date": "2026-06-15",
+            "departure_date": "2030-06-15",
             "passengers": 1,
         }
         return [

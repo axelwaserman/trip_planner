@@ -174,7 +174,7 @@ def test_flight_search_result_envelope_shape() -> None:
     """FlightSearchResult.model_dump() exposes exactly the 4 required envelope keys."""
     # Arrange
     result = FlightSearchResult(
-        query={"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
+        query={"origin": "LAX", "destination": "JFK", "departure_date": "2030-06-15", "passengers": 1},
         results=[],
         count=0,
     )
@@ -206,7 +206,7 @@ def test_to_flight_search_result_preserves_flight_fields() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2026, 6, 15),
+        departure_date=date(2030, 6, 15),
         passengers=1,
     )
 
@@ -230,7 +230,7 @@ def test_to_flight_search_result_empty_list() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2026, 6, 15),
+        departure_date=date(2030, 6, 15),
         passengers=1,
     )
 
@@ -370,7 +370,7 @@ async def test_search_flights_returns_json_envelope_string() -> None:
         ctx,
         origin="LAX",
         destination="JFK",
-        departure_date="2026-06-15",
+        departure_date="2030-06-15",
         passengers=1,
         limit=3,
     )

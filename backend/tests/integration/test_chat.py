@@ -160,7 +160,7 @@ def test_retry_endpoint_replays_last_tool_invocation(client: TestClient, auth_he
     chat_service = client.app.state.chat_service
     chat_service._metadata[session_id]["last_tool_invocation"] = {
         "tool_name": "search_flights",
-        "tool_args": {"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
+        "tool_args": {"origin": "LAX", "destination": "JFK", "departure_date": "2030-06-15", "passengers": 1},
         "tool_call_id": "call_test",
     }
 
