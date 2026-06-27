@@ -423,5 +423,5 @@ async def search_flights(
 
     except FlightSearchError as e:
         return f"Flight search error: {e}"
-    except Exception as e:
-        return f"Unexpected error during flight search: {e}"
+    except Exception:
+        return "Flight search encountered an unexpected error. Please try again."

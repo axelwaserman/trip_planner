@@ -16,11 +16,9 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // Use cached Chromium 1223 to avoid downloading 1228 from network
-        launchOptions: {
-          executablePath:
-            '/Users/axel/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-        },
+        ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } }
+          : {}),
       },
     },
   ],

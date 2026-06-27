@@ -161,7 +161,7 @@ class OllamaProvider(LLMProvider):
         # surface at /v1/chat/completions, so the base_url must include /v1.
         # self._base_url is kept without /v1 because list_models hits /api/tags.
         bare = self._base_url.rstrip("/")
-        chat_base_url = bare if bare.endswith("/v1") else bare + "/v1"
+        chat_base_url = bare if bare.lower().endswith("/v1") else bare + "/v1"
         model = OpenAIChatModel(
             self._model,
             provider=_PaiOllamaProvider(base_url=chat_base_url),
