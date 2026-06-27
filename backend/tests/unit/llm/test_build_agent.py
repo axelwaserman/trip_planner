@@ -58,9 +58,7 @@ def test_ollama_build_agent_appends_v1_to_bare_host() -> None:
 
     captured: list[str] = []
 
-    real_pai_provider = __import__(
-        "pydantic_ai.providers.ollama", fromlist=["OllamaProvider"]
-    ).OllamaProvider
+    real_pai_provider = __import__("pydantic_ai.providers.ollama", fromlist=["OllamaProvider"]).OllamaProvider
 
     original_init = real_pai_provider.__init__
 
