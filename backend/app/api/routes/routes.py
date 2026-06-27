@@ -111,21 +111,6 @@ async def chat(
                 # ``model_dump_json``. mypy can't see this on the bare ABC.
                 yield f"data: {event.model_dump_json()}\n\n"  # type: ignore[attr-defined]
 
-        except ValueError:
-            # Defensive: the route boundary already 404s missing sessions
-            # (CR-02). This catch covers a narrow race where the session is
-            # deleted between the boundary check and chat_stream's first
-            # history read.
-            error_event = ErrorEvent(
-                error_code=ErrorCode.session_error,
-                message="Session not found or expired.",
-                retryable=False,
-                tool_name=None,
-                raw_detail=None,
-                session_id=request.session_id,
-            )
-            yield f"data: {error_event.model_dump_json()}\n\n"
-
         except Exception:
             # CR-05: do NOT echo str(e) over the SSE wire. Upstream SDK
             # exceptions (httpx, OpenAI / Anthropic SDK, langchain) often
@@ -230,19 +215,6 @@ async def retry_tool_call(
                 # StreamEvent is a marker ABC; concrete subclasses all expose
                 # model_dump_json via their BaseModel base.
                 yield f"data: {event.model_dump_json()}\n\n"  # type: ignore[attr-defined]
-
-        except ValueError:
-            # Defensive: narrow race where the session is deleted between the
-            # ownership check above and chat_stream's first history read.
-            error_event = ErrorEvent(
-                error_code=ErrorCode.session_error,
-                message="Session not found or expired.",
-                retryable=False,
-                tool_name=None,
-                raw_detail=None,
-                session_id=request.session_id,
-            )
-            yield f"data: {error_event.model_dump_json()}\n\n"
 
         except Exception:
             # CR-05: same static-message guarantee as POST /api/chat — no

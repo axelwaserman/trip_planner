@@ -138,7 +138,9 @@ class LMStudioProvider(LLMProvider):
         """
         url = f"{self._base_url.rstrip('/')}/models"
         # H1/H4: pyreqwest per ADR-008; response consumed inside async-with block.
-        async with ClientBuilder().timeout(timedelta(seconds=self._probe_timeout)).error_for_status(True).build() as client:
+        async with (
+            ClientBuilder().timeout(timedelta(seconds=self._probe_timeout)).error_for_status(True).build() as client
+        ):
             resp = await client.get(url).build().send()
             payload = await resp.json()
         # LM Studio models endpoint shape: {"object": "list", "data": [{"id": "...", "object": "model", ...}]}
