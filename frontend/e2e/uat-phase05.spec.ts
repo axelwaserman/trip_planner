@@ -76,14 +76,6 @@ test.describe('Phase 05 UAT', () => {
     await expect(page.locator('[name="message"]')).toBeVisible({ timeout: 15_000 })
 
     // ── U3+U4: first turn ──────────────────────────────────────────────────
-    // Intercept SSE to capture event types as they arrive
-    const sseEvents: string[] = []
-    page.on('response', async (response) => {
-      if (response.url().includes('/api/chat') && response.headers()['content-type']?.includes('text/event-stream')) {
-        // Can't stream response body in Playwright easily; use DOM state instead
-      }
-    })
-
     await sendMessage(page, 'Find flights from JFK to LAX on 2030-07-15')
 
     // LLM needs time to think + tool-call + summarise — allow up to 90s
