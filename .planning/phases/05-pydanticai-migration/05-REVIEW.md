@@ -1,6 +1,6 @@
 ---
 phase: 05-pydanticai-migration
-reviewed: 2026-06-03T00:00:00Z
+reviewed: 2026-06-21T00:00:00Z
 depth: standard
 files_reviewed: 47
 files_reviewed_list:
@@ -52,6 +52,27 @@ files_reviewed_list:
   - backend/tests/unit/test_no_langchain_imports.py
   - backend/tests/unit/test_tool_json_normalization.py
   - backend/tests/unit/tools/test_flight_search_no_backdoor.py
+post_fix_review:
+  reviewed: 2026-06-21T00:00:00Z
+  depth: quick
+  plan: 05-07
+  files_reviewed: 11
+  files_reviewed_list:
+    - backend/app/chat/service.py
+    - backend/app/chat/models.py
+    - backend/app/api/routes/routes.py
+    - backend/app/llm/providers/openai.py
+    - backend/app/llm/providers/anthropic.py
+    - backend/app/llm/providers/ollama.py
+    - backend/app/llm/providers/lmstudio.py
+    - backend/app/config.py
+    - backend/app/tools/flight_search.py
+    - backend/tests/unit/test_chat_service.py
+    - backend/tests/unit/chat/test_stream_event_extraction.py
+  new_findings:
+    critical: 2
+    warning: 1
+    total: 3
 findings:
   critical: 4
   warning: 11
@@ -739,3 +760,173 @@ Then test files import the factory and stay readable.
 _Reviewed: 2026-06-03_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+---
+
+## Post-Fix Review (05-07)
+
+**Reviewed:** 2026-06-21
+**Plan:** 05-07 (pre-merge fix set)
+**Depth:** quick
+**Files Reviewed:** 11
+
+### Fix Verification
+
+The following fixes from plan 05-07 were verified correct as implemented:
+
+| Fix | Status | Notes |
+|-----|--------|-------|
+| C1: KeyError guard in `chat_stream` | CORRECT | `service.py:350-362` catches `KeyError` and yields `ErrorEvent`. TOCTOU race handled inside service rather than at route boundary. |
+| C4: RetryPromptPart handling | CORRECT | `service.py:494-507` yields `ErrorEvent(tool_error, retryable=True)` and pops timing entry. |
+| C5: assert → ValueError in openai.py | CORRECT | `openai.py:147-151` uses explicit `if … raise ValueError`. |
+| C5: assert → ValueError in anthropic.py | CORRECT | `anthropic.py:137-141` uses explicit `if … raise ValueError`. |
+| C6: tool_name allowlist before interpolation | CORRECT | `routes.py:37-40` defines `_REGISTERED_TOOL_NAMES = frozenset({"search_flights"})` and `routes.py:207-212` validates before the f-string. |
+| C7: ChatRequest.message max_length=32_768 | CORRECT | `models.py:243` — constraint applied. |
+| H1/H4: pyreqwest in ollama.py | CORRECT | `ollama.py:127-136` uses `ClientBuilder().timeout(...).error_for_status(True).build()` as async context manager; `await resp.json()` consumed inside the block. |
+| H1/H4: pyreqwest in lmstudio.py | CORRECT | `lmstudio.py:141-149` — same pattern. |
+| H5: SecretStr for api keys in config.py | CORRECT | `config.py:60,65` — `SecretStr | None`; factory unwraps with `.get_secret_value()` at `factory.py:102-103,114-115`. |
+| H6: passengers > 9 guard | CORRECT | `flight_search.py:393-394` — guard present and returns user-facing error string. |
+
+### New Issues Found in Post-Fix Code
+
+The 05-07 fixes introduced or left behind the following defects:
+
+---
+
+### CR-PF-01: `assert` introduced at route boundary — same `-O` vulnerability as original CR-02
+
+**BLOCKER**
+
+**File:** `backend/app/api/routes/routes.py:385`
+**Issue:**
+The H7 refactor added this line to the `create_session` route:
+
+```python
+metadata = chat_service.get_conversation_metadata(session_id)
+assert metadata is not None  # invariant: create_session always populates _metadata
+```
+
+This is the exact same pattern that plan 05-07 fixed in `openai.py` and `anthropic.py` (C5): `assert` is stripped under `python -O`. Under a standard production deployment (`python -O -m uvicorn app.api.main:app`), this `assert` is silently removed. If the service's internal invariant is broken — for example, a TOCTOU race in which a concurrent `cleanup_expired_sessions` fires between the `create_session` call completing and the route reading back the metadata — then `metadata` is `None`, and `metadata["provider"]` and `metadata["model"]` on lines 388-389 raise `TypeError: 'NoneType' object is not subscriptable`, which surfaces as a 500 response with an unhandled exception instead of a clean error.
+
+The fix plan correctly documented: "C5 — assert would be stripped." The same principle applies here; this assert was introduced by the same plan.
+
+**Fix:**
+```python
+metadata = chat_service.get_conversation_metadata(session_id)
+if metadata is None:
+    # Should not happen — create_session always populates _metadata when it
+    # returns a non-empty session_id. Guard against TOCTOU race where a
+    # concurrent cleanup_expired_sessions fires between create_session and here.
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Session metadata unavailable after creation.",
+    )
+return {
+    "session_id": session_id,
+    "provider": metadata["provider"],
+    "model": metadata["model"],
+}
+```
+
+---
+
+### CR-PF-02: pyreqwest `JSONDecodeError` escapes `validate_config` — "never raises" ABC contract broken
+
+**BLOCKER**
+
+**File:** `backend/app/llm/providers/ollama.py:99` and `backend/app/llm/providers/lmstudio.py:108`
+**Issue:**
+The H1/H4 migration replaced `httpx` with `pyreqwest` in `list_models()` for both local providers. The `validate_config` catch clause now reads:
+
+```python
+except (ConnectError, RequestTimeoutError, StatusError):
+    return ProbeError(error=ProbeErrorCode.PROVIDER_UNREACHABLE, ...)
+```
+
+The `list_models()` body does `payload = await resp.json()` inside the `async with` block. When the Ollama or LM Studio daemon returns a non-JSON response body (HTML error page from a proxy, empty body on a startup race, partial flush), `pyreqwest` raises `pyreqwest.exceptions.JSONDecodeError`. This is NOT a subclass of any of the three caught exception types — it is a subclass of `pyreqwest.exceptions.BodyDecodeError` and also a subclass of `json.decoder.JSONDecodeError` (which is a `ValueError`), but neither of those are in the catch list.
+
+The `LLMProvider` ABC documents `validate_config` as: "Returns: `None` on success; `ProbeError` on any reachability or configuration failure. Raises: Never." That "Raises: Never" contract is broken.
+
+The unhandled `JSONDecodeError` propagates out of `validate_config`, through `ChatService.create_session` (which has no try/except around `await provider.validate_config()`), and surfaces as a 500 Internal Server Error on the `POST /api/chat/session` route instead of a clean 400/502 with a structured `ProbeError` message.
+
+This is easily reproducible: start Nginx in front of Ollama, misconfigure the proxy to return 502 HTML, call `POST /api/chat/session` — the server 500s.
+
+Additionally, `pyreqwest.exceptions.ReadError` (server closed the connection mid-response body) is also NOT caught, and falls through the same path.
+
+**Fix:**
+Add the missing exception types to both providers' `validate_config` catch clause:
+
+```python
+# ollama.py and lmstudio.py
+from pyreqwest.exceptions import ConnectError, JSONDecodeError as PyreqwestJSONDecodeError, ReadError, RequestTimeoutError, StatusError
+
+async def validate_config(self) -> ProbeError | None:
+    try:
+        available = await self.list_models()
+    except (ConnectError, RequestTimeoutError, StatusError, ReadError):
+        return ProbeError(
+            error=ProbeErrorCode.PROVIDER_UNREACHABLE,
+            message=f"Can't reach Ollama at {self._base_url}.",
+            hint="Run `ollama serve` and retry, or pick another provider.",
+        )
+    except (PyreqwestJSONDecodeError, ValueError, KeyError):
+        # Non-JSON or malformed response body — daemon returned unexpected content.
+        return ProbeError(
+            error=ProbeErrorCode.PROVIDER_UNREACHABLE,
+            message=f"Ollama at {self._base_url} returned an unexpected response.",
+            hint="Check the daemon version and any proxy configuration.",
+        )
+    ...
+```
+
+Note: `pyreqwest.exceptions.JSONDecodeError` also inherits from `json.decoder.JSONDecodeError` → `ValueError`, so `except ValueError` would catch it too, but being explicit is safer.
+
+---
+
+### WR-PF-01: Route `except ValueError` is now dead code after C1 fix — stale comment misleads
+
+**WARNING**
+
+**File:** `backend/app/api/routes/routes.py:113-127` and `routes.py:233-245`
+**Issue:**
+Both `chat` and `retry_tool_call` event generators contain:
+
+```python
+except ValueError:
+    # Defensive: the route boundary already 404s missing sessions
+    # (CR-02). This catch covers a narrow race where the session is
+    # deleted between the boundary check and chat_stream's first
+    # history read.
+    error_event = ErrorEvent(
+        error_code=ErrorCode.session_error,
+        message="Session not found or expired.",
+        ...
+    )
+```
+
+The C1 fix moved the TOCTOU session-missing guard INSIDE `chat_stream` (`service.py:350-362`). The guard now catches `KeyError` internally and YIELDS an `ErrorEvent` rather than raising. As a result, `chat_stream` no longer raises `ValueError` (or `KeyError`) from a missing session — it always yields an error event and returns normally. The route-level `except ValueError` can never fire on the missing-session path; it is dead code.
+
+The stale comment ("This catch covers a narrow race...") is now factually wrong and will mislead future readers who trace how race conditions are handled.
+
+**Fix:**
+Remove the `except ValueError` block from both event generators, or if a belt-and-suspenders clause is desired, document the correct current behavior:
+
+```python
+except ValueError:
+    # NOTE: as of C1 (plan 05-07), chat_stream handles TOCTOU session-missing
+    # races internally by yielding an ErrorEvent. This clause is retained only
+    # as defense-in-depth for unforeseen ValueError sources in the stream loop.
+    error_event = ErrorEvent(
+        error_code=ErrorCode.session_error,
+        message="Session not found or expired.",
+        ...
+    )
+```
+
+Or simply remove the `except ValueError` block entirely — the outer `except Exception` already catches any unexpected ValueError sources and emits a generic stream_error.
+
+---
+
+_Post-fix reviewed: 2026-06-21_
+_Reviewer: Claude (gsd-code-reviewer)_
+_Depth: quick (11 files, plan 05-07 scope)_
