@@ -41,36 +41,18 @@ def test_ollama_provider_build_agent_returns_pydantic_ai_agent() -> None:
     assert isinstance(agent, Agent)
 
 
-import pytest  # noqa: E402  (grouped below class-level tests intentionally)
+def test_ollama_build_agent_appends_v1_to_bare_host() -> None:
+    """build_agent passes base_url + /v1 to PydanticAI's OllamaProvider.
 
-
-@pytest.mark.parametrize(
-    "base_url,expected_prefix",
-    [
-        # bare host — must append /v1
-        ("http://localhost:11434", "http://localhost:11434/v1"),
-        # trailing slash on host — must strip then append
-        ("http://localhost:11434/", "http://localhost:11434/v1"),
-        # already has /v1 — must NOT double-append
-        ("http://localhost:11434/v1", "http://localhost:11434/v1"),
-        # trailing slash after /v1 — must strip then leave as-is
-        ("http://localhost:11434/v1/", "http://localhost:11434/v1"),
-        # uppercase /V1 — case-insensitive check must NOT double-append
-        ("http://localhost:11434/V1", "http://localhost:11434/V1"),
-    ],
-)
-def test_ollama_build_agent_v1_url_normalisation(base_url: str, expected_prefix: str) -> None:
-    """build_agent always produces a chat_base_url that ends with the /v1 suffix.
-
-    OllamaProvider._base_url is kept bare (no /v1) so list_models can hit /api/tags.
-    build_agent must append /v1 exactly once regardless of how the caller supplied
-    base_url (bare, trailing slash, already has /v1, uppercase /V1).
+    OllamaProvider._base_url is the bare host (scheme://host:port, no path).
+    The frontend rejects any Ollama base_url that contains a path, so build_agent
+    unconditionally appends /v1 without normalization logic.
     """
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     provider = OllamaProvider(
         model="qwen3:4b",
-        base_url=base_url,
+        base_url="http://localhost:11434",
         probe_timeout_seconds=1.0,
     )
 
@@ -89,10 +71,7 @@ def test_ollama_build_agent_v1_url_normalisation(base_url: str, expected_prefix:
     with patch.object(real_pai_provider, "__init__", _capturing_init):
         provider.build_agent(tools=[], deps_type=ChatDeps)
 
-    assert len(captured) == 1
-    assert captured[0] == expected_prefix, (
-        f"base_url={base_url!r} → expected {expected_prefix!r}, got {captured[0]!r}"
-    )
+    assert captured == ["http://localhost:11434/v1"]
 
 
 def test_openai_provider_build_agent_returns_pydantic_ai_agent() -> None:

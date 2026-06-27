@@ -76,7 +76,7 @@ const ANTHROPIC_MODELS = [
  * Mirrors the backend SSRF guard in SessionCreateRequest._validate_base_url
  * so the user gets immediate inline feedback before any network round-trip.
  */
-function validateBaseUrl(url: string): string | null {
+function validateBaseUrl(url: string, kind: ProviderKind): string | null {
   if (url.trim().length === 0) return null
   try {
     const parsed = new URL(url.trim())
@@ -86,6 +86,9 @@ function validateBaseUrl(url: string): string | null {
     const allowedHosts = ['localhost', '127.0.0.1', 'host.docker.internal']
     if (!allowedHosts.includes(parsed.hostname)) {
       return 'Only localhost, 127.0.0.1, or host.docker.internal are allowed'
+    }
+    if (kind === 'ollama' && parsed.pathname !== '/') {
+      return 'Ollama URL must be host only (e.g. http://localhost:11434) — no path'
     }
     return null
   } catch {
@@ -264,7 +267,7 @@ export function ProviderCard({ kind, settings, onSave }: ProviderCardProps) {
   function handleSave() {
     setBaseUrlError(null)
     if (isLocal && baseUrl.trim().length > 0) {
-      const urlErr = validateBaseUrl(baseUrl.trim())
+      const urlErr = validateBaseUrl(baseUrl.trim(), kind)
       if (urlErr) {
         setBaseUrlError(urlErr)
         return
