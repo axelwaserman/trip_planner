@@ -1,17 +1,23 @@
 """Integration tests for the provider probe wired into POST /api/chat/session.
 
-Plan 4.2-04 inserts ``await probe_provider(provider, model)`` between the existing
-provider validation and ``chat_service.create_session()``. These tests monkeypatch
-``httpx.AsyncClient.get`` so we exercise the four probe outcomes without needing
-a live Ollama daemon.
+Phase 5 (plan 05-07) migrated OllamaProvider and LMStudioProvider from httpx
+to pyreqwest (ADR-008). These tests patch the pyreqwest ``ClientBuilder`` call
+chain so we exercise the four probe outcomes without needing a live daemon.
+
+Call chain under test:
+    async with ClientBuilder().timeout(...).error_for_status(True).build() as client:
+        resp = await client.get(url).build().send()
+        payload = await resp.json()
 """
 
-from collections.abc import Generator
-from unittest.mock import AsyncMock, MagicMock
+from collections.abc import AsyncGenerator, Generator
+from contextlib import asynccontextmanager
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pyreqwest.exceptions import CauseErrorDetails, ConnectError
 
 from app.api.main import app
 
@@ -23,62 +29,97 @@ def client() -> Generator[TestClient]:
         yield c
 
 
-def _make_tags_response(models: list[dict[str, str]]) -> MagicMock:
-    """Return a MagicMock that mimics httpx.Response for /api/tags."""
+def _make_pyreqwest_builder(payload: dict[str, Any]) -> MagicMock:
+    """Return a MagicMock ClientBuilder whose call chain yields ``payload``."""
     response = MagicMock()
-    response.raise_for_status = MagicMock(return_value=None)
-    response.json = MagicMock(return_value={"models": models})
-    return response
+    response.json = AsyncMock(return_value=payload)
+
+    request_mock = MagicMock()
+    request_mock.send = AsyncMock(return_value=response)
+
+    request_builder = MagicMock()
+    request_builder.build = MagicMock(return_value=request_mock)
+
+    client = AsyncMock()
+    client.get = MagicMock(return_value=request_builder)
+
+    @asynccontextmanager
+    async def _cm(*_: Any, **__: Any) -> AsyncGenerator[AsyncMock]:
+        yield client
+
+    builder_instance = MagicMock()
+    builder_instance.timeout = MagicMock(return_value=builder_instance)
+    builder_instance.error_for_status = MagicMock(return_value=builder_instance)
+    builder_instance.build = MagicMock(return_value=_cm())
+
+    return MagicMock(return_value=builder_instance)
 
 
-def test_session_create_returns_502_when_provider_unreachable(
-    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """ConnectError from httpx.AsyncClient.get → 502 with structured provider_unreachable."""
-    monkeypatch.setattr(
-        httpx.AsyncClient,
-        "get",
-        AsyncMock(side_effect=httpx.ConnectError("connection refused")),
-    )
+def _make_pyreqwest_builder_raising(exc: Exception) -> MagicMock:
+    """Return a MagicMock ClientBuilder whose ``.send()`` raises ``exc``."""
+    request_mock = MagicMock()
+    request_mock.send = AsyncMock(side_effect=exc)
 
-    response = client.post(
-        "/api/chat/session",
-        headers=auth_headers,
-        json={"provider": "ollama", "model": "qwen3:4b"},
-    )
+    request_builder = MagicMock()
+    request_builder.build = MagicMock(return_value=request_mock)
+
+    client = AsyncMock()
+    client.get = MagicMock(return_value=request_builder)
+
+    @asynccontextmanager
+    async def _cm(*_: Any, **__: Any) -> AsyncGenerator[AsyncMock]:
+        yield client
+
+    builder_instance = MagicMock()
+    builder_instance.timeout = MagicMock(return_value=builder_instance)
+    builder_instance.error_for_status = MagicMock(return_value=builder_instance)
+    builder_instance.build = MagicMock(return_value=_cm())
+
+    return MagicMock(return_value=builder_instance)
+
+
+def _ollama_tags_payload(models: list[str]) -> dict[str, Any]:
+    return {"models": [{"name": m, "model": m} for m in models]}
+
+
+def _lmstudio_models_payload(model_ids: list[str]) -> dict[str, Any]:
+    return {
+        "object": "list",
+        "data": [{"id": mid, "object": "model"} for mid in model_ids],
+    }
+
+
+def test_session_create_returns_502_when_provider_unreachable(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """ConnectError from pyreqwest → 502 with structured provider_unreachable."""
+    builder = _make_pyreqwest_builder_raising(ConnectError("connection refused", CauseErrorDetails()))
+    with patch("app.llm.providers.ollama.ClientBuilder", builder):
+        response = client.post(
+            "/api/chat/session",
+            headers=auth_headers,
+            json={"provider": "ollama", "model": "qwen3:4b"},
+        )
 
     assert response.status_code == 502
-    body = response.json()
-    detail = body["detail"]
+    detail = response.json()["detail"]
     assert detail["error"] == "provider_unreachable"
     assert "Ollama" in detail["message"]
     assert "ollama serve" in detail["hint"]
 
 
-def test_session_create_returns_400_when_model_not_installed(
-    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_session_create_returns_400_when_model_not_installed(client: TestClient, auth_headers: dict[str, str]) -> None:
     """/api/tags responds but does not list the requested model → 400 model_not_installed."""
-    monkeypatch.setattr(
-        httpx.AsyncClient,
-        "get",
-        AsyncMock(
-            return_value=_make_tags_response(
-                [{"name": "other:7b", "model": "other:7b"}],
-            ),
-        ),
-    )
-
-    response = client.post(
-        "/api/chat/session",
-        headers=auth_headers,
-        json={"provider": "ollama", "model": "qwen3:4b"},
-    )
+    builder = _make_pyreqwest_builder(_ollama_tags_payload(["other:7b"]))
+    with patch("app.llm.providers.ollama.ClientBuilder", builder):
+        response = client.post(
+            "/api/chat/session",
+            headers=auth_headers,
+            json={"provider": "ollama", "model": "qwen3:4b"},
+        )
 
     assert response.status_code == 400
-    body = response.json()
-    assert body["detail"]["error"] == "model_not_installed"
-    assert "qwen3:4b" in body["detail"]["hint"]
+    detail = response.json()["detail"]
+    assert detail["error"] == "model_not_installed"
+    assert "qwen3:4b" in detail["hint"]
 
 
 def test_session_create_returns_400_when_cloud_key_missing(
@@ -91,10 +132,7 @@ def test_session_create_returns_400_when_cloud_key_missing(
     :meth:`OpenAIProvider.validate_config` returns the structured
     ``MISSING_API_KEY`` error inside :meth:`ChatService.create_session`.
     """
-    # Patch the module-level settings instance the route layer reads from.
     monkeypatch.setattr("app.config.settings.openai_api_key", None, raising=False)
-    # Also clear it on the ChatService's factory's settings instance — the
-    # lifespan-scoped factory captured a Settings() object at app construction.
     factory = client.app.state.llm_factory
     monkeypatch.setattr(factory._settings, "openai_api_key", None, raising=False)
 
@@ -105,30 +143,20 @@ def test_session_create_returns_400_when_cloud_key_missing(
     )
 
     assert response.status_code == 400
-    body = response.json()
-    assert body["detail"]["error"] == "missing_api_key"
-    assert "OPENAI_API_KEY" in body["detail"]["hint"]
+    detail = response.json()["detail"]
+    assert detail["error"] == "missing_api_key"
+    assert "OPENAI_API_KEY" in detail["hint"]
 
 
-def test_session_create_succeeds_when_ollama_probe_passes(
-    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_session_create_succeeds_when_ollama_probe_passes(client: TestClient, auth_headers: dict[str, str]) -> None:
     """/api/tags lists the requested model → 201 with session_id."""
-    monkeypatch.setattr(
-        httpx.AsyncClient,
-        "get",
-        AsyncMock(
-            return_value=_make_tags_response(
-                [{"name": "qwen3:4b", "model": "qwen3:4b"}],
-            ),
-        ),
-    )
-
-    response = client.post(
-        "/api/chat/session",
-        headers=auth_headers,
-        json={"provider": "ollama", "model": "qwen3:4b"},
-    )
+    builder = _make_pyreqwest_builder(_ollama_tags_payload(["qwen3:4b"]))
+    with patch("app.llm.providers.ollama.ClientBuilder", builder):
+        response = client.post(
+            "/api/chat/session",
+            headers=auth_headers,
+            json={"provider": "ollama", "model": "qwen3:4b"},
+        )
 
     assert response.status_code == 201
     body = response.json()
@@ -138,7 +166,7 @@ def test_session_create_succeeds_when_ollama_probe_passes(
 
 
 def test_session_create_accepts_model_outside_curated_list_when_daemon_has_it(
-    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    client: TestClient, auth_headers: dict[str, str]
 ) -> None:
     """UAT round-3 regression guard: a daemon-installed model NOT in the curated
     frozen list (e.g. ``qwen3.5:9b`` after the user pulled it) must succeed.
@@ -150,25 +178,16 @@ def test_session_create_accepts_model_outside_curated_list_when_daemon_has_it(
     consults ``/api/tags`` and surfaces structured ``MODEL_NOT_INSTALLED`` only
     when the daemon actually doesn't have the model.
     """
-    monkeypatch.setattr(
-        httpx.AsyncClient,
-        "get",
-        AsyncMock(
-            return_value=_make_tags_response(
-                [{"name": "qwen3.5:9b", "model": "qwen3.5:9b"}],
-            ),
-        ),
-    )
-
-    response = client.post(
-        "/api/chat/session",
-        headers=auth_headers,
-        json={"provider": "ollama", "model": "qwen3.5:9b"},
-    )
+    builder = _make_pyreqwest_builder(_ollama_tags_payload(["qwen3.5:9b"]))
+    with patch("app.llm.providers.ollama.ClientBuilder", builder):
+        response = client.post(
+            "/api/chat/session",
+            headers=auth_headers,
+            json={"provider": "ollama", "model": "qwen3.5:9b"},
+        )
 
     assert response.status_code == 201
-    body = response.json()
-    assert body["model"] == "qwen3.5:9b"
+    assert response.json()["model"] == "qwen3.5:9b"
 
 
 def test_session_create_rejects_unknown_provider_at_route_layer(
@@ -186,25 +205,11 @@ def test_session_create_rejects_unknown_provider_at_route_layer(
         json={"provider": "made-up-provider", "model": "anything"},
     )
     assert response.status_code == 400
-    body = response.json()
-    assert "Invalid provider" in body["detail"]
-
-
-def _make_lmstudio_models_response(model_ids: list[str]) -> MagicMock:
-    """Return a MagicMock that mimics httpx.Response for LM Studio's /models."""
-    response = MagicMock()
-    response.raise_for_status = MagicMock(return_value=None)
-    response.json = MagicMock(
-        return_value={
-            "object": "list",
-            "data": [{"id": mid, "object": "model"} for mid in model_ids],
-        }
-    )
-    return response
+    assert "Invalid provider" in response.json()["detail"]
 
 
 def test_session_create_accepts_lmstudio_provider_at_route_layer(
-    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    client: TestClient, auth_headers: dict[str, str]
 ) -> None:
     """Regression for AR-01: ``provider="lmstudio"`` must pass the route validator.
 
@@ -216,23 +221,17 @@ def test_session_create_accepts_lmstudio_provider_at_route_layer(
     provider name is now accepted: with a mocked LM Studio daemon the call
     proceeds to the probe and returns 201.
     """
-    monkeypatch.setattr(
-        httpx.AsyncClient,
-        "get",
-        AsyncMock(
-            return_value=_make_lmstudio_models_response(["qwen2.5-coder-7b"]),
-        ),
-    )
-
-    response = client.post(
-        "/api/chat/session",
-        headers=auth_headers,
-        json={
-            "provider": "lmstudio",
-            "model": "qwen2.5-coder-7b",
-            "base_url": "http://localhost:1234/v1",
-        },
-    )
+    builder = _make_pyreqwest_builder(_lmstudio_models_payload(["qwen2.5-coder-7b"]))
+    with patch("app.llm.providers.lmstudio.ClientBuilder", builder):
+        response = client.post(
+            "/api/chat/session",
+            headers=auth_headers,
+            json={
+                "provider": "lmstudio",
+                "model": "qwen2.5-coder-7b",
+                "base_url": "http://localhost:1234/v1",
+            },
+        )
 
     assert response.status_code == 201, response.text
     body = response.json()

@@ -49,14 +49,16 @@ class TestDeleteSession:
         session_id = session_response.json()["session_id"]
 
         chat_service = client.app.state.chat_service
-        assert session_id in chat_service._histories
+        # Phase 5 / Plan 05-04: ``_histories`` retired in favour of the ``_agents`` dict
+        # + ``ConversationStore``. Session creation populates ``_agents`` and ``_metadata``.
+        assert session_id in chat_service._agents
         assert session_id in chat_service._metadata
         assert session_id in chat_service._last_activity
 
         delete_response = client.delete(f"/api/chat/session/{session_id}", headers=auth_headers)
 
         assert delete_response.status_code == 204
-        assert session_id not in chat_service._histories
+        assert session_id not in chat_service._agents
         assert session_id not in chat_service._metadata
         assert session_id not in chat_service._last_activity
 
@@ -156,7 +158,11 @@ class TestChatInvalidSession:
         alice_session_id = session_response.json()["session_id"]
 
         chat_service = client.app.state.chat_service
-        original_history_len = len(chat_service._histories[alice_session_id].messages)
+        # Phase 5 / Plan 05-04: history lives in the ConversationStore. The
+        # in-memory impl exposes ``_store`` as a dict for synchronous test
+        # access; we read the entry directly here so this method stays sync.
+        store = chat_service._conversation_store
+        original_history_len = len(store._store.get(alice_session_id, []))
 
         # Bob tries to post a message to alice's session.
         response = client.post(
@@ -167,5 +173,5 @@ class TestChatInvalidSession:
         assert response.status_code == 404
 
         # Alice's history must NOT have been mutated by bob's attempt.
-        new_history_len = len(chat_service._histories[alice_session_id].messages)
+        new_history_len = len(store._store.get(alice_session_id, []))
         assert new_history_len == original_history_len

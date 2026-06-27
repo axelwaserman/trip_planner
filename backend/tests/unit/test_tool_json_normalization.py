@@ -174,7 +174,7 @@ def test_flight_search_result_envelope_shape() -> None:
     """FlightSearchResult.model_dump() exposes exactly the 4 required envelope keys."""
     # Arrange
     result = FlightSearchResult(
-        query={"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
+        query={"origin": "LAX", "destination": "JFK", "departure_date": "2030-06-15", "passengers": 1},
         results=[],
         count=0,
     )
@@ -206,7 +206,7 @@ def test_to_flight_search_result_preserves_flight_fields() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2026, 6, 15),
+        departure_date=date(2030, 6, 15),
         passengers=1,
     )
 
@@ -230,7 +230,7 @@ def test_to_flight_search_result_empty_list() -> None:
     query = FlightQuery(
         origin="LAX",
         destination="JFK",
-        departure_date=date(2026, 6, 15),
+        departure_date=date(2030, 6, 15),
         passengers=1,
     )
 
@@ -342,32 +342,42 @@ def test_skyscanner_empty_segments_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_search_flights_returns_json_envelope_string() -> None:
-    """search_flights.ainvoke() returns a valid JSON FlightSearchResult string."""
+    """``search_flights(ctx, ...)`` returns a valid JSON FlightSearchResult string.
+
+    Phase 5 / Plan 05-04: ``search_flights`` is now a plain ``async def`` whose
+    first parameter is ``ctx: RunContext[ChatDeps]``. We construct a real
+    :class:`pydantic_ai.RunContext` carrying a :class:`ChatDeps` populated with
+    the deterministic ``MockFlightAPIClient`` and call the function directly.
+    The Phase 4.x ``search_flights._flight_client`` back-door is gone (D-06).
+    """
+    from pydantic_ai import RunContext
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.usage import RunUsage
+
+    from app.chat.deps import ChatDeps
     from app.tools.flight_client import MockFlightAPIClient
 
-    # Arrange — inject a deterministic mock client
-    search_flights._flight_client = MockFlightAPIClient(seed=42)  # type: ignore[attr-defined]
+    # Arrange — build a RunContext with ChatDeps that carries the mock client.
+    deps = ChatDeps(
+        flight_client=MockFlightAPIClient(seed=42),
+        session_id="test-session",
+        user_id="test-user",
+    )
+    ctx: RunContext[ChatDeps] = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
 
-    try:
-        # Act
-        result = await search_flights.ainvoke(
-            {
-                "origin": "LAX",
-                "destination": "JFK",
-                "departure_date": "2026-06-15",
-                "passengers": 1,
-                "limit": 3,
-            }
-        )
+    # Act
+    result = await search_flights(
+        ctx,
+        origin="LAX",
+        destination="JFK",
+        departure_date="2030-06-15",
+        passengers=1,
+        limit=3,
+    )
 
-        # Assert
-        assert isinstance(result, str), "Tool must return a str"
-        parsed = FlightSearchResult.model_validate_json(result)
-        assert parsed.count >= 1
-        assert parsed.status == "ok"
-        assert parsed.query.origin == "LAX"
-
-    finally:
-        # Cleanup — remove injected client so other tests are unaffected
-        if hasattr(search_flights, "_flight_client"):
-            del search_flights._flight_client  # type: ignore[attr-defined]
+    # Assert
+    assert isinstance(result, str), "Tool must return a str"
+    parsed = FlightSearchResult.model_validate_json(result)
+    assert parsed.count >= 1
+    assert parsed.status == "ok"
+    assert parsed.query.origin == "LAX"

@@ -1,10 +1,10 @@
 # Trip Planner - Architecture & Code Patterns
 
-**Last Updated**: 2026-05-20
+**Last Updated**: 2026-06-03
 
 ## Core Design Principles
 
-1. **Async-First**: All I/O operations use `async/await` (FastAPI, LangChain, `pyreqwest` per ADR-008 — never `requests`, `aiohttp`, or `httpx`)
+1. **Async-First**: All I/O operations use `async/await` (FastAPI, PydanticAI, `pyreqwest` per ADR-008 — never `requests`, `aiohttp`, or `httpx`)
 2. **Type Safety**: Full mypy strict mode, explicit type hints everywhere
 3. **Dependency Injection**: FastAPI `Depends()` for clients and services
 4. **SOLID Principles**: Abstract clients, service layer, domain models
@@ -172,42 +172,57 @@ async def search_flights(
 ---
 
 ### LLMProvider Factory Pattern
-**When to use**: Any code that needs to obtain a chat model. Do not construct
-`ChatOllama` / `ChatOpenAI` / `ChatAnthropic` directly — use the factory.
+**When to use**: Any code that needs an LLM agent for a session. Do not
+construct PydanticAI `OpenAIChatModel` / `AnthropicModel` / `Agent` directly —
+use the factory.
 
 **Location**:
-- Protocol: `app/llm/protocol.py` — `LLMProvider` + `BoundProvider`
+- ABC: `app/llm/base.py` — `LLMProvider(ABC)` (renamed from `protocol.py` in Phase 5)
 - Factory + DTO: `app/llm/factory.py` — `LLMProviderFactory`, `SessionLLMConfig`
 - Concrete providers: `app/llm/providers/` (`ollama.py`, `openai.py`, `anthropic.py`, `lmstudio.py`)
 
 **Structure**:
 ```
-LLMProviderFactory          # per-app singleton on app.state.llm_factory
-    └── build(SessionLLMConfig) → LLMProvider   # per-session, from protocol.py
+LLMProviderFactory                                # per-app singleton on app.state.llm_factory
+    └── build(SessionLLMConfig) → LLMProvider     # per-session, from base.py
 
-LLMProvider (Protocol, @runtime_checkable)
+LLMProvider (ABC)                                 # single-tier; PydanticAI's Agent IS the tool-bound thing
     ├── get_provider_name() → str
     ├── validate_config()   → ProbeError | None
-    ├── bind_tools(tools)   → BoundProvider
-    └── list_models()       → list[str]
-
-BoundProvider (Protocol, @runtime_checkable)    # return type of bind_tools()
-    ├── ainvoke(messages)   → AIMessage
-    └── astream(messages)   → AsyncIterator[AIMessageChunk]
+    ├── list_models()       → list[str]
+    └── build_agent(tools, deps_type) → pydantic_ai.Agent[Deps, str]
 ```
 
 **Rules**:
-- Concrete providers (`OllamaProvider`, etc.) satisfy `LLMProvider` via duck
-  typing — they do **not** subclass the Protocol. `@runtime_checkable` makes
-  `isinstance(provider, LLMProvider)` work for conformance tests.
-- `LLMProvider.bind_tools()` returns `BoundProvider`, which deliberately does
-  **not** expose `bind_tools` again. Re-binding would silently drop session state.
+- Concrete providers (`OllamaProvider`, `OpenAIProvider`,
+  `AnthropicProvider`, `LMStudioProvider`) explicitly subclass `LLMProvider`
+  — ABC is the project convention per `CLAUDE.md` ("Abstract interfaces use
+  `ABC`, never `Protocol`"). The Phase 4.5 `@runtime_checkable Protocol`
+  shape and the `BoundProvider` second tier are both retired.
+- `build_agent(tools, deps_type)` returns a `pydantic_ai.Agent[Deps, str]`.
+  PydanticAI's `Agent` IS the tool-bound thing — there is no second tier.
+  The Phase 4.5 `bind_tools` → `BoundProvider` indirection collapses.
 - `SessionLLMConfig` is a `@dataclass(frozen=True)` — immutable by policy.
 - `api_key` lives only in the in-memory `SessionLLMConfig`; it is never logged
   or persisted (D-09). The `ApiKeyScrubber` log filter installed at startup
   redacts any accidental leaks.
 - `LLMProviderFactory` is constructed once in `lifespan` and stashed on
   `app.state.llm_factory`. Routes access it via the `get_llm_factory` dependency.
+- `ChatService.create_session` calls `provider.validate_config()` and then
+  `provider.build_agent(tools=[search_flights], deps_type=ChatDeps)`, storing
+  the resulting `Agent[ChatDeps, str]` on `_agents[session_id]`. The Phase 4.5
+  `_bound_providers` dict is gone.
+
+**Per-provider model classes** (see `.planning/phases/05-pydanticai-migration/05-RESEARCH.md`
+§ Per-Provider Migration Rules for full detail):
+
+| Provider | PydanticAI model | PydanticAI provider |
+|----------|------------------|---------------------|
+| Ollama | `OpenAIChatModel(model, provider=OllamaProvider(base_url=...))` | `pydantic_ai.providers.ollama.OllamaProvider` |
+| OpenAI (standard) | `OpenAIChatModel(model, provider=OpenAIProvider(api_key=...))` | `pydantic_ai.providers.openai.OpenAIProvider` |
+| OpenAI (o-series) | `OpenAIResponsesModel(model, provider=OpenAIProvider(api_key=...))` | `pydantic_ai.providers.openai.OpenAIProvider` |
+| Anthropic | `AnthropicModel(model, provider=AnthropicProvider(api_key=...))` | `pydantic_ai.providers.anthropic.AnthropicProvider` |
+| LM Studio | `OpenAIChatModel(model, provider=OpenAIProvider(base_url=..., api_key=None))` | `pydantic_ai.providers.openai.OpenAIProvider` (no `api_key="lm-studio"` sentinel) |
 
 **Example**:
 ```python
@@ -230,29 +245,41 @@ class LLMProviderFactory:
                     model=config.model,
                     base_url=config.base_url or self._settings.ollama_base_url,
                     probe_timeout_seconds=self._settings.provider_probe_timeout_seconds,
-                    reasoning_model_prefixes=self._settings.ollama_reasoning_model_prefixes,
                 )
             case "openai":
                 return OpenAIProvider(
                     model=config.model,
                     api_key=config.api_key or self._settings.openai_api_key,
+                    o_series_prefixes=self._settings.openai_o_series_prefixes,
                 )
             ...
 ```
 
 ```python
-# app/llm/protocol.py
-@runtime_checkable
-class LLMProvider(Protocol):
+# app/llm/base.py
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from pydantic_ai import Agent
+
+class LLMProvider(ABC):
+    @abstractmethod
     def get_provider_name(self) -> str: ...
+    @abstractmethod
     async def validate_config(self) -> ProbeError | None: ...
-    def bind_tools(self, tools: Sequence[BaseTool]) -> BoundProvider: ...
+    @abstractmethod
     async def list_models(self) -> list[str]: ...
+    @abstractmethod
+    def build_agent(
+        self, tools: Sequence[Any], deps_type: type[Any]
+    ) -> Agent[Any, str]: ...
 ```
+
+*(Phase 5 — replaces the Phase 4.5 two-tier `LLMProvider` Protocol +
+`BoundProvider` Protocol shape. See ADR-007 for the locked decision.)*
 
 ---
 
-### Discriminated StreamEvent Union Pattern
+### StreamEvent ABC Hierarchy
 **When to use**: Any code that emits or consumes chat stream events
 (`chat_stream`, SSE serialisation, frontend parsing).
 
@@ -260,49 +287,64 @@ class LLMProvider(Protocol):
 
 **Structure**:
 
-Five concrete event models, each with a `Literal` `type` discriminator, plus
-a `StreamEvent` union alias used for annotations and `TypeAdapter` validation:
+`StreamEvent(BaseModel, ABC)` is a base class with five concrete subclasses,
+each carrying its own `Literal` `type` discriminator field:
 
 ```
-ContentEvent     type="content"     — LLM text chunk
-ThinkingEvent    type="thinking"    — LLM reasoning token (Ollama qwen3/deepseek-r1 only)
-ToolCallEvent    type="tool_call"   — tool dispatched (before execution)
-ToolResultEvent  type="tool_result" — tool completed
-ErrorEvent       type="error"       — tool or stream-level error
+StreamEvent (BaseModel, ABC)
+    ├── ContentEvent      type="content"     — LLM text chunk
+    ├── ThinkingEvent     type="thinking"    — LLM reasoning token (qwen3 <think> tags, Anthropic extended thinking, OpenAI o-series)
+    ├── ToolCallEvent     type="tool_call"   — tool dispatched (before execution)
+    ├── ToolResultEvent   type="tool_result" — tool completed
+    └── ErrorEvent        type="error"       — tool or stream-level error
 ```
 
 **Rules**:
-- Do not instantiate `StreamEvent` directly; it is a `Field(discriminator="type")`
-  annotated union alias, not a class.
+- `StreamEvent` declares no `@abstractmethod` — it is purely a marker base
+  for `isinstance(event, StreamEvent)` checks. Pydantic v2 supports
+  `BaseModel + ABC` cleanly (verified in RESEARCH OQ-01 against pydantic 2.12.3).
+- For union-style type annotations, use the explicit union
+  `ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent`.
+  The Phase 4.7 `Annotated[..., Field(discriminator="type")]` alias is retired.
 - `ErrorEvent.error_code` is typed as `ErrorCode` (a `StrEnum` in the same
   module). Do not use bare strings for error codes — use the enum.
 - `ErrorEvent.raw_detail` always passes through `_scrub()` before construction
   (see `app/llm/log_scrubbing.py`) so API keys cannot leak in error payloads.
 - Wire-level `type` discriminator values are part of the frontend contract —
   do not rename them.
+- **Wire format is byte-equivalent to Phase 4.7** (verified by golden-file
+  test in `tests/unit/chat/test_stream_event_wire_compat.py`). Frontend
+  `parseSSE.ts`, `useChat.ts`, and `types/chat.ts` are unchanged.
 
 **Example**:
 ```python
 # app/chat/models.py
+from abc import ABC
+from pydantic import BaseModel
+from typing import Literal
+
 class ErrorCode(StrEnum):
     session_error = "session_error"
     tool_error    = "tool_error"
     stream_error  = "stream_error"
 
-class ErrorEvent(BaseModel):
+class StreamEvent(BaseModel, ABC):
+    """Base class for all SSE stream events. Marker-only — no abstract methods."""
+    type: str
+    session_id: str
+
+class ErrorEvent(StreamEvent):
     type:       Literal["error"] = "error"
     error_code: ErrorCode
     message:    str
     retryable:  bool
     tool_name:  str | None = None
     raw_detail: str | None = None
-    session_id: str
-
-StreamEvent = Annotated[
-    ContentEvent | ThinkingEvent | ToolCallEvent | ToolResultEvent | ErrorEvent,
-    Field(discriminator="type"),
-]
 ```
+
+*(Phase 5 — refactored from the Phase 4.7 discriminated-union alias as part of
+REQ-p5-stream-event-abc, bundled with the LangChain → PydanticAI rewrite. See
+ADR-007.)*
 
 ---
 
@@ -402,18 +444,27 @@ class SessionCreateError(BaseModel):
 
 ---
 
-## LangChain 1.0 Integration
+## PydanticAI Integration
 
-**Version**: LangChain 1.0.3 (with LangGraph)
+**Version**: `pydantic-ai >= 0.8.1` (replaces LangChain in Phase 5; see ADR-007
+at `.planning/adrs/ADR-007-pydantic-ai.md` for the locked decision).
 
 ### Key Patterns
 
-**Tool Definition**:
-```python
-from langchain_core.tools import tool
+**Tool Definition** (Phase 5):
 
-@tool
-def search_flights(
+Tools are plain `async def` functions whose first parameter is
+`ctx: RunContext[ChatDeps]`. The Phase 2 `@tool` decorator from
+`langchain_core.tools` is gone, and the `search_flights._flight_client`
+attribute back-door used in Phase 4.x is **deleted** — `RunContext` is the
+framework-managed replacement (D-06).
+
+```python
+from pydantic_ai import RunContext
+from app.chat.deps import ChatDeps
+
+async def search_flights(
+    ctx: RunContext[ChatDeps],
     origin: str,
     destination: str,
     departure_date: str,
@@ -421,36 +472,134 @@ def search_flights(
     max_results: int = 5,
 ) -> str:
     """Search for flights between two airports.
-    
+
     Args:
         origin: IATA code for departure airport (e.g., 'JFK')
         destination: IATA code for arrival airport (e.g., 'LHR')
         departure_date: Date in YYYY-MM-DD format
         return_date: Optional return date in YYYY-MM-DD format
         max_results: Maximum number of flights to return (1-10)
-    
+
     Returns:
         JSON string with flight results including status, query, and results array.
     """
-    # Implementation returns structured JSON for LLM
+    client = ctx.deps.flight_client  # framework-injected — not a monkey-patch
+    # ... rest of body unchanged from Phase 4.x
 ```
 
-**LLM with Tools (Phase 4.5+)**:
-
-LLM construction no longer happens at startup. The app builds a per-session
-`LLMProvider` from `LLMProviderFactory.build(config)`, calls `bind_tools()` on it
-to get a `BoundProvider`, and passes that to `ChatService.chat_stream`. See the
-`LLMProvider` factory section below for the full pattern.
+**Per-turn dependency container** (D-05):
 
 ```python
-# app/chat/service.py (simplified)
-provider = factory.build(session_config)          # LLMProvider
-bound    = provider.bind_tools([search_flights])  # BoundProvider
-async for chunk in bound.astream(messages):
-    # Handle content / tool_calls / reasoning_content
+# app/chat/deps.py
+from dataclasses import dataclass
+from app.tools.flight_client import FlightAPIClient
+
+@dataclass(frozen=True)
+class ChatDeps:
+    flight_client: FlightAPIClient
+    session_id: str
+    user_id: str
 ```
 
-**No `create_agent()` needed** - LangChain 1.0 uses `bind_tools()` for function calling support.
+`session_id` and `user_id` are carried so Phase 8 structured logging can
+correlate tool calls without a Deps-shape churn.
+
+**Per-session Agent construction** (D-04, D-07):
+
+```python
+# app/chat/service.py — ChatService.create_session (simplified)
+provider = factory.build(session_config)            # LLMProvider (ABC)
+err = await provider.validate_config()
+if err is not None:
+    raise SessionCreateError.from_probe(err)
+agent = provider.build_agent(
+    tools=[search_flights],
+    deps_type=ChatDeps,
+)                                                   # Agent[ChatDeps, str]
+self._agents[session_id] = agent
+```
+
+**Streaming via `agent.iter()`** (D-12, D-15) — see RESEARCH § "Match block
+pattern for the agent.iter() streaming loop" for the full canonical structure.
+`agent.run_stream()` is **not** used in `ChatService` because tool events
+must be emitted live; `run_stream` handles tools silently in `on_complete()`.
+
+```python
+# app/chat/service.py — ChatService.chat_stream (simplified)
+from pydantic_ai import ModelRequestNode, CallToolsNode
+from pydantic_ai.messages import (
+    PartStartEvent, PartDeltaEvent,
+    TextPart, ThinkingPart,
+    TextPartDelta, ThinkingPartDelta,
+    FunctionToolCallEvent, FunctionToolResultEvent,
+    ToolCallPart, ToolReturnPart,
+)
+
+history = await self._conversation_store.load(session_id)
+deps = ChatDeps(
+    flight_client=self._flight_client,
+    session_id=session_id,
+    user_id=self._metadata[session_id]["user_id"],
+)
+async with self._agents[session_id].iter(
+    message,
+    message_history=history,
+    deps=deps,
+) as agent_run:
+    async for node in agent_run:
+        if isinstance(node, ModelRequestNode):
+            async with node.stream(agent_run.ctx) as model_stream:
+                async for event in model_stream:
+                    match event:
+                        case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=d)) if d:
+                            yield ThinkingEvent(chunk=d, session_id=session_id)
+                        case PartDeltaEvent(delta=TextPartDelta(content_delta=d)) if d:
+                            yield ContentEvent(chunk=d, session_id=session_id)
+                        # PartStartEvent variants handled the same way; see RESEARCH
+        elif isinstance(node, CallToolsNode):
+            async with node.stream(agent_run.ctx) as tool_stream:
+                async for event in tool_stream:
+                    match event:
+                        case FunctionToolCallEvent(part=ToolCallPart() as part):
+                            yield ToolCallEvent(
+                                tool_name=part.tool_name,
+                                tool_args=_coerce_args(part.args),
+                                session_id=session_id,
+                            )
+                        case FunctionToolResultEvent(result=ToolReturnPart() as ret):
+                            yield ToolResultEvent(
+                                tool_name=ret.tool_name,
+                                tool_result=str(ret.content),
+                                elapsed_ms=0,
+                                session_id=session_id,
+                            )
+
+if agent_run.result is not None:
+    await self._conversation_store.append(
+        session_id,
+        agent_run.result.new_messages(),
+    )
+```
+
+**Reasoning-token extraction** (D-12, D-14):
+
+- **Ollama qwen3** — native `<think>` tag parsing via
+  `ModelProfile.thinking_tags` on `OllamaProvider`. No `reasoning=True` flag
+  is needed; `chunk.additional_kwargs["reasoning_content"]` is gone.
+- **OpenAI o-series** — `OpenAIResponsesModel` (Responses API) instead of
+  `OpenAIChatModel`. `OpenAIProvider.build_agent()` dispatches on a model-name
+  prefix list (`("o1", "o3")`) carried on `Settings`.
+- **Anthropic extended thinking** — emitted automatically when the model
+  returns `BetaThinkingBlock` / `BetaThinkingDelta`. (May require
+  `extra_headers={"anthropic-beta": "thinking-in-streaming"}` — see ADR-007
+  Open Risk OQ-R2.)
+
+**Mock testing**:
+
+`_MockLLMProvider.build_agent()` returns
+`Agent(FunctionModel(stream_function=...), tools=..., deps_type=...)` so the
+real PydanticAI streaming code path runs in tests. Mocking happens at the
+`Model` level, not the `Agent` level, per the ADR-007 anti-pattern guidance.
 
 ---
 
@@ -562,23 +711,31 @@ Use FastAPI's `TestClient` rather than rolling an HTTP client by hand — it spe
 
 **Date**: 2025-11-10
 
-**Status**: Accepted
+**Status**: Superseded by ADR-007 (Phase 5, 2026-06-03)
 
-**Context**: Need agent framework for tool calling with LLMs.
+See `.planning/adrs/ADR-001-langchain.md` for the full standalone ADR
+(including the supersession note pointing at
+`.planning/phases/05-pydanticai-migration/05-CONTEXT.md` D-21 and the
+superseding ADR-007). LangChain shipped through Phase 4.x and was
+removed wholesale in Phase 5.
 
-**Decision**: Use LangChain 1.0 `bind_tools()` pattern instead of older `create_agent()` approach.
+---
 
-**Rationale**:
-- LangChain 1.0 uses LangGraph under the hood (more flexible)
-- `bind_tools()` works with any chat model that supports function calling
-- Simpler pattern: just bind tools to LLM, no separate agent object
-- Easier to test (mock LLM directly)
+### ADR-007: PydanticAI Agent Pattern
 
-**Consequences**:
-- ✅ Cleaner code, less abstraction
-- ✅ Works with streaming out of the box
-- ✅ Easy to switch LLM providers
-- ❌ Less guidance on agent patterns (more DIY)
+**Date**: 2026-06-03
+
+**Status**: Locked
+
+**Supersedes**: ADR-001 (LangChain 1.0 with bind_tools())
+
+See `.planning/adrs/ADR-007-pydantic-ai.md` for the full standalone ADR
+(including RESEARCH OQ-01..OQ-05 verifications against installed
+pydantic-ai 0.8.1, the per-provider migration rules table, and the
+five-wave consequences breakdown). ADR-007 closes the
+`LLMProvider`/`BoundProvider` Protocol-vs-ABC tech-debt entry and the
+`search_flights._flight_client` Monkey-Patched Tool Dependency
+anti-pattern carried through Phase 4.x.
 
 ---
 
@@ -684,17 +841,18 @@ Use FastAPI's `TestClient` rather than rolling an HTTP client by hand — it spe
 
 ### Backend
 - **FastAPI** 0.120+ - Async web framework
-- **LangChain** 1.0+ - LLM orchestration (with LangGraph)
-- **langchain-ollama** - Ollama integration
-- **langchain-openai** - OpenAI + LM Studio integration
-- **langchain-anthropic** - Anthropic integration
-- **Pydantic** 2.12+ - Data validation
+- **PydanticAI** 0.8.1+ - LLM agent framework (`Agent[Deps, str]`, `RunContext`, `agent.iter()`); replaces LangChain in Phase 5 per ADR-007
+- **Pydantic** 2.12+ - Data validation (floor raised to match pydantic-ai-slim's requirement)
 - **pyjwt** + **pwdlib[argon2]** - JWT auth + password hashing
 - **pytest** + **pytest-asyncio** - Testing
 - **ruff** - Linting and formatting
 - **mypy** - Static type checking (strict mode)
 - **uvicorn** - ASGI server
 - **`pyreqwest`** - Outbound HTTP client per ADR-008 (target; lands Phase 7 alongside real travel APIs). Provider probes and integration tests currently still use `httpx` and will migrate as part of ADR-008 — never add `aiohttp` or `requests`.
+
+`langchain`, `langchain-core`, `langchain-ollama`, `langchain-openai`,
+`langchain-anthropic`, and `langgraph` were all removed from `pyproject.toml`
+in Phase 5 (Wave 4).
 
 ### Frontend
 - **React** 18+ - UI library
@@ -714,10 +872,10 @@ and model from `SessionLLMConfig`; the factory builds the right `LLMProvider`.
 
 | Provider | Local/Cloud | Notes |
 |----------|-------------|-------|
-| `ollama` | Local | Dynamic `list_models` via `/api/tags`; `reasoning=True` gated on model prefix |
-| `lmstudio` | Local | Dynamic `list_models` via `/v1/models` |
-| `openai` | Cloud | API key from payload or `OPENAI_API_KEY` env var |
-| `anthropic` | Cloud | API key from payload or `ANTHROPIC_API_KEY` env var |
+| `ollama` | Local | Dynamic `list_models` via `/api/tags`; `<think>` tag parsing native via PydanticAI `ModelProfile.thinking_tags` |
+| `lmstudio` | Local | Dynamic `list_models` via `/v1/models`; no `api_key="lm-studio"` sentinel needed (Phase 5) |
+| `openai` | Cloud | API key from payload or `OPENAI_API_KEY` env var; o-series models dispatched to `OpenAIResponsesModel` (Phase 5) |
+| `anthropic` | Cloud | API key from payload or `ANTHROPIC_API_KEY` env var; extended thinking native via `BetaThinkingBlock` |
 
 Default local model: **qwen3:8b** (supports function calling + reasoning tokens via Ollama)
 
@@ -739,27 +897,29 @@ backend/
 │   │   ├── repository.py    # UserRepository ABC + EnvUserRepository
 │   │   ├── routes.py        # /api/auth/* endpoints
 │   │   └── exceptions.py    # UserNotFoundError
-│   ├── chat/                # Chat domain (Phase 4.7 / 4.9)
-│   │   ├── models.py        # StreamEvent union + session DTOs
-│   │   └── service.py       # ChatService (tool-calling loop + SSE)
+│   ├── chat/                # Chat domain (Phase 4.7 / 4.9 / 5)
+│   │   ├── deps.py          # ChatDeps frozen dataclass for RunContext (Phase 5)
+│   │   ├── models.py        # StreamEvent ABC + 5 concrete subclasses + session DTOs
+│   │   ├── service.py       # ChatService (agent.iter() loop + SSE)
+│   │   └── store.py         # ConversationStore ABC + InMemoryConversationStore (Phase 5)
 │   ├── flights/             # Flight domain (Phase 4.9)
 │   │   └── models.py        # FlightQuery, Flight, FlightSearchResult, etc.
-│   ├── llm/                 # LLM provider abstraction (Phase 4.5)
+│   ├── llm/                 # LLM provider abstraction (Phase 4.5 / 5)
+│   │   ├── base.py          # LLMProvider(ABC) — renamed from protocol.py in Phase 5
 │   │   ├── errors.py        # ProbeErrorCode (StrEnum) + ProbeError
 │   │   ├── factory.py       # LLMProviderFactory + SessionLLMConfig
 │   │   ├── log_scrubbing.py # ApiKeyScrubber log filter
-│   │   ├── protocol.py      # LLMProvider + BoundProvider (uses typing.Protocol — see "Known Tech Debt" below)
-│   │   └── providers/
-│   │       ├── anthropic.py # AnthropicProvider
-│   │       ├── lmstudio.py  # LMStudioProvider
-│   │       ├── ollama.py    # OllamaProvider
-│   │       └── openai.py    # OpenAIProvider
+│   │   └── providers/       # All four reshaped against pydantic_ai.models in Phase 5
+│   │       ├── anthropic.py # AnthropicProvider (AnthropicModel + AnthropicProvider)
+│   │       ├── lmstudio.py  # LMStudioProvider (OpenAIChatModel + OpenAIProvider, no api_key sentinel)
+│   │       ├── ollama.py    # OllamaProvider (OpenAIChatModel + OllamaProvider; <think> tags native)
+│   │       └── openai.py    # OpenAIProvider (OpenAIChatModel | OpenAIResponsesModel for o-series)
 │   ├── providers/           # Provider discovery domain (Phase 4.5)
 │   │   └── models.py        # ProviderInfo, SessionCreateError, ProviderRefreshResponse
 │   ├── services/            # (empty — reserved for future functional services)
 │   └── tools/
 │       ├── flight_client.py # FlightAPIClient ABC → MockFlightAPIClient
-│       ├── flight_search.py # @tool search_flights
+│       ├── flight_search.py # search_flights(ctx: RunContext[ChatDeps], ...) — RunContext-injected (Phase 5)
 │       └── retry.py         # Retry decorator
 ├── tests/
 │   ├── unit/                # One module under test; MagicMock collaborators only
@@ -780,19 +940,27 @@ frontend/
 
 ---
 
-## Known Tech Debt
+## Anti-Pattern Closures (Phase 5)
 
-### `app/llm/protocol.py` uses `typing.Protocol`
+The PydanticAI migration in Phase 5 closed two long-standing anti-pattern
+entries that had been carried in this document since Phase 4.5 / 4.x. Both
+are listed here for the historical record — neither is active tech debt
+anymore.
 
-The `LLMProvider` and `BoundProvider` interfaces in `app/llm/protocol.py` are defined as `typing.Protocol` (with `@runtime_checkable`), not `abc.ABC`. This pre-dates the project rule documented in `CLAUDE.md`:
+| Anti-pattern | Closed in | How |
+|--------------|-----------|-----|
+| `search_flights._flight_client` monkey-patched dependency | Phase 5 (D-06) | Replaced with `RunContext[ChatDeps]` framework-managed DI; the back-door attribute and the `lifespan` line that wrote it are both deleted. Tools now declare `ctx: RunContext[ChatDeps]` as their first parameter and read `ctx.deps.flight_client`. |
+| `LLMProvider` / `BoundProvider` Protocol-vs-ABC mismatch (Known Tech Debt) | Phase 5 (D-03) | Collapsed to a single `LLMProvider(ABC)` in `app/llm/base.py`. Concrete providers (`OllamaProvider`, `OpenAIProvider`, `AnthropicProvider`, `LMStudioProvider`) explicitly subclass the ABC. The `BoundProvider` second tier is retired entirely — PydanticAI's `Agent` IS the tool-bound thing, so no second tier is needed. |
 
-> Abstract interfaces use `ABC`, never `Protocol`. Python abstract base classes are the project convention; `typing.Protocol` is reserved for third-party duck-typing compatibility only.
+See `.planning/adrs/ADR-007-pydantic-ai.md` for the locked decision and
+`.planning/phases/05-pydanticai-migration/05-CONTEXT.md` D-01..D-21 for the
+full set of Phase 5 architectural decisions.
 
-**Why it stayed**: at the time `protocol.py` was authored (Phase 4.5), the rule was a global Python pattern (`~/.claude/rules/python/patterns.md`) preferring Protocols. The repo-local rule reversing this came later via the `/dignified-python` skill.
-
-**Migration plan**: convert both Protocols to ABCs as part of the Phase 6 PydanticAI migration — `bind_tools` retires from the interface at that point anyway, so the rework is a natural fit. Activate `/dignified-python` when doing the conversion.
-
-**Until then**: do NOT add new `typing.Protocol`-based interfaces. New abstract types must be ABCs (see `app/auth/repository.py::UserRepository` and `app/tools/flight_client.py::FlightAPIClient` for the canonical pattern in this repo).
+**Rule going forward**: do NOT introduce `typing.Protocol`-based interfaces
+for in-project abstract types. New abstract types must be ABCs (see
+`app/auth/repository.py::UserRepository`, `app/tools/flight_client.py::FlightAPIClient`,
+`app/chat/store.py::ConversationStore`, and `app/llm/base.py::LLMProvider`
+for the canonical patterns in this repo).
 
 ---
 

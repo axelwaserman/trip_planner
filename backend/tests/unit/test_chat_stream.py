@@ -1,15 +1,25 @@
-"""Unit tests for ChatService.chat_stream() with deterministic MockLLM."""
+"""Unit tests for ChatService.chat_stream() with the FunctionModel-backed mock.
 
-from unittest.mock import AsyncMock, patch
+Phase 5 / Plan 05-04 (Wave 3): the LangChain-shape tests that patched
+``search_flights.ainvoke`` to inject errors retire here. The Phase 4.7
+contract — ``ErrorEvent.error_code`` taxonomy + ``raw_detail`` scrubbing —
+is preserved by the rewritten ``ChatService.chat_stream`` exception handler;
+the new tests trigger errors via the ``FunctionModel.stream_function``
+substrate (the ``streams: Callable[[], None]`` widening on
+``make_chat_service_with_mock_llm``) instead of patching the tool surface.
 
-from langchain_core.messages import AIMessage
+Greeting/content scenarios continue to drive the fixture's ``MockLLMStream``
+classmethods unchanged. History assertions migrate from
+``service.get_session_history(session_id).messages`` to
+``await service._conversation_store.load(session_id)``.
+"""
+
+import pytest
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from app.chat.models import ErrorCode, ErrorEvent
-from app.exceptions import APIError
-from app.tools.flight_search import search_flights
 from tests.fixtures.llm import (
     MockLLMStream,
-    ToolCall,
     default_session_config,
     make_chat_service_with_mock_llm,
 )
@@ -17,187 +27,91 @@ from tests.fixtures.llm import (
 
 async def test_chat_stream_emits_content_events_for_greeting() -> None:
     """Content-only mock stream produces only 'content' type events and correct history."""
-    # Arrange
     service = make_chat_service_with_mock_llm(MockLLMStream.greeting())
     session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    # Act
     events = [e async for e in service.chat_stream("Hello", session_id)]
 
-    # Assert
     content_events = [e for e in events if e.type == "content"]
     non_content_events = [e for e in events if e.type not in ("content",)]
     assert len(content_events) >= 1
     assert len(non_content_events) == 0
 
-    history = service.get_session_history(session_id)
-    msgs = list(history.messages)
-    assert len(msgs) == 2
+    # History: one ModelRequest (with UserPromptPart) and one ModelResponse (with TextPart).
+    msgs = await service._conversation_store.load(session_id)
+    user_msgs = [p for m in msgs if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, UserPromptPart)]
+    assistant_msgs = [p for m in msgs if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, TextPart)]
+    assert len(user_msgs) == 1
+    assert str(user_msgs[0].content) == "Hello"
+    assert len(assistant_msgs) == 1
 
 
-async def test_chat_stream_yields_error_event_on_tool_apierror() -> None:
-    """chat_stream yields ErrorEvent(error_code=tool_error, retryable=True) when the tool raises APIError(retryable=True).
+async def test_chat_stream_yields_error_event_on_stream_exception() -> None:
+    """Generic Exception in stream_function → ErrorEvent(stream_error, retryable=False).
 
-    Arrange: single-tool-call stream; mock search_flights.ainvoke to raise an APIError
-    with retryable=True. Assert the last event is an ErrorEvent with the expected fields.
-
-    NOTE: StructuredTool (Pydantic model) forbids attribute patching via setattr, so we
-    patch at the class level: patch.object(type(search_flights), 'ainvoke', ...).
+    Phase 5 substitute for the Phase 4.7 ``test_chat_stream_yields_error_event_on_tool_unexpected_exception``
+    test: that test patched ``search_flights.ainvoke`` (a LangChain-only surface)
+    to raise a plain Exception; the equivalent under PydanticAI is to inject
+    the failure at the ``FunctionModel.stream_function`` level (the contract
+    documented in ``tests/unit/chat/test_stream_error_event.py`` and the
+    ``StreamsArg`` widening on ``make_chat_service_with_mock_llm``).
     """
-    # Arrange
-    service = make_chat_service_with_mock_llm(
-        MockLLMStream.from_chunks(
-            [
-                [
-                    ToolCall(
-                        name="search_flights",
-                        args={"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
-                        id="call_test",
-                    )
-                ],
-            ]
-        )
-    )
+
+    def boom() -> None:
+        raise RuntimeError("kaboom")
+
+    service = make_chat_service_with_mock_llm(boom)  # type: ignore[arg-type]
     session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    # Act — patch the tool's ainvoke at the class level to raise a retryable APIError
-    with patch.object(
-        type(search_flights),
-        "ainvoke",
-        new_callable=AsyncMock,
-        side_effect=APIError(message="upstream boom", retryable=True),
-    ):
-        events = [e async for e in service.chat_stream("find flights", session_id)]
+    events = [e async for e in service.chat_stream("find flights", session_id)]
 
-    # Assert — last event is an ErrorEvent with tool_error code and retryable=True
     error_events = [e for e in events if e.type == "error"]
     assert len(error_events) == 1
     err = error_events[0]
     assert isinstance(err, ErrorEvent)
-    assert err.error_code == ErrorCode.tool_error
-    assert err.retryable is True
-    assert err.tool_name == "search_flights"
-    assert err.raw_detail is not None
-    assert "upstream boom" in (err.raw_detail or "")
-
-
-async def test_chat_stream_yields_error_event_on_tool_unexpected_exception() -> None:
-    """chat_stream yields ErrorEvent(retryable=False) when the tool raises a plain Exception.
-
-    Arrange: single-tool-call stream; mock search_flights.ainvoke to raise a plain Exception.
-    Assert the error event has retryable=False (non-APIError path).
-    """
-    # Arrange
-    service = make_chat_service_with_mock_llm(
-        MockLLMStream.from_chunks(
-            [
-                [
-                    ToolCall(
-                        name="search_flights",
-                        args={"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
-                        id="call_test",
-                    )
-                ],
-            ]
-        )
-    )
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
-
-    # Act — patch the tool's ainvoke at the class level to raise a generic Exception
-    with patch.object(
-        type(search_flights),
-        "ainvoke",
-        new_callable=AsyncMock,
-        side_effect=Exception("kaboom"),
-    ):
-        events = [e async for e in service.chat_stream("find flights", session_id)]
-
-    # Assert — ErrorEvent with retryable=False on the non-APIError path
-    error_events = [e for e in events if e.type == "error"]
-    assert len(error_events) == 1
-    err = error_events[0]
-    assert isinstance(err, ErrorEvent)
-    assert err.error_code == ErrorCode.tool_error
+    assert err.error_code == ErrorCode.stream_error
     assert err.retryable is False
-    assert err.tool_name == "search_flights"
-
-
-async def test_tool_apierror_does_not_write_blank_ai_message_to_history() -> None:
-    """Stream that hits an APIError early return must NOT pollute history with AIMessage('').
-
-    When the tool raises APIError, chat_stream returns early (before the second
-    astream call), so tool_results stays empty. The `elif tool_was_called and
-    tool_results:` guard in the finally block must NOT fire, leaving history with
-    exactly 1 HumanMessage and 0 AIMessages.
-    """
-    # Arrange
-    service = make_chat_service_with_mock_llm(
-        MockLLMStream.from_chunks(
-            [
-                [
-                    ToolCall(
-                        name="search_flights",
-                        args={"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
-                        id="call_test",
-                    )
-                ],
-            ]
-        )
-    )
-    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
-
-    # Act — patch search_flights.ainvoke to raise a retryable APIError
-    with patch.object(
-        type(search_flights),
-        "ainvoke",
-        new_callable=AsyncMock,
-        side_effect=APIError(message="upstream boom", retryable=True),
-    ):
-        _events = [e async for e in service.chat_stream("find flights", session_id)]
-
-    # Assert — history has 1 HumanMessage and NO AIMessage entries
-    history = service.get_session_history(session_id)
-    ai_messages = [m for m in history.messages if isinstance(m, AIMessage)]
-    assert ai_messages == [], "No AIMessage should be written on tool error early return"
+    assert err.raw_detail is not None
+    assert "kaboom" in (err.raw_detail or "")
 
 
 async def test_chat_stream_scrubs_api_key_from_raw_detail() -> None:
-    """chat_stream scrubs API key patterns from ErrorEvent.raw_detail.
+    """``ErrorEvent.raw_detail`` is passed through ``_scrub`` (Phase 4.7 contract).
 
-    Arrange: mock search_flights to raise APIError whose message contains a
-    fake API key (``sk-AAAAAA...``). Assert the ErrorEvent.raw_detail does NOT
-    contain the original key — the _scrub() function must have redacted it.
+    Same invariant as ``tests/unit/chat/test_stream_error_event.py`` but under
+    a ``RuntimeError`` instead of an ``APIError``: the ``_scrub`` function must
+    rewrite ``sk-proj-...`` patterns to ``sk-[REDACTED]`` regardless of the
+    exception subclass.
     """
-    # Arrange
     fake_key = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA"
-    service = make_chat_service_with_mock_llm(
-        MockLLMStream.from_chunks(
-            [
-                [
-                    ToolCall(
-                        name="search_flights",
-                        args={"origin": "LAX", "destination": "JFK", "departure_date": "2026-06-15", "passengers": 1},
-                        id="call_test",
-                    )
-                ],
-            ]
-        )
-    )
+
+    def boom() -> None:
+        raise RuntimeError(f"call to OpenAI failed: {fake_key}")
+
+    service = make_chat_service_with_mock_llm(boom)  # type: ignore[arg-type]
     session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
 
-    # Act — patch the tool's ainvoke at the class level to raise an APIError with a key-like substring
-    with patch.object(
-        type(search_flights),
-        "ainvoke",
-        new_callable=AsyncMock,
-        side_effect=APIError(message=f"call to OpenAI failed: {fake_key}", retryable=False),
-    ):
-        events = [e async for e in service.chat_stream("find flights", session_id)]
+    events = [e async for e in service.chat_stream("find flights", session_id)]
 
-    # Assert — the key must be redacted from raw_detail
     error_events = [e for e in events if e.type == "error"]
     assert len(error_events) == 1
     err = error_events[0]
     assert err.raw_detail is not None
     assert fake_key not in (err.raw_detail or "")
     assert "sk-[REDACTED]" in (err.raw_detail or "")
+
+
+@pytest.mark.parametrize(
+    "scenario_name",
+    ["greeting", "multi_turn"],
+)
+async def test_chat_stream_no_tool_call_for_content_scenarios(scenario_name: str) -> None:
+    """Content-only scenarios never produce tool_call / tool_result events."""
+    scenario = getattr(MockLLMStream, scenario_name)()
+    service = make_chat_service_with_mock_llm(scenario)
+    session_id, _ = await service.create_session(default_session_config(), user_id="testuser")
+
+    events = [e async for e in service.chat_stream("hi", session_id)]
+    types = {e.type for e in events}
+    assert "tool_call" not in types
+    assert "tool_result" not in types

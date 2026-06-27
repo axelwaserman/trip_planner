@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Re-platform
-status: in_progress
-stopped_at: Phase 4.9 complete; ready to plan Phase 5 (PydanticAI Migration — resequenced ahead of Postgres on 2026-06-02 per PR #20 review)
-last_updated: "2026-06-02T00:00:00.000Z"
-last_activity: 2026-05-21
+status: completed
+stopped_at: Phase 5 context gathered
+last_updated: "2026-06-03T10:37:23.968Z"
+last_activity: 2026-06-03 -- Phase 05 marked complete
 progress:
   total_phases: 16
-  completed_phases: 11
-  total_plans: 26
-  completed_plans: 26
-  percent: 69
+  completed_phases: 5
+  total_plans: 33
+  completed_plans: 32
+  percent: 31
 ---
 
 # Project State
@@ -21,13 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-15)
 
 **Core value:** A user can authenticate via a real login page, pick an LLM provider (a local Ollama model discovered from the host, or a cloud provider via API key), hold a natural conversation with the agent, watch it reason and call travel tools live, and trust that the results are structured, sanitized, and rendered usefully.
-**Current focus:** Phase 5 — **PydanticAI Migration** (next up; resequenced ahead of the PG re-platform on 2026-06-02 per PR #20 review)
+**Current focus:** Phase 05 — pydanticai-migration
 
 ## Current Position
 
-Phase: 04.9 (pre-phase-5-prep) — COMPLETE
-Status: Phase 4.9 complete — v1 Working Demo milestone done (Phases 4.2–4.8 all shipped) + pre-Phase-5 prep done (Phase 4.9 shipped 2026-05-21); ready to plan Phase 5
-Last activity: 2026-05-21
+Phase: 05 — COMPLETE
+Plan: 1 of 6
+Status: Phase 05 complete
+Last activity: 2026-06-03 -- Phase 05 marked complete
 
 Progress: [███████░░░] 69% (11/16 phases complete)
 
@@ -119,6 +120,6 @@ Items acknowledged and carried forward; tracked in REQUIREMENTS.md "v2 Requireme
 
 ## Session Continuity
 
-Last session: 2026-06-02T00:00:00.000Z
-Stopped at: Phase 4.9 complete; ready to plan Phase 5 (PydanticAI Migration — resequenced 2026-06-02 per PR #20 review)
-Resume file: None
+Last session: 2026-06-02T15:34:56.138Z
+Stopped at: Phase 5 context gathered
+Resume file: .planning/phases/05-pydanticai-migration/05-CONTEXT.md

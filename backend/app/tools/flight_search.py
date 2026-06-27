@@ -1,12 +1,36 @@
-"""Flight search tool for LangChain agent."""
+"""Flight search tool for the PydanticAI chat agent.
+
+Phase 5 / Plan 05-04: this module retired the LangChain ``@tool`` decorator
+and the Phase 4.x monkey-patched attribute back-door. The function now reads
+its :class:`FlightAPIClient` collaborator from ``ctx.deps.flight_client`` —
+PydanticAI threads :class:`app.chat.deps.ChatDeps` through ``RunContext`` once
+per turn (D-06).
+
+Closes ARCHITECTURE.md "Monkey-Patched Tool Dependency" Known Tech Debt.
+
+Import-cycle note: PydanticAI resolves the ``ctx: RunContext[ChatDeps]``
+annotation via :func:`typing.get_type_hints` at ``Agent`` construction time,
+which evaluates the deferred string annotation in this module's globals — so
+``ChatDeps`` must be a real runtime symbol here, not a ``TYPE_CHECKING``-only
+import. To avoid the ``app.chat`` ↔ ``app.tools.flight_search`` cycle,
+:mod:`app.chat.service` imports ``search_flights`` LAZILY inside
+:meth:`ChatService.create_session`. Importing :mod:`app.chat.deps` directly
+here is safe because ``deps.py`` itself has no transitive dependency on this
+module.
+"""
+
+from __future__ import annotations
 
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from langchain_core.tools import tool
+from pydantic_ai import (
+    RunContext,  # noqa: TC002 - PydanticAI evaluates RunContext[ChatDeps] via get_type_hints at Agent construction time; runtime import required (see module docstring)
+)
 
+from app.chat.deps import ChatDeps  # noqa: TC001 - same reason as RunContext above; ChatDeps must be a runtime symbol
 from app.exceptions import FlightSearchError
 from app.flights.models import (
     CarrierInfo,
@@ -20,9 +44,6 @@ from app.flights.models import (
     PriceInfo,
     SortBy,
 )
-
-if TYPE_CHECKING:
-    from app.tools.flight_client import FlightAPIClient
 
 
 def _extract_carrier_iata(flight: Flight) -> str:
@@ -274,8 +295,8 @@ def normalize_skyscanner_itinerary(itin: dict[str, Any]) -> FlightResult:
     )
 
 
-@tool
 async def search_flights(
+    ctx: RunContext[ChatDeps],
     origin: str,
     destination: str,
     departure_date: str,
@@ -334,12 +355,9 @@ async def search_flights(
         JSON string (FlightSearchResult.model_dump_json()) on success, or a plain error
         string on failure. Always returns a string.
     """
-    # Get the flight client from the tool's context
-    # NOTE: This will be injected when the tool is bound to the ChatService
-    client: FlightAPIClient | None = getattr(search_flights, "_flight_client", None)
-
-    if client is None:
-        return "Error: Flight search service not initialized. Please contact support."
+    # PydanticAI threads ChatDeps through RunContext per turn (D-06).
+    # The Phase 4.x attribute back-door is closed; the deps client is non-None by type.
+    client = ctx.deps.flight_client
 
     try:
         # Validate and parse inputs
@@ -366,6 +384,10 @@ async def search_flights(
         # Validate numeric parameters
         if passengers < 1:
             return "Error: Number of passengers must be at least 1."
+        # H6: cap passengers at 9 (airline industry maximum per booking; prevents
+        # the LLM from requesting absurd values that would fail downstream).
+        if passengers > 9:
+            return "Error: Number of passengers cannot exceed 9."
         if limit < 1 or limit > 20:
             return "Error: Limit must be between 1 and 20."
         if max_stops is not None and (max_stops < 0 or max_stops > 2):
@@ -401,5 +423,5 @@ async def search_flights(
 
     except FlightSearchError as e:
         return f"Flight search error: {e}"
-    except Exception as e:
-        return f"Unexpected error during flight search: {e}"
+    except Exception:
+        return "Flight search encountered an unexpected error. Please try again."

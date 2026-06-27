@@ -1,26 +1,21 @@
-"""LM Studio provider — wraps :class:`langchain_openai.ChatOpenAI` against a local LM Studio daemon.
+"""LM Studio provider — wraps PydanticAI's ``OpenAIChatModel`` against a local LM Studio daemon.
 
-Implements :class:`app.llm.protocol.LLMProvider` structurally (no inheritance —
-the Protocol is ``@runtime_checkable`` and satisfied via duck typing). Peer of
-:class:`app.llm.providers.ollama.OllamaProvider` (local, dynamic discovery) and
-:class:`app.llm.providers.openai.OpenAIProvider` (ChatOpenAI delegate, cloud).
+Phase 5 / Plan 05-03 rewrite (Wave 2): the Phase 4.5 LangChain ``bind_tools`` body
+retires. :meth:`build_agent` now constructs a ``pydantic_ai.Agent`` backed by
+``OpenAIChatModel(model, provider=PaiOpenAIProvider(base_url=...))``. PydanticAI's
+``OpenAIProvider`` auto-fills the ``"api-key-not-set"`` placeholder when
+``base_url`` is set and ``OPENAI_API_KEY`` is unset (Phase 4.5 ``"lm-studio"``
+sentinel retired).
 
 Design notes:
 
 - **D-15 — first-class provider class.** LM Studio is a peer of Ollama / OpenAI /
-  Anthropic, not a hidden adapter. The factory match block (Plan 06 + 04b)
-  dispatches ``"lmstudio"`` to this class.
+  Anthropic, not a hidden adapter. The factory match block dispatches
+  ``"lmstudio"`` to this class.
 
-- **D-16 — ChatOpenAI delegation.** LM Studio exposes an OpenAI-compatible REST
-  surface; the provider re-uses :class:`langchain_openai.ChatOpenAI` with a
+- **D-16 — OpenAI-compatible delegation.** LM Studio exposes an OpenAI-compatible
+  REST surface; the provider re-uses PydanticAI's ``OpenAIChatModel`` with a
   custom ``base_url`` pointing at the local daemon. No second SDK dependency.
-
-- **D-17 — no API key in v1.** The provider's ``__init__`` does NOT accept an
-  ``api_key``. The sentinel string ``"lm-studio"`` is mandatory at
-  ``ChatOpenAI`` construction (the OpenAI SDK validator rejects empty/None
-  api_key — RESEARCH.md Pitfall 3) but it is never sent to ``api.openai.com``
-  because ``base_url`` overrides the destination. Settings has NO
-  ``lmstudio_api_key`` field for the same reason.
 
 - **D-18 — discovery via GET ${base_url}/models.** ``list_models`` hits the
   OpenAI-compatible ``/models`` endpoint (the daemon's ``/v1`` prefix is
@@ -36,27 +31,35 @@ Design notes:
   :attr:`Settings.provider_probe_timeout_seconds` when the session payload's
   ``base_url`` is ``None``. Mirrors the OllamaProvider precedent.
 
-Cross-reference: :meth:`bind_tools` is structurally symmetric with
-:meth:`app.llm.providers.openai.OpenAIProvider.bind_tools` — only the
-``base_url`` and the sentinel ``api_key`` differ.
+- **ADR-008 — pyreqwest per CLAUDE.md.** ``validate_config`` and
+  ``list_models`` use ``pyreqwest`` for ``/models`` probes (H1, Phase 07 fix).
+  The response JSON is consumed inside the ``async with`` block (H4) to ensure
+  the context manager is still active when the body is parsed.
+
+Cross-reference: :meth:`build_agent` is structurally symmetric with
+:meth:`app.llm.providers.openai.OpenAIProvider.build_agent` for the
+non-o-series branch — only the ``base_url`` differs.
 """
 
 from collections.abc import Sequence
+from datetime import timedelta
+from typing import Any
 
-import httpx
-from langchain_core.tools import BaseTool
-from langchain_openai import ChatOpenAI
-from pydantic import SecretStr
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider as _PaiOpenAIProvider
+from pyreqwest.client import ClientBuilder
+from pyreqwest.exceptions import ConnectError, JSONDecodeError, ReadError, RequestTimeoutError, StatusError
 
+from app.llm.base import LLMProvider
 from app.llm.errors import ProbeError, ProbeErrorCode
-from app.llm.protocol import BoundProvider
 
 
-class LMStudioProvider:
+class LMStudioProvider(LLMProvider):
     """Local LM Studio provider with dynamic ``${base_url}/models`` discovery.
 
-    Satisfies :class:`app.llm.protocol.LLMProvider` structurally; the four
-    members below match the Protocol signatures exactly.
+    Phase 5 D-03: explicitly subclasses :class:`app.llm.base.LLMProvider`
+    (the ABC); the four abstract methods below match the ABC contract.
 
     The constructor takes its full configuration as arguments — no
     :mod:`app.config` import — so the factory hands in either the payload's
@@ -64,7 +67,7 @@ class LMStudioProvider:
     (applied symmetrically to local providers).
     """
 
-    def __init__(self, model: str, base_url: str, probe_timeout_seconds: float) -> None:
+    def __init__(self, *, model: str, base_url: str, probe_timeout_seconds: float) -> None:
         """Construct with model id, daemon base URL, and probe timeout.
 
         Args:
@@ -75,7 +78,7 @@ class LMStudioProvider:
                 (e.g. ``"http://localhost:1234/v1"``). The factory injects
                 either the request payload's value or
                 :attr:`Settings.lmstudio_base_url`.
-            probe_timeout_seconds: Per-request httpx timeout for
+            probe_timeout_seconds: Per-request pyreqwest timeout (seconds) for
                 :meth:`list_models` and :meth:`validate_config`. Sourced
                 from :attr:`Settings.provider_probe_timeout_seconds` —
                 same knob as the Ollama provider.
@@ -102,7 +105,7 @@ class LMStudioProvider:
         """
         try:
             available = await self.list_models()
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
+        except (ConnectError, ReadError, JSONDecodeError, RequestTimeoutError, StatusError):
             return ProbeError(
                 error=ProbeErrorCode.PROVIDER_UNREACHABLE,
                 message=f"Can't reach LM Studio at {self._base_url}.",
@@ -128,12 +131,18 @@ class LMStudioProvider:
         per RESEARCH.md §"LM Studio Discovery". Returns ``[]`` on shape drift
         (Assumption A4) — non-list ``data`` field, missing ``id`` keys, or
         non-dict entries are filtered out rather than raising.
+
+        H1: uses pyreqwest per ADR-008 (CLAUDE.md mandate). H4: the response
+        body is consumed inside the ``async with`` block so the context manager
+        is still active when the body is parsed.
         """
         url = f"{self._base_url.rstrip('/')}/models"
-        async with httpx.AsyncClient(timeout=self._probe_timeout) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-        payload = response.json()
+        # H1/H4: pyreqwest per ADR-008; response consumed inside async-with block.
+        async with (
+            ClientBuilder().timeout(timedelta(seconds=self._probe_timeout)).error_for_status(True).build() as client
+        ):
+            resp = await client.get(url).build().send()
+            payload = await resp.json()
         # LM Studio models endpoint shape: {"object": "list", "data": [{"id": "...", "object": "model", ...}]}
         # Defensive parse — Assumption A4 — empty list on shape drift.
         data = payload.get("data", [])
@@ -141,31 +150,27 @@ class LMStudioProvider:
             return []
         return sorted({entry["id"] for entry in data if isinstance(entry, dict) and entry.get("id")})
 
-    def bind_tools(self, tools: Sequence[BaseTool]) -> BoundProvider:
-        """Construct a tool-bound runnable that streams from the LM Studio daemon.
+    def build_agent(self, tools: Sequence[Any], deps_type: type[Any]) -> Agent[Any, str]:
+        """Construct a PydanticAI ``Agent`` against the LM Studio daemon.
 
-        Constructs ``ChatOpenAI(model=..., base_url=self._base_url,
-        api_key="lm-studio")`` — the sentinel ``api_key`` is MANDATORY
-        (RESEARCH.md Pitfall 3 — the OpenAI SDK rejects empty/None api_key
-        at construction). Because ``base_url`` overrides the destination,
-        the sentinel never reaches ``api.openai.com``.
+        Builds an ``OpenAIChatModel`` wrapped in PydanticAI's ``OpenAIProvider``
+        with the ``base_url`` pointed at the local LM Studio daemon. The
+        Phase 4.5 ``SecretStr("lm-studio")`` sentinel retires — PydanticAI's
+        ``OpenAIProvider`` auto-fills ``"api-key-not-set"`` when ``base_url``
+        is provided and ``OPENAI_API_KEY`` is unset (RESEARCH § "LM Studio
+        Provider"). Because ``base_url`` overrides the destination, the
+        placeholder never reaches ``api.openai.com``.
 
-        The returned ``Runnable[LanguageModelInput, AIMessage]`` structurally
-        satisfies :class:`BoundProvider` (it has ``ainvoke`` + ``astream``);
-        mypy can't statically verify that match because LangChain's
-        ``Runnable`` is a generic class, not a Protocol — hence the targeted
-        ``type: ignore``.
+        Args:
+            tools: PydanticAI tool callables (each takes
+                ``ctx: RunContext[deps_type]`` as first parameter).
+            deps_type: ``ChatDeps`` dataclass passed through ``RunContext``.
+
+        Returns:
+            A PydanticAI ``Agent`` ready for ``agent.iter(...)``.
         """
-        # ChatOpenAI types ``api_key`` as ``SecretStr | Callable | None``; the
-        # sentinel literal must be wrapped to satisfy mypy strict. The literal
-        # text "lm-studio" still appears in source for grep-based traceability
-        # to D-17 / RESEARCH.md Pitfall 3.
-        llm = ChatOpenAI(
-            model=self._model,
-            base_url=self._base_url,
-            api_key=SecretStr("lm-studio"),  # sentinel; D-17, RESEARCH.md Pitfall 3
+        model = OpenAIChatModel(
+            self._model,
+            provider=_PaiOpenAIProvider(base_url=self._base_url),
         )
-        # mypy can't statically prove Runnable[LanguageModelInput, AIMessage]
-        # matches the BoundProvider Protocol; @runtime_checkable confirms it
-        # at runtime via the conformance test (Plan 06).
-        return llm.bind_tools(list(tools))  # type: ignore[return-value]
+        return Agent(model, tools=list(tools), deps_type=deps_type)

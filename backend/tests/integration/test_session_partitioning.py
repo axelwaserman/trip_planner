@@ -3,6 +3,10 @@
 Two distinct users log in, each owns a session in ``ChatService._metadata``,
 and each ``GET /api/chat/sessions`` call MUST return only its caller's
 sessions. Closes RESEARCH.md Open Question 5 (RESOLVED).
+
+Phase 5 / Plan 05-04: ``_histories`` and ``_bound_providers`` retired in
+favour of ``_agents`` + the ``ConversationStore`` seam. The per-user
+partition behaviour is identical; only the seeding shape changes.
 """
 
 from collections.abc import Generator
@@ -10,7 +14,6 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.chat_history import InMemoryChatMessageHistory
 
 
 @pytest.fixture(autouse=True)
@@ -55,10 +58,9 @@ def test_two_users_get_independent_session_lists(
 ) -> None:
     # Arrange — clear chat state, log in as alice + bob
     chat_service = client.app.state.chat_service
-    chat_service._histories.clear()
     chat_service._metadata.clear()
     chat_service._last_activity.clear()
-    chat_service._bound_providers.clear()
+    chat_service._agents.clear()
 
     alice_headers = _login(client, "alice", "alicepass")
     bob_headers = _login(client, "bob", "bobpass")
@@ -76,14 +78,12 @@ def test_two_users_get_independent_session_lists(
     # Seed one session per user directly via metadata.
     # We bypass the create_session route because that requires a live provider
     # probe; the partition behaviour is the unit-of-test here.
-    chat_service._histories["alice-1"] = InMemoryChatMessageHistory()
     chat_service._metadata["alice-1"] = {
         "provider": "ollama",
         "model": "qwen3:4b",
         "user_id": "alice",
         "created_at": datetime.now(UTC).isoformat(),
     }
-    chat_service._histories["bob-1"] = InMemoryChatMessageHistory()
     chat_service._metadata["bob-1"] = {
         "provider": "ollama",
         "model": "qwen3:4b",
