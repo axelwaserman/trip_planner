@@ -156,8 +156,14 @@ class OllamaProvider(LLMProvider):
         Returns:
             A PydanticAI ``Agent`` ready for ``agent.iter(...)``.
         """
+        # PydanticAI's OllamaProvider passes base_url to AsyncOpenAI, which
+        # appends /chat/completions directly. Ollama serves the OpenAI-compat
+        # surface at /v1/chat/completions, so the base_url must include /v1.
+        # self._base_url is kept without /v1 because list_models hits /api/tags.
+        bare = self._base_url.rstrip("/")
+        chat_base_url = bare if bare.endswith("/v1") else bare + "/v1"
         model = OpenAIChatModel(
             self._model,
-            provider=_PaiOllamaProvider(base_url=self._base_url),
+            provider=_PaiOllamaProvider(base_url=chat_base_url),
         )
         return Agent(model, tools=list(tools), deps_type=deps_type)
